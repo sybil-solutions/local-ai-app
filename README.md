@@ -63,7 +63,7 @@ server/
   usage.js      tokens served, from each engine's own counters; who is calling
   recipes.js    the registry catalog, your own recipes, the three picks per GPU, model cards
   speed.js      measured tokens per second and load times
-  agents.js     coding agents: find, open on a model, install, update
+  agents.js     coding agents and the terminal they open in: find, open on a model, install, update
   machines.js   connected machines, your Tailscale machines, key-less pairing
   update.js     the app updating itself from the repo it was cloned from
   util.js       paths, config, events, running commands
@@ -104,7 +104,7 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 | `GET /api/endpoints` | Each running model's addresses and APIs, the key, today's callers. | `index.js` `endpoints` |
 | `POST /api/open` `{ agent, device, port, folder }` | Open an agent on a running model. | `agents.open` |
 | `POST /api/agents` `{ id }` | Install an agent, or update it. | `agents.change` |
-| `POST /api/settings` `{ folder?, agent?, home?, background?, picture?, autoUpdate?, hfToken? }` | Save settings. | `index.js` `saveSettings` |
+| `POST /api/settings` `{ folder?, agent?, terminal?, home?, background?, picture?, autoUpdate?, hfToken? }` | Save settings. | `index.js` `saveSettings` |
 | `GET /api/background` | Your own background picture. | `index.js` |
 | `GET /api/tailscale` | Your other Tailscale computers and the command that installs Local AI on one. | `machines.peers` |
 | `POST /api/devices` `{ url, key? }` | Connect a machine. No key needed for your own Tailscale machines. | `machines.add` |
@@ -130,7 +130,8 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
   catalog: { at, error, count, id },
   last,                                                        // the recipe started most recently
   devices: [{ i, name, url, online, error, state }],           // state is that machine's own snapshot
-  agents: [{ id, name, needs, installed, version, latest, canInstall, job }], agent, folder,
+  agents: [{ id, name, needs, installed, version, latest, canInstall, canUpdate, app, job }], agent, folder,
+  terminals: [{ id, name }], terminal,                         // terminals installed here, and the one Open uses
   home: { order, on } | null, background, tone, picture,       // background: fresco · own · none; tone: gray · color, or null for the default
   app: { version, started, latest, notes, phase, error, can, auto },
   hfToken }                                                    // the saved token's last four characters, or null
@@ -158,7 +159,7 @@ Run    = { id,            // the port it serves on
 | `usage.json` | Tokens per day and per hour, by model. |
 | `speeds.json`, `loads.json` | Measured speed and load time per recipe. |
 | `events.jsonl` | Everything that happened, one JSON line each. |
-| `models/`, `runs/`, `agents/`, `background` | Weights, per-run config files (for a host run also its script, weight links and `engine.log`, rotated at 20 MB), agent launch scripts and Pi's model list, your picture. |
+| `models/`, `runs/`, `agents/`, `background` | Weights, per-run config files (for a host run also its script, weight links and `engine.log`, rotated at 20 MB), agent launch scripts, the running models as a list (`agents/models.json`) and the Pi extension that reads it (`agents/local-ai.js`), your picture. |
 | `hosts.json`, `envs/` | Host runs that are running (pid, inner port, start time), and their Python venvs. |
 
 ### Outside the app
@@ -173,6 +174,8 @@ Run    = { id,            // the port it serves on
 | `tailscale` | `status --json` (this machine and yours), `whois --json` (who is asking). |
 | Hugging Face | Weights, and model cards. The token is read from `HF_TOKEN` or the HF cache's `token` file. |
 | npm registry | The newest version of each agent. |
+| An agent | Opened in a terminal with its own config folder, so it stays signed in: the model is passed in environment variables or flags for that run only. Pi and Oh My Pi get it from an extension (`-e agents/local-ai.js`) that registers each running model as a provider. On a Mac the terminal is the first installed of Ghostty, iTerm, kitty, WezTerm, Alacritty, Terminal, or the one chosen under Agents; Warp can't be started on a script. |
+| T3 Code | A desktop app: Open places the same extension in Pi's `extensions/` folder (once) and runs `t3 app <folder>`. The model is then listed under Pi in T3 Code. |
 | `git` | The app's own updates, when it was installed from a clone. |
 
 A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` with `image`, `port`, `args`, `env`, `weights`, `ctx`, `cards`, `seqs` (a host recipe has `kind: host`, `backend`, `command`, `pip` and `config` instead of `image` and `args`). A registry recipe only runs when its image and weights are pinned and it needs nothing beyond one `docker run`, or for a host recipe, when everything above is pinned; your own recipes are trusted as written. Host recipes can't be edited in the app yet.

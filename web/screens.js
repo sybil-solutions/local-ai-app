@@ -38,13 +38,16 @@ function agentRow(h, mode) {
     const wrong = run()?.apis && !run().apis.includes(h.needs);
     return `<button class="item" data-act="open" data-agent="${h.id}" ${wrong ? 'disabled' : ''}>${h.name}<small>${wrong ? 'Not for this model' : isDefault ? 'Default' : ''}</small></button>`;
   }
-  const label = failed ? 'Try again' : h.version && h.latest && newer(h.latest, h.version) ? `Update to ${h.latest}` : h.latest ? '' : 'Update';
-  const right = label ? `<button class="inst vact" ${act} title="${esc(h.job?.error || '')}">${label}</button>` : '<small>Up to date</small>';
+  const label = !h.canUpdate ? '' : failed ? 'Try again' : h.version && h.latest && newer(h.latest, h.version) ? `Update to ${h.latest}` : h.latest ? '' : 'Update';
+  const right = label ? `<button class="inst vact" ${act} title="${esc(h.job?.error || '')}">${label}</button>` : `<small>${h.canUpdate ? 'Up to date' : 'Updates itself'}</small>`;
   return `<div class="item vrow"><button class="vpick" data-act="default" data-agent="${h.id}"><span><b>${h.name}</b><small>${h.version || 'Installed'}${isDefault ? ' · Default' : ''}${failed ? ' · Couldn’t update' : ''}</small></span></button>${right}</div>`;
 }
 export const agentList = (mode) => s.snap.agents.map((h) => agentRow(h, mode)).join('');
+// The terminal is only asked for where there is a choice to make.
+const terminalPick = () => ((s.snap.terminals || []).length > 1 ? `<div class="label">Terminal</div><select class="field" data-save="terminal" aria-label="Terminal">`
+  + `${s.snap.terminals.map((t) => `<option value="${esc(t.id)}"${t.id === s.snap.terminal ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : '');
 export const agentsFoot = () => `${outdated().length ? a(`Update all (${outdated().length})`, 'updateall') : ''}<div class="label">Folder</div>`
-  + `<input class="field" data-f="folder" data-save="folder" spellcheck="false" aria-label="Folder" value="${esc(s.form.folder ?? s.snap.folder)}">`;
+  + `<input class="field" data-f="folder" data-save="folder" spellcheck="false" aria-label="Folder" value="${esc(s.form.folder ?? s.snap.folder)}">${terminalPick()}`;
 
 // A model card is someone else's Markdown, so every tag in it is dropped and only our own are written.
 export function markdown(text) {
