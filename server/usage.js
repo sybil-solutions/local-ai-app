@@ -33,14 +33,15 @@ const PREFILL_MIN = 1000, PREFILL_WINDOW = 300e3;
 function prefillSpeed(r, m, seconds, now) {
   const prev = r.counters;
   r.counters = m;
-  if (!prev) return null;
   if (m.prompt_tokens_seconds !== undefined && m.request_prefill_time_seconds_sum === undefined) return m.prompt_tokens_seconds > 0 ? m.prompt_tokens_seconds : null;
-  const d = (k) => (m[k] ?? 0) - (prev[k] ?? 0);
+  const d = (k) => (prev ? (m[k] ?? 0) - (prev[k] ?? 0) : 0);
   const [tokens, secs] = m.request_prefill_time_seconds_sum !== undefined
     ? [d('request_prefill_kv_computed_tokens_sum'), d('request_prefill_time_seconds_sum')]
     : [d('prompt_tokens_total') - d('cached_tokens_total'), seconds];
   if (tokens >= PREFILL_MIN && secs > 0) r.prefills = [...(r.prefills || []).filter(([at]) => now - at < PREFILL_WINDOW), [now, tokens, secs]];
-  if (!r.prefills?.length) return null;
+  // Before any prefill worth timing since the app started watching: the engine's average over its whole life, so
+  // the number is never 0 for an engine that has read prompts.
+  if (!r.prefills?.length) return m.request_prefill_time_seconds_sum > 0 ? m.request_prefill_kv_computed_tokens_sum / m.request_prefill_time_seconds_sum : null;
   return r.prefills.reduce((n, p) => n + p[1], 0) / r.prefills.reduce((n, p) => n + p[2], 0);
 }
 
