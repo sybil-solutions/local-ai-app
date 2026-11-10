@@ -44,7 +44,7 @@ function modelsPage(page) {
   const r = all().find((x) => x.id === s.modelOpen) || chosen();
   if (!r) return `<div class="pwrap pg"><div class="ptitle">Models</div><div class="psub">None run on ${esc(here())}</div>${elsewhere()}</div>`;
   const row = (x) => `<button class="mitem${x.id === r.id ? ' sel' : ''}${x.id === chosen()?.id ? ' cur' : ''}" data-act="model" data-id="${esc(x.id)}" data-go="adv-models">`
-    + `<span class="at"><b data-tag="${run() ? 'Running' : 'Selected'}">${esc(x.name)}</b><small>${meta(x)}</small></span><span class="ics">${caps(x)}</span></button>`;
+    + `<span class="at"><b data-tag="${run()?.recipe === x.id ? 'Running' : 'Selected'}">${esc(x.name)}</b><small>${meta(x)}</small></span><span class="ics">${caps(x)}</span></button>`;
   const right = page === 'edit' ? `<div class="pg"><div class="screen">${editBody()}</div></div><button class="pback" data-go="adv-models">Cancel</button>`
     : `<div><div class="ptitle">${esc(r.name)}</div><div class="psub" style="margin-bottom:0">${meta(r)}</div></div><div class="mcaps">${capNames(r)}</div><div class="kv">${kv(facts(r, true))}</div>`
       + `<div class="macts">${useBtn(r)}${r.host ? '' : `<button class="btn" data-act="model" data-id="${esc(r.id)}" data-go="edit">Edit</button>`}</div>${cardHtml(r)}`;
