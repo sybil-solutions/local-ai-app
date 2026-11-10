@@ -9,8 +9,8 @@ export const offLine = (c) => (!c.ready ? `${c.sizeGb ? `${Math.round(c.sizeGb)}
 const detail = (r) => `<div class="mdetail"><div class="ics">${caps(r)}</div><div class="kv small">${kv(facts(r))}</div></div>`;
 const editBtn = (r, extra = '') => a('Edit', 'model', '', `data-id="${esc(r.id)}" data-go="edit" ${extra}`);
 const modelRow = (r) => `<div class="mrow${r.id === chosen().id ? ' on' : ''}"><div class="mhead">`
-  + `<button class="mpick" data-act="pick" data-id="${esc(r.id)}">${esc(r.name)}<small>${r.tier || ''}</small></button>`
-  + `<button class="plus" data-act="expand" data-id="${esc(r.id)}" aria-label="Details">${s.expanded === r.id ? '−' : '+'}</button></div>`
+  + `<button class="mpick" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${r.tier || ''}</small></button>`
+  + `<button class="plus" data-act="expand" data-id="${esc(r.id)}" aria-label="Details">${icon(s.expanded === r.id ? 'minus' : 'plus', 14)}</button></div>`
   + `${s.expanded === r.id ? `${detail(r)}<div class="mdetail" style="padding-top:0">${editBtn(r)}</div>` : ''}</div>`;
 export const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => `<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0)}%"></u></i><span>${Math.round((g.used || 0) / 1024)} of ${Math.round(g.total / 1024)} GB</span></div>`).join('')}</div>`;
 export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.external ? 'Running · started outside Local AI' : 'Running');
@@ -35,7 +35,7 @@ function agentRow(h, mode) {
   const isDefault = h.id === s.snap.agent;
   if (mode === 'open') {
     const wrong = run()?.apis && !run().apis.includes(h.needs);
-    return `<button class="item" data-act="open" data-agent="${h.id}" ${wrong ? 'disabled' : ''}>${h.name}<small>${wrong ? 'Won’t work with this model' : isDefault ? 'Default' : ''}</small></button>`;
+    return `<button class="item" data-act="open" data-agent="${h.id}" ${wrong ? 'disabled' : ''}>${h.name}<small>${wrong ? 'Not for this model' : isDefault ? 'Default' : ''}</small></button>`;
   }
   const label = failed ? 'Try again' : h.version && h.latest && newer(h.latest, h.version) ? `Update to ${h.latest}` : h.latest ? '' : 'Update';
   const right = label ? `<button class="inst vact" ${act} title="${esc(h.job?.error || '')}">${label}</button>` : '<small>Up to date</small>';
@@ -95,7 +95,7 @@ export function editBody() {
 }
 
 const BGS = [['gray', 'The Creation of Adam', 'Grayscale'], ['color', 'The Creation of Adam', 'In colour'], ['own', 'Your own picture', 'Choose a file'], ['none', 'None', 'Plain dark']];
-const BLOCK_NAMES = { hands: ['Picture', 'The painting and what’s happening'], models: ['Model picks', 'Fast, balanced and smart'], stats: ['Live stats', 'Speed and tokens while running'], usage: ['Usage', 'Tokens served, by day'], gpus: ['GPUs', 'Memory on each GPU'] };
+const BLOCK_NAMES = { hands: ['Picture', 'The painting and its light'], models: ['Model picks', 'Fast, balanced and smart'], stats: ['Live stats', 'Speed and tokens, live'], usage: ['Usage', 'Tokens served, by day'], gpus: ['GPUs', 'Memory on each GPU'] };
 const addr = (text, show) => `<button class="addr" data-act="copy" data-copy="${esc(text)}"><span>${esc(show ?? text)}</span><small>Copy</small></button>`;
 const yes = (apis, k) => (apis ? (apis.includes(k) ? 'Yes' : 'No') : '—');
 const field = (name, label, placeholder, type = 'text') => `<div class="label">${label}</div><input class="field" type="${type}" data-f="${name}" spellcheck="false" autocomplete="off" aria-label="${label}" placeholder="${placeholder}" value="${esc(s.form[name] || '')}">`;
@@ -166,7 +166,7 @@ export const SCREENS = {
   machines: () => {
     const gpus = (d) => (d?.gpus.length ? `${d.gpus.length}× ${(d.groups[0]?.name || 'GPU').replace(/^(NVIDIA|GeForce) /g, '')}` : 'No GPU');
     const mine = [{ i: -1, name: s.snap.name, sub: gpus(s.snap) }, ...s.snap.devices.map((d) => ({ i: d.i, name: d.name, sub: d.online ? gpus(d.state) : d.error || 'Offline' }))];
-    const who = (p) => `<span><b>${esc(p.name)}</b><small>${esc(p.os)}</small></span>`;
+    const who = (p) => `<span><b>${esc(p.name)}</b><small>${esc(p.os.replace(/^[a-z]/, (c) => c.toUpperCase()))}</small></span>`;
     const others = (s.peers || []).filter((p) => !p.linked).map((p) => (p.online
       ? `<button class="item" data-act="peer" data-ip="${p.ip}" data-name="${esc(p.name)}" data-app="${p.app ? 1 : ''}">${who(p)}<small>${p.app ? 'Connect' : 'Not set up'}</small></button>`
       : `<div class="item busy">${who(p)}<small>Seen ${ago(p.seen)}</small></div>`)).join('');
@@ -174,10 +174,10 @@ export const SCREENS = {
       + mine.map((m) => `<button class="item" data-act="use" data-dev="${m.i}"><span><b>${esc(m.name)}</b><small>${esc(m.sub)}</small></span><small>${m.i === s.dev ? 'In use' : ''}</small></button>`).join('')
       + `<div class="label group">On your Tailscale</div>${s.peers === null ? left('Looking') : others || left('No other machines')}</div>${b('Add machine', 'addmachine')}`;
   },
-  addmachine: () => `${close()}<div class="head">Add machine</div>${field('host', 'Address', 'http://100.64.0.10:18700')}${field('mkey', 'Key', 'From API endpoints on that machine')}<div class="sp"></div>${a('Add machine', 'connect', 'go')}`,
+  addmachine: () => `${close()}<div class="head">Add machine</div>${field('host', 'Address', 'http://100.64.0.10:18700')}${field('mkey', 'Key', 'Not needed on your Tailscale')}<div class="sp"></div>${a('Add machine', 'connect', 'go')}`,
   usage: () => `${close()}<div class="head">Usage</div><div class="scroll">${usageBody()}</div>`,
   'adv-models': () => `${close()}<div class="head">Models</div><div class="label">Runs on this machine, newest first</div><div class="scroll">`
-    + `${all().map((r) => `<div class="arow"><button class="ahead" data-act="model" data-id="${esc(r.id)}" data-go="model-page"><span class="at"><b>${esc(r.name)}</b><small>${meta(r)}</small></span><span class="ics">${caps(r)}<span class="chev">›</span></span></button></div>`).join('')}</div>`,
+    + `${all().map((r) => `<div class="arow"><button class="ahead" data-act="model" data-id="${esc(r.id)}" data-go="model-page"><span class="at"><b>${esc(r.name)}</b><small>${meta(r)}</small></span><span class="ics">${caps(r)}<span class="chev">${icon('right', 14)}</span></span></button></div>`).join('')}</div>`,
   'model-page': () => {
     const r = all().find((x) => x.id === s.modelOpen) || chosen();
     return `${close()}<div class="scroll"><div class="head">${esc(r.name)}</div>${left(meta(r))}${detail(r)}${cardHtml(r)}</div><div class="two">${useBtn(r) || '<button class="btn" disabled>Running</button>'}${editBtn(r, 'style="width:auto;flex:1"')}</div>`;

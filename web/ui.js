@@ -13,6 +13,10 @@ const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
+  right: '<path d="M9 6l6 6-6 6"/>',
+  left: '<path d="M15 6l-6 6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
   grow: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   shrink: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
   vision: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
@@ -39,7 +43,7 @@ export const a = (label, act, cls = '', extra = '') => `<button class="btn ${cls
 export const bar = (pct) => `<div class="bar"><i style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></i></div>`;
 export const toggle = (on, attrs, label) => `<button class="switch${on ? ' on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" ${attrs}></button>`;
 export const left = (text) => `<div class="line" style="text-align:left">${text}</div>`;
-export const item = (name, go, note = '›') => `<button class="item" data-go="${go}">${name}<small>${note}</small></button>`;
+export const item = (name, go, note = icon('right', 14)) => `<button class="item" data-go="${go}">${name}<small>${note}</small></button>`;
 export const kv = (rows) => rows.map(([k, v]) => `<span class="label">${k}</span><b>${v}</b>`).join('');
 export const stat = (label, value, live) => `<div class="stat${live ? ' live' : ''}"><b>${fmt(value)}</b><span class="label">${label}</span></div>`;
 
