@@ -14,12 +14,9 @@ mkdirSync(HOME, { recursive: true, mode: 0o700 });
 export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 export const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
-const recent = [];
-export const events = () => recent;
+// Everything that happens is one JSON line, on stdout and in ~/.local-ai/events.jsonl.
 export function event(level, name, data = {}) {
   const entry = { at: new Date().toISOString(), level, name, ...data };
-  recent.push(entry);
-  if (recent.length > 300) recent.shift();
   console.log(JSON.stringify(entry));
   try {
     const file = at('events.jsonl');

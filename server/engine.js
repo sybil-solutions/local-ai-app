@@ -183,7 +183,7 @@ async function testReply(r) {
   } catch { return false; }
 }
 
-export function startMeasure(r) {
+function startMeasure(r) {
   const recipe = find(r.recipe);
   update(r, { tried: true, measureAbort: new AbortController(), measuring: 1 });
   measure({ id: r.recipe, url: r.url, model: r.served, seqs: recipe?.launch.seqs || 1, signal: r.measureAbort.signal, onLevel: (c) => { r.measuring = c; } })
@@ -327,23 +327,21 @@ export async function tick() {
   } finally { ticking = false; }
 }
 
+// How a run looks to the app: how far along it is (p), one line about it, and for a failure the word that names it.
 function describe(r) {
-  const expected = loadSeconds(r.recipe);
-  const elapsed = (Date.now() - r.since) / 1000;
-  const left = expected ? Math.max(1, Math.ceil((expected - elapsed) / 60)) : 0;
-  const waking = expected ? `About ${left} minute${left > 1 ? 's' : ''}` : 'Loading the model';
+  const expected = loadSeconds(r.recipe), elapsed = (Date.now() - r.since) / 1000;
   const heard = r.heard ? Math.max(1, Math.round((Date.now() - r.heard) / 60000)) : 0;
   return {
-    queued: { word: 'Waking', line: 'Getting ready', p: 0.02 },
-    weights: { word: 'Downloading', line: r.detail || 'Getting the model', p: 0.05 + (r.progress || 0) * 0.3 },
-    image: { word: 'Waking', line: r.detail || 'Preparing the engine', p: 0.38 },
-    starting: { word: 'Waking', line: waking, p: 0.42 + 0.48 * Math.min(1, expected ? elapsed / expected : 0.5) },
-    testing: { word: 'Waking', line: 'Asking it one question', p: 0.95 },
-    ready: { word: 'Awake', line: r.measuring ? `Measuring speed, ${r.measuring} at once` : r.stats?.tps ? `${Math.round(r.stats.tps)} tokens a second` : 'Listening. Nothing leaves this machine.', p: 1 },
-    unresponsive: { word: 'No reply', line: `Last heard ${heard} minute${heard > 1 ? 's' : ''} ago`, p: 0.6 },
+    queued: { line: 'Getting ready', p: 0.02 },
+    weights: { line: r.detail || 'Getting the model', p: 0.05 + (r.progress || 0) * 0.3 },
+    image: { line: r.detail || 'Preparing the engine', p: 0.38 },
+    starting: { line: expected ? `About ${Math.max(1, Math.ceil((expected - elapsed) / 60))} min` : 'Loading the model', p: 0.42 + 0.48 * Math.min(1, expected ? elapsed / expected : 0.5) },
+    testing: { line: 'Asking it one question', p: 0.95 },
+    ready: { line: 'Running', p: 1 },
+    unresponsive: { line: `Last heard ${heard} min ago`, p: 0.6 },
     failed: { ...(r.failure || { word: 'Stopped', line: r.error || '' }), p: -1 },
-    stopping: { word: 'Going to sleep', line: 'Freeing the GPU', p: 0.3 },
-  }[r.phase] || { word: 'Waking', line: '', p: 0.1 };
+    stopping: { line: 'Freeing the GPU', p: 0.3 },
+  }[r.phase];
 }
 
 export const all = () => [...runs.values()];
