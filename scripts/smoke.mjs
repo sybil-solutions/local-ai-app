@@ -73,6 +73,8 @@ if (APPLE) {
   catalog.recipes[TAMPERED] = { card: 'smoke-chip', model: 'tampered-1', engine: 'mlx', launch: launch(`${script}\nimport os  # changed after it was hashed\n`), proof: [{ tps: 10 }] };
 }
 const registry = await serve(() => [200, catalog]);
+// A proxy in front of cloud models: answers /v1/models with several, has no engine counters. Not a model running here.
+const proxy = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ id: 'cloud-a' }, { id: 'cloud-b' }] }] : [404, { error: 'not found' }]));
 
 // The app itself.
 const logFile = join(HOME, 'server.log');
@@ -114,7 +116,7 @@ async function cleanup() {
   let pids = [hostPid];
   try { pids = pids.concat(Object.values(JSON.parse(readFileSync(join(HOME, 'hosts.json'), 'utf8'))).map((h) => h.pid)); } catch { /* none started */ }
   for (const pid of pids) if (pid && alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
-  outside.close(); registry.close();
+  outside.close(); registry.close(); proxy.close();
   writeFileSync(logFile, log);
   if (failures.length) console.log(`\n--- server log (last 60 lines) ---\n${log.trim().split('\n').slice(-60).join('\n')}`);
   rmSync(HOME, { recursive: true, force: true });
@@ -143,6 +145,7 @@ try {
   const port = outside.address().port;
   const found = await until('the outside engine to be found', async () => (await state()).runs.find((r) => r.external && r.id === port), 45000);
   check('finds a model started outside the app', found.served === 'outside-model');
+  check('does not take a proxy of several models for a model running here', !(await state()).runs.some((r) => r.id === proxy.address().port));
   await until('a first read of its counters', async () => (await state()).runs.find((r) => r.id === port)?.stats, 15000);
   await chat(port, false);
   const counted = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 1050 && r; }, 15000);

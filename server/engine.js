@@ -311,6 +311,17 @@ async function health(r) {
   }
 }
 
+// An engine serves one model, or says what it is on /metrics. A proxy in front of cloud APIs (or of several engines)
+// lists many models and has no engine counters, so it is not shown as a model running here. Returns the model id.
+async function isEngine(port, models) {
+  const id = Array.isArray(models) ? models[0]?.id : null;
+  if (!id || models.length === 1) return id || null;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/metrics`, { signal: AbortSignal.timeout(800) });
+    return res.ok && /^(vllm|sglang|llamacpp)[:_]/m.test(await res.text()) ? id : null;
+  } catch { return null; }
+}
+
 // Models someone else started: anything on this machine that answers like an OpenAI server. They are shown, never stopped.
 let scanned = 0;
 async function discover(now) {
@@ -325,7 +336,7 @@ async function discover(now) {
   const text = (process.platform === 'darwin' ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnH'])).stdout;
   const open = new Map([...text.matchAll(/(\S+):(\d+)\s/g)].map((m) => [+m[2], !/^(127\.|\[::1\])/.test(m[1])]));
   const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p) && !innerPorts().has(p)).sort((a, b) => a - b).map(async (port) => {
-    try { const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await res.json()).data?.[0]?.id]; } catch { return [port, null]; }
+    try { const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await isEngine(port, (await res.json()).data))]; } catch { return [port, null]; }
   }));
   const known = new Set([...runs.values()].map((r) => r.served));
   for (const [port, model] of found) {
