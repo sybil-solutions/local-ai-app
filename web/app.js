@@ -24,12 +24,15 @@ function swap(el, html, id, force, scrollers) {
   el.querySelectorAll(scrollers).forEach((e, i) => { e.scrollTop = keep[i + 1] || 0; });
 }
 function render(force) {
+  try { paint(force); } catch (e) { if (!s.nav) throw e; go('home'); paint(true); } // a screen whose data vanished closes
+}
+function paint(force) {
   if (s.nav && (!s.snap || !D() || (NEEDS_RUN.has(s.nav) && !run()))) s.nav = null;
   const state = resolve(), id = s.nav || state, wide = isFull(), glow = lit(look(state));
   root.classList.toggle('wide', wide);
   if (wide) {
     const page = s.nav || (state === 'key' ? 'key' : null), working = look(state).pose === 'work';
-    desk.className = `${working ? 'live' : ''}${page ? ' paged' : ''}`;
+    desk.classList.toggle('paged', !!page);
     painting.classList.toggle('work', working && !page);
     painting.style.setProperty('--beat', `${Math.round(1 / (0.0006 + ((s.snap && D() && run()?.stats?.tps) || 0) / 200000))}ms`);
     swap($('#ui'), `${navBar(page)}${page ? '' : homeHtml(state)}${notice()}`, id, force, '.apop');
@@ -56,18 +59,22 @@ async function loadCard(id) {
   s.cards[id] = await api(scoped(`card?id=${encodeURIComponent(id)}`)).then((c) => ({ ...c, html: markdown(c.md) }), (e) => ({ error: e.message }));
   render();
 }
+// An answer only counts if you are still looking at the machine, screen and model it was asked for.
+const where = () => `${s.dev} ${s.nav} ${s.modelOpen}`;
+async function ask(path) { const asked = where(), answer = await api(scoped(path)); return asked === where() ? answer : null; }
 const LOAD = {
-  usage: async () => { s.usage = await api(scoped('usage')); render(); },
-  endpoints: async () => { s.ends = null; s.ends = await api(scoped('endpoints')); render(); },
+  usage: async () => { s.usage = (await ask('usage')) || s.usage; render(); },
+  endpoints: async () => { s.ends = null; s.ends = await ask('endpoints'); render(); },
   machines: async () => { ({ peers: s.peers, install: s.install } = await api('tailscale').catch(() => ({ peers: [], install: null }))); render(); },
-  logs: async () => { s.logText = 'Loading'; s.logText = (await api(scoped(`runs/${run().id}/logs?tail=60`))).text.trim() || 'Nothing was printed'; render(); },
+  logs: async () => { s.logText = 'Loading'; s.logText = (await ask(`runs/${run().id}/logs?tail=60`))?.text.trim() || 'Nothing was printed'; render(); },
   'adv-models': () => isFull() && loadCard(s.modelOpen || chosen()?.id),
   'model-page': () => loadCard(s.modelOpen),
   'app-update': () => send('app/check').catch(() => {}),
   edit: async () => {
     s.draft = null;
-    const view = all().find((r) => r.id === s.modelOpen), raw = await api(scoped(`recipe?id=${encodeURIComponent(s.modelOpen)}`)), L = raw.launch;
-    s.draft = { raw, name: view.name, engine: view.engine, local: view.local, ctx: L.ctx || 0, cards: L.cards || 1, seqs: L.seqs || 1, kv: view.kv || 'Off', args: (L.args || []).map((x) => (/\s/.test(x) ? `'${x}'` : x)).join(' '), touched: new Set() };
+    const view = all().find((r) => r.id === s.modelOpen), raw = await ask(`recipe?id=${encodeURIComponent(s.modelOpen)}`), L = raw?.launch;
+    if (!raw) return;
+    s.draft = { raw, name: view.name, engine: view.engine, local: view.local, ctx: L.ctx || 0, cards: L.cards || 1, seqs: L.seqs || 1, kv: view.kv || 'Off', args: (L.args || []).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)).join(' '), touched: new Set() };
     render(true);
   },
 };
@@ -93,7 +100,8 @@ async function startRun(recipe) {
   }
 }
 const saveHome = (home) => { s.snap.home = home; return send('settings', 'POST', { home }); };
-const split = (text) => (text.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((x) => (/^(["']).*\1$/.test(x) ? x.slice(1, -1) : x));
+// Arguments are shown one per word; one with spaces or quotes is shown as a JSON string, and read back the same way.
+const split = (text) => (text.match(/"(?:[^"\\]|\\.)*"|\S+/g) || []).map((x) => (x.startsWith('"') ? JSON.parse(x) : x));
 // Engines name the same setting differently, so an edit is written to whichever of these flags the recipe uses.
 const FLAGS = { ctx: ['--max-model-len', '--context-length', '--ctx-size', '-c'], seqs: ['--max-num-seqs', '--max-running-requests', '--parallel', '-np'], cards: ['--tensor-parallel-size', '--tp-size', '--tp'] };
 const ACTS = {
@@ -122,8 +130,8 @@ const ACTS = {
     setTimeout(() => el.classList.remove('copied'), 1200);
     return 'keep';
   },
-  use: (d) => { s.dev = +d.dev; s.sel = s.opened = null; go('home'); },
-  uselinked: () => { const i = s.snap.devices.findIndex((x) => x.url === s.link.url); if (i >= 0) s.dev = i; s.sel = null; go('home'); },
+  use: (d) => { s.dev = +d.dev; s.sel = s.opened = s.usage = s.ends = null; go('home'); },
+  uselinked: () => ACTS.use({ dev: Math.max(-1, s.snap.devices.findIndex((x) => x.url === s.link.url)) }),
   peer: (d) => {
     s.link = { name: d.name };
     if (!d.app) return go('m-install');
@@ -137,6 +145,7 @@ const ACTS = {
     render(true);
     try {
       await send('devices', 'POST', { url, key: (s.form.mkey || '').trim() });
+      for (let tries = 0; tries < 25 && !s.snap.devices.some((x) => x.url === url); tries++) await sleep(200);
       s.form.host = s.form.mkey = '';
       if (s.nav === 'm-connect') s.nav = 'm-linked';
     } catch (e) {
@@ -160,11 +169,11 @@ const ACTS = {
   draft: (d) => { s.draft[d.k] = d.k === 'kv' ? d.v : +d.v; s.draft.touched.add(d.k); },
   saveedit: async () => {
     const { raw, touched, ctx, seqs, cards, kv } = s.draft, recipe = structuredClone(raw), L = recipe.launch, args = split(s.draft.args);
-    const set = (names, v) => { const i = args.findIndex((x) => names.includes(x)); if (i >= 0) args[i + 1] = String(v); };
+    const set = (names, v) => { const i = args.findIndex((x) => names.includes(x.split('=')[0])); if (i >= 0) { if (args[i].includes('=')) args[i] = `${args[i].split('=')[0]}=${v}`; else args[i + 1] = String(v); } };
     if (touched.has('ctx')) { L.ctx = ctx; set(FLAGS.ctx, ctx); if (L.config?.text) L.config.text = L.config.text.replace(/(max_seq_len:\s*)\d+/, `$1${ctx}`); }
     if (touched.has('seqs')) { L.seqs = seqs; set(FLAGS.seqs, seqs); }
     if (touched.has('cards')) { L.cards = cards; set(FLAGS.cards, cards); }
-    if (touched.has('kv')) { const i = args.indexOf('--kv-cache-dtype'); if (i >= 0) args.splice(i, 2); if (kv !== 'Off') args.push('--kv-cache-dtype', kv); }
+    if (touched.has('kv')) { const i = args.findIndex((x) => x.split('=')[0] === '--kv-cache-dtype'); if (i >= 0) args.splice(i, args[i].includes('=') ? 1 : 2); if (kv !== 'Off') args.push('--kv-cache-dtype', kv); }
     L.args = args;
     await send(scoped('recipes'), 'POST', recipe);
     go('back');
@@ -247,17 +256,18 @@ onChange(() => render(true));
 // The snapshot is long-polled: each answer is a full picture of the machine, and the page redraws from it.
 async function follow() {
   for (;;) {
+    let lost = false;
     try {
       const next = await api(`state?v=${s.version}`);
       if (s.snap && next.app.started !== s.snap.app.started) location.reload(); // the server restarted, so this page's code may be old
       Object.assign(s, { version: next.v, snap: next, online: true, needKey: false });
       if (s.dev !== -1 && !next.devices[s.dev]) s.dev = -1;
-      applyBg(); loadOwn(); render();
     } catch (e) {
+      lost = true;
       if (e.status === 401) s.needKey = true; else s.online = false;
-      render();
-      await sleep(1500);
     }
+    try { if (s.snap) { applyBg(); loadOwn(); } render(); } catch (e) { console.error(e); } // a screen that can't draw must not stop the polling
+    if (lost) await sleep(1500);
   }
 }
 applyBg(); layout(); follow();

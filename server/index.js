@@ -36,16 +36,18 @@ async function publish() {
   if (text === signature) return;
   signature = text;
   snapshot = JSON.stringify({ ...state, v: ++version });
-  waiters.forEach((done) => done());
-  waiters = [];
+  [...waiters].forEach((wake) => wake());
 }
-const changed = (ms) => new Promise((done) => { const t = setTimeout(done, ms); waiters.push(() => { clearTimeout(t); done(); }); });
+const changed = (ms) => new Promise((done) => {
+  const wake = () => { clearTimeout(timer); waiters = waiters.filter((w) => w !== wake); done(); }, timer = setTimeout(wake, ms);
+  waiters.push(wake);
+});
 
 // Everything an agent can be pointed at: the models ready here and on connected machines.
 function targets() {
   const toTarget = (device, host, key) => (r) => ({ key: `la-${key}-${r.id}`, device, url: host ? `http://${host}:${r.id}` : r.url, model: r.served || r.name, name: r.name, ctx: r.ctx, vision: r.vision, apis: r.apis, id: r.id, deviceIndex: key });
   const ready = (runs) => runs.filter((r) => r.phase === 'ready');
-  return [...ready(engine.listRuns()).map(toTarget(hostname(), null, 'self')), ...machines.views().flatMap((d) => (d.state ? ready(d.state.runs).map(toTarget(d.name, new URL(d.url).hostname, d.i)) : []))];
+  return [...ready(engine.listRuns()).map(toTarget(hostname(), null, 'self')), ...machines.views().flatMap((d) => (d.state ? ready(d.state.runs).filter((r) => r.reachable !== false).map(toTarget(d.name, new URL(d.url).hostname, d.i)) : []))];
 }
 
 function openAgent({ b }) {
@@ -99,8 +101,8 @@ const ROUTES = compile({
   },
   'GET /api/tailscale': async () => { const me = await machines.self(); return { peers: await machines.peers(), install: me ? `curl -fsSL http://${me.ip}:${PORT}/install | bash` : null }; },
   'POST /api/devices': ({ b }) => machines.add(b),
-  'DELETE /api/devices': ({ q }) => machines.remove(+q.get('i')),
-  'ANY /api/devices/:i/:rest': async ({ req, res, p, q, b }) => { const out = await machines.forward(+p.i, req.method, `${p.rest}${q.size ? `?${q}` : ''}`, b); res.writeHead(out.status, JSON_TYPE); res.end(out.text); },
+  'DELETE /api/devices': ({ q }) => machines.remove(q.get('i')),
+  'ANY /api/devices/:i/:rest': async ({ req, res, p, q, b }) => { const out = await machines.forward(+p.i, req.method, `${p.rest}${q.size ? `?${q}` : ''}`, b); res.writeHead(out.status, { 'content-type': out.type }); res.end(out.body); },
   'POST /api/docker/start': engine.startDocker,
   'POST /api/app/check': update.check,
   'POST /api/app/update': update.update,
@@ -121,7 +123,7 @@ const OPEN = compile({
 function compile(table) {
   return Object.entries(table).map(([key, run]) => {
     const [method, path] = key.split(' ');
-    return { method, run, path: new RegExp(`^${path.replace(':rest', '(?<rest>.+)').replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`) };
+    return { method, run, path: new RegExp(`^${path.replace(/\./g, '\\.').replace(':rest', '(?<rest>.+)').replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`) };
   });
 }
 function match(routes, method, path) {
@@ -135,7 +137,9 @@ const body = (req) => new Promise((done, reject) => {
   req.on('data', (c) => { size += c.length; if (size > 12e6) reject(Object.assign(new Error('Request too large'), { status: 413 })); else chunks.push(c); });
   req.on('error', reject);
   req.on('end', () => {
-    try { done(chunks.length ? JSON.parse(Buffer.concat(chunks)) : {}); } catch { reject(Object.assign(new Error('Body must be JSON'), { status: 400 })); }
+    let parsed = null;
+    try { parsed = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {}; } catch { /* rejected below */ }
+    if (parsed && typeof parsed === 'object') done(parsed); else reject(Object.assign(new Error('Body must be a JSON object'), { status: 400 }));
   });
 });
 
@@ -147,7 +151,7 @@ async function sendStatic(req, res, path) {
   if (file === 'index.html') {
     // The Host check stops a rebound DNS name from reading the key.
     const local = /^(127\.|::1|::ffff:127\.)/.test(req.socket.remoteAddress) && LOOPBACK.test(req.headers.host || '');
-    const trusted = local || (shared && req.socket.localAddress?.replace(/^::ffff:/, '') === shared && await machines.isMine(req));
+    const trusted = local || await machines.isMine(req);
     data = String(data).replace('__KEY__', trusted ? config.key : '');
   }
   res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
@@ -164,7 +168,8 @@ async function handle(req, res) {
     if (result === undefined) return undefined;
     res.writeHead(200, JSON_TYPE);
     res.end(JSON.stringify(result));
-    return open ? undefined : publish();
+    if (!open) publish().catch((e) => event('error', 'publish.failed', { error: e.message }));
+    return undefined;
   } catch (e) {
     const status = e.status || 500;
     if (status >= 500) event('error', 'http.error', { path: req.url, error: e.message });

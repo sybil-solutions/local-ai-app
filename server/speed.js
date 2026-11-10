@@ -4,7 +4,7 @@ const speedsFile = at('speeds.json');
 const loadsFile = at('loads.json');
 const speeds = readJson(speedsFile, {});
 const loads = readJson(loadsFile, {});
-const LEVELS = [1, 2, 4, 8];
+const LEVELS = [1, 4, 8];
 const TOKENS = 256;
 const WAVES = 2;
 

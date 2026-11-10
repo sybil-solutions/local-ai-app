@@ -5,6 +5,8 @@ const file = at('usage.json');
 const usage = { days: {}, hours: {}, last: {}, ...readJson(file, {}) };
 let dirty = false;
 const keyOf = (r) => r.container || `port-${r.id}`;
+// A counter row by name. Names come from engines, so one like "__proto__" must still be an ordinary key.
+const rowOf = (rows, name) => (Object.hasOwn(rows, name) ? rows[name] : Object.defineProperty(rows, name, { value: { in: 0, out: 0, req: 0 }, enumerable: true, writable: true, configurable: true })[name]);
 export const forget = (r) => { delete usage.last[keyOf(r)]; dirty = true; };
 
 function parseMetrics(text) {
@@ -29,22 +31,18 @@ export async function scrape(r, now) {
   const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : cur[k]]));
   usage.last[keyOf(r)] = cur;
   r.used ||= { in: 0, out: 0, req: 0 };
-  if (!r.measuring && (delta.in || delta.out || delta.req)) {
-    const stamp = new Date(now).toISOString();
-    const row = ((usage.days[stamp.slice(0, 10)] ||= {})[r.name] ||= { in: 0, out: 0, req: 0 });
-    const hour = ((usage.hours[stamp.slice(0, 13)] ||= {})[r.name] ||= { in: 0, out: 0, req: 0 });
+  // Tokens a speed measurement wrote are not usage. The scrape just after one still holds some, so it is skipped too.
+  const benchmark = r.measuring || r.benchmarked, moved = delta.in || delta.out || delta.req;
+  r.benchmarked = false;
+  if (moved) dirty = true;
+  if (moved && !benchmark) {
+    const stamp = new Date(now).toISOString(), row = rowOf(usage.days[stamp.slice(0, 10)] ||= {}, r.name), hour = rowOf(usage.hours[stamp.slice(0, 13)] ||= {}, r.name);
     for (const k of Object.keys(delta)) { row[k] += delta[k]; hour[k] += delta[k]; r.used[k] += delta[k]; }
-    dirty = true;
   }
   r.series ||= [];
   if (!r.series.length || now - r.series.at(-1)[0] >= 60000) { r.series.push([now, r.used.in + r.used.out]); if (r.series.length > 240) r.series.shift(); }
   const seconds = r.scraped ? (now - r.scraped) / 1000 : 0;
-  const ttftN = m.time_to_first_token_seconds_count;
-  r.stats = {
-    tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: seconds ? Math.round(delta.in / seconds) : 0, used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0,
-    queued: m.num_requests_waiting ?? m.num_queue_reqs ?? 0, ttft: ttftN ? Math.round((m.time_to_first_token_seconds_sum / ttftN) * 100) / 100 : null,
-    in: cur.in, out: cur.out, req: cur.req,
-  };
+  r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: seconds ? Math.round(delta.in / seconds) : 0, used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
   r.scraped = now;
 }
 
@@ -58,17 +56,8 @@ export function flush() {
 
 // The short version every snapshot carries: totals and the last twelve weeks by day.
 export function view() {
-  const days = Object.keys(usage.days).sort();
-  const total = (d) => Object.values(usage.days[d]).reduce((n, row) => n + row.in + row.out, 0);
-  const sum = (list) => list.reduce((n, d) => n + total(d), 0);
-  const models = {};
-  for (const d of days) for (const [name, row] of Object.entries(usage.days[d])) {
-    const m = (models[name] ||= { name, in: 0, out: 0, req: 0 });
-    for (const k of ['in', 'out', 'req']) m[k] += row[k];
-  }
-  const today = new Date().toISOString().slice(0, 10);
-  const week = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
-  return { today: days.includes(today) ? total(today) : 0, week: sum(days.filter((d) => d >= week)), all: sum(days), days: days.slice(-84).map((d) => ({ d, v: total(d) })), models: Object.values(models).sort((a, b) => b.out - a.out) };
+  const days = Object.keys(usage.days).sort().map((d) => ({ d, v: Object.values(usage.days[d]).reduce((n, row) => n + row.in + row.out, 0) }));
+  return { all: days.reduce((n, x) => n + x.v, 0), days: days.slice(-84) };
 }
 
 // Everything the Usage screen draws: every day split by model, the last two days by hour, and each running model's own count.

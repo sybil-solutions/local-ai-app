@@ -126,6 +126,11 @@ function nearest(vramGb) {
 }
 export const cardFor = (gpu) => cardOf(gpu.name, gpu.total / 1024) ?? nearest(gpu.total / 1024);
 
+// A recipe this machine may start, as the app shows it. One that can't be read is reported and left out.
+function usable(id) {
+  try { return blocked(id) ? [] : [view(id)]; } catch (e) { event('warn', 'recipe.unreadable', { id, error: e.message }); return []; }
+}
+
 // One group per kind of card on the machine: its three picks plus everything else it can launch.
 export function groups(gpus) {
   const byCard = new Map();
@@ -137,8 +142,8 @@ export function groups(gpus) {
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
     const own = ids.filter((id) => find(id).card === card && (find(id).launch.cards || 1) <= members.length);
-    const list = latestOfEachFamily(own.filter((id) => !blocked(id)).map(view)).sort((a, b) => (b.tps || 0) - (a.tps || 0));
-    return { card, name: catalog.cards[tested]?.name || members[0].name, supported: !!card, untested: tested ? null : catalog.cards[card]?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(list), recipes: list, hidden: own.filter(blocked).length };
+    const list = latestOfEachFamily(own.flatMap(usable)).sort((a, b) => (b.tps || 0) - (a.tps || 0));
+    return { card, name: catalog.cards[tested]?.name || members[0].name, untested: tested ? null : catalog.cards[card]?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(list), recipes: list };
   });
 }
 
@@ -153,7 +158,9 @@ export function save({ id, ...recipe }) {
   if (!Number.isInteger(recipe.launch.port)) fail(400, 'launch.port must be the port the engine listens on');
   if (typeof recipe.card !== 'string') fail(400, 'Recipe needs a card id');
   for (const w of [].concat(recipe.launch.weights || [])) if (!w?.at || !(w.path || (REPO.test(w.repo || '') && REVISION.test(w.revision || '')))) fail(400, 'Each weight needs "at" and either "path" or a "repo" with a 40-character "revision"');
+  const before = local[id];
   local[id] = recipe;
+  try { blocked(id); view(id); } catch (e) { if (before) local[id] = before; else delete local[id]; fail(400, `That recipe can’t be read: ${e.message}`); }
   writeJson(localFile, local);
   event('info', 'recipe.saved', { id });
   return { id };
