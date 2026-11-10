@@ -47,7 +47,8 @@ export function blocked(id) {
   if (launch.setup || launch.prepare || launch.resources) return 'Needs manual setup';
   if ((launch.machines || 1) > 1) return 'Needs several machines';
   if (!/^[a-z0-9][\w./:-]*@sha256:[0-9a-f]{64}$/i.test(launch.image)) return 'Image is not pinned';
-  const flag = flagsOf(launch).find((f) => f.startsWith('-') && !ALLOWED_FLAGS.has(f));
+  // Each flag must be one allowed option with at most one plain value. Anything else could slip an option, or another image, in front of the pinned one.
+  const flag = [].concat(launch.flags || []).find((f) => !ALLOWED_FLAGS.has(/^(--?[\w-]+)(?:[=\s]+[^\s-]\S*)?$/.exec(String(f).trim())?.[1]));
   if (flag) return `Uses ${flag}`;
   if ([].concat(launch.weights || []).some((w) => w.path || !REPO.test(w.repo || '') || !REVISION.test(w.revision || '') || !/^\/[\w./-]+$/.test(w.at || '') || w.at.includes('..'))) return 'Weights are not pinned';
   if (/(--host[ =]|host:\s*)127\.0\.0\.1/.test(`${(launch.args || []).join(' ')} ${launch.config?.text || ''}`)) return 'Only listens on loopback';

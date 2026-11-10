@@ -1,4 +1,4 @@
-import { at, event, readJson, writeJson } from './util.js';
+import { at, event, readJson, together, writeJson } from './util.js';
 
 const speedsFile = at('speeds.json');
 const loadsFile = at('loads.json');
@@ -45,12 +45,7 @@ async function answer(url, model, signal) {
 
 // C is the total tokens a second across C requests at once, timed from the first token to the last.
 async function wave(url, model, c, signal) {
-  // If one answer fails the rest are stopped and waited for, so no stray request is still writing when the measurement ends.
-  const stop = new AbortController(), either = AbortSignal.any([signal, stop.signal]);
-  const done = await Promise.allSettled(Array.from({ length: c }, () => answer(url, model, either).catch((e) => { stop.abort(); throw e; })));
-  const failed = done.find((d) => d.status === 'rejected');
-  if (failed) throw failed.reason;
-  const all = done.map((d) => d.value);
+  const all = await together(signal, Array.from({ length: c }, () => (either) => answer(url, model, either)));
   const seconds = (Math.max(...all.map((a) => a.last)) - Math.min(...all.map((a) => a.first))) / 1000;
   return { total: all.reduce((n, a) => n + a.tokens - 1, 0) / seconds, ttft: median(all.map((a) => a.first - a.started)) / 1000, exact: all.every((a) => a.exact) };
 }

@@ -13,6 +13,14 @@ mkdirSync(HOME, { recursive: true, mode: 0o700 });
 
 export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 export const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
+// Runs jobs side by side. If one fails, the rest are told to stop and waited for before the failure is passed on, so nothing is left running.
+export async function together(signal, jobs) {
+  const stop = new AbortController(), either = AbortSignal.any([signal, stop.signal]);
+  const done = await Promise.allSettled(jobs.map((job) => job(either).catch((e) => { stop.abort(); throw e; })));
+  const failed = done.find((d) => d.status === 'rejected');
+  if (failed) throw failed.reason;
+  return done.map((d) => d.value);
+}
 
 // Everything that happens is one JSON line, on stdout and in ~/.local-ai/events.jsonl.
 export function event(level, name, data = {}) {

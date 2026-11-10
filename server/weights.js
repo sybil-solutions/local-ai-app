@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { at, event, sleep } from './util.js';
+import { at, event, sleep, together } from './util.js';
 
 const MODELS = process.env.LOCAL_AI_MODELS || at('models');
 const HF_HOME = process.env.HF_HOME || join(homedir(), '.cache/huggingface');
@@ -109,7 +109,7 @@ async function fetchAll(w, dest, signal, report) {
   const needed = files.filter((f) => !existsSync(join(dest, f.path))).reduce((n, f) => n + f.size - have(join(dest, `${f.path}.part`)), 0);
   if (space.bavail * space.bsize < needed) throw new Error(`Needs ${Math.ceil(needed / 1e9)} GB free in ${dest}`);
   const seen = new Map(), pending = [...files];
-  await Promise.all(Array.from({ length: 4 }, async () => {
+  await together(signal, Array.from({ length: 4 }, () => async (either) => {
     for (let f = pending.shift(); f; f = pending.shift()) {
       seen.set(f.path, 0);
       const onBytes = (n) => {
@@ -117,7 +117,7 @@ async function fetchAll(w, dest, signal, report) {
         const done = [...seen.values()].reduce((a, b) => a + b, 0);
         report({ detail: `${size(done, total)} of ${size(total, total)}`, progress: total ? Math.min(1, done / total) : 1 });
       };
-      await fetchFile(w.repo, w.revision, f, dest, onBytes, signal);
+      await fetchFile(w.repo, w.revision, f, dest, onBytes, either);
     }
   }));
 }

@@ -21,7 +21,7 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .top .x:hover { background: var(--surface); }
 .chip { display: inline-flex; align-items: center; height: 30px; box-sizing: border-box; border-radius: 15px; background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .top .mark.chip, .nav .mark.chip { gap: 7px; height: 30px; padding: 0 12px 0 11px; font: 500 13px/1 var(--ui); color: var(--text); }
-.mark.chip i, .nav .mark.chip i { margin: 0; vertical-align: 0; flex: none; }
+.mark.chip i { margin: 0; vertical-align: 0; flex: none; }
 .top .topr.chip { gap: 0; padding: 0 2px; }
 .top .topr.chip button { width: 30px; height: 30px; border-radius: 15px; color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 .chip button:hover, .nav .mark.chip:hover { background-color: rgba(255,255,255,.08); }
@@ -150,7 +150,7 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .mdcard th, .mdcard td { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: left; }
 .mdcard pre { overflow-x: auto; padding: 8px; border-radius: 4px; background: var(--surface); font-size: 11px; }
 .mdcard code { font-size: 11px; }
-.pg .mdcard, .mright .mdcard { font-size: 13px; max-width: 760px; }
+.mright .mdcard { font-size: 13px; max-width: 760px; }
 .mright .mdcard h2 { font-size: 16px; }
 
 /* Agents, Home screen order, and Background. */
@@ -318,7 +318,7 @@ html.wide #view { visibility: hidden; }
 .psub { margin: 4px 0 18px; font: 400 13px var(--ui); color: var(--muted); }
 .pg .screen { position: static; width: auto; height: auto; padding: 0; border: 0; border-radius: 0; background: none; overflow: visible; }
 .pg .top, .pg .sp { display: none; }
-.pg .scroll, .pg .scroll.home { overflow: visible; flex: none; margin: 0; padding: 0; }
+.pg .scroll { overflow: visible; flex: none; margin: 0; padding: 0; }
 .pg .head { font: 600 24px/1.2 var(--ui); letter-spacing: -.02em; }
 .pg .btn { width: auto; align-self: flex-start; padding: 0 24px; }
 .pg canvas.art { margin: 0 auto; }

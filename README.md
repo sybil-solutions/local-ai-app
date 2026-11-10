@@ -25,10 +25,10 @@ A machine that already runs Local AI can install another one on your tailnet: Ma
 | Setting | Default | |
 |---|---|---|
 | `LOCAL_AI_HOST` | `127.0.0.1` | Address the server and engines bind to. Leave it unset to get loopback plus, when Tailscale is up, this machine's tailnet address. |
-| `LOCAL_AI_SHARE` | on | `0` keeps everything on loopback even with Tailscale up. |
+| `LOCAL_AI_SHARE` | on | `0` stops the app from also answering on the tailnet address when `LOCAL_AI_HOST` is unset. |
 | `LOCAL_AI_PORT` | `18700` | The app. Engines take the next 99 ports. |
 | `LOCAL_AI_HOME` | `~/.local-ai` | Config, your recipes, usage, events. |
-| `LOCAL_AI_MODELS` | `~/.local-ai/models` | Downloaded weights. |
+| `LOCAL_AI_MODELS` | `~/.local-ai/models` | Downloaded weights. A recipe that asks for the Hugging Face cache layout uses `HF_HOME/hub` instead. |
 | `LOCAL_AI_REGISTRY` | the registry's `dist/catalog.json` | Where recipes come from. |
 
 ## How it works
@@ -124,12 +124,12 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
   groups: [{ card, name, untested, gpus: [index],              // one per kind of GPU; untested names the card it borrows recipes from
              tiers: { fastest, balanced, smartest }, recipes: [Recipe] }],
   runs: [Run],
-  usage: { all, days: [{ d, v }] },                            // tokens ever, and per day for the last twelve weeks
+  usage: { all, days: [{ d, v }] },                            // tokens ever, and per day for the last 84 days that had any
   catalog: { at, error, count, id },
   last,                                                        // the recipe started most recently
   devices: [{ i, name, url, online, error, state }],           // state is that machine's own snapshot
   agents: [{ id, name, needs, installed, version, latest, canInstall, job }], agent, folder,
-  home: { order, on }, background, picture,
+  home: { order, on } | null, background, picture,
   app: { version, started, latest, notes, phase, error, can, auto },
   hfToken }                                                    // the saved token's last four characters, or null
 
@@ -138,7 +138,8 @@ Recipe = { id, name, local, card, cards, engine, ctx, seqs, vision, think, tools
 Run    = { id,            // the port it serves on
            recipe, name, url, gpus, since, readyAt, expected,
            phase,         // queued · weights · image · starting · testing · ready · unresponsive · stopping · failed
-           detail, progress, error, failure: { word, line }, view: { line, p },
+           detail, progress, error, failure: { word, line }, view: { line, p, word? },   // word only when it failed
+           ctx, vision,
            served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active },
            external,                                           // true for a model Local AI found but did not start
            reachable }                                         // whether another machine can call it
