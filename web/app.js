@@ -90,11 +90,10 @@ function go(id) {
   moves++;
   s.agentsOpen = false;
   if (id === 'home') { s.nav = null; s.trail.length = 0; return; }
-  if (id === 'back') { s.nav = s.trail.pop() ?? null; return; }
   if (id === 'chooser' && isFull()) { s.agentsOpen = true; return; }
-  if (s.nav !== id && !STATE[s.nav]) s.trail.push(s.nav);
-  s.nav = id;
-  Promise.resolve(LOAD[id]?.()).catch((e) => { s.note = e.message; render(true); });
+  if (id === 'back') s.nav = s.trail.pop() ?? null;
+  else { if (s.nav !== id && !STATE[s.nav]) s.trail.push(s.nav); s.nav = id; }
+  Promise.resolve(LOAD[s.nav]?.()).catch((e) => { s.note = e.message; render(true); }); // a screen you return to loads again
 }
 const jump = (id) => { s.trail.length = 0; s.nav = null; go(id); s.trail.length = 0; };
 setInterval(() => { if (s.nav === 'usage') LOAD.usage().catch(() => {}); if (s.nav === 'machines' || s.nav === 'm-install') LOAD.machines(); }, 12000);

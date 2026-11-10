@@ -68,6 +68,7 @@ const portFree = (port) => new Promise((done) => {
 
 function dockerArgs(r, recipe, name) {
   const launch = recipe.launch;
+  r.reachable = !!shared || !/^127\./.test(HOST); // whether the port is published where another machine can call it
   const entry = [].concat(launch.entrypoint || []);
   const flags = flagsOf(launch);
   const keep = [];
@@ -82,7 +83,7 @@ function dockerArgs(r, recipe, name) {
   const metrics = METRICS_FLAGS.find(([re, flag]) => re.test(command.join(' ')) && !command.includes(flag))?.[1];
   const env = Object.entries(launch.env || {}).filter(([k]) => !['NVIDIA_VISIBLE_DEVICES', 'CUDA_VISIBLE_DEVICES'].includes(k));
   return ['run', '-d', '--name', name, '--label', 'local-ai=1', '--label', `local-ai.port=${r.id}`, '--label', `local-ai.recipe=${r.recipe}`,
-    '--label', `local-ai.gpus=${r.gpus.join('+')}`, '--label', `local-ai.since=${r.since}`, '--gpus', `"device=${r.gpus.join(',')}"`,
+    '--label', `local-ai.gpus=${r.gpus.join('+')}`, '--label', `local-ai.since=${r.since}`, '--label', `local-ai.reach=${+r.reachable}`, '--gpus', `"device=${r.gpus.join(',')}"`,
     '-p', `${HOST}:${r.id}:${launch.port}`, ...(shared ? ['-p', `${shared}:${r.id}:${launch.port}`] : []), ...(isLocal(r.recipe) ? [] : ['--security-opt', 'no-new-privileges']), ...(launch.shm ? ['--shm-size', launch.shm] : []), ...keep,
     ...env.flatMap(([k, v]) => ['-e', `${k}=${v}`]), ...weights.mounts(launch), ...(configFile ? ['-v', `${configFile}:${launch.config.at}:ro`] : []),
     ...(entry[0] ? ['--entrypoint', entry[0]] : []), launch.image, ...entry.slice(1), ...(launch.args || []), ...(metrics ? [metrics] : [])];
@@ -239,7 +240,7 @@ async function reconcile(c, listedAt) {
   const id = +c.labels['local-ai.port'];
   let r = runs.get(id);
   if (!r) {
-    r = { id, recipe: c.labels['local-ai.recipe'], name: label(c.labels['local-ai.recipe']), url: `http://${ENGINE_HOST}:${id}`, gpus: (c.labels['local-ai.gpus'] || '').split('+').filter(Boolean).map(Number), phase: 'starting', detail: 'Loading model', progress: null, error: null, since: +c.labels['local-ai.since'] || Date.now(), busy: false, container: c.name, apis: null, stats: null, misses: 0, seen: true };
+    r = { id, recipe: c.labels['local-ai.recipe'], name: label(c.labels['local-ai.recipe']), url: `http://${ENGINE_HOST}:${id}`, reachable: c.labels['local-ai.reach'] ? c.labels['local-ai.reach'] === '1' : !/^127\./.test(HOST), gpus: (c.labels['local-ai.gpus'] || '').split('+').filter(Boolean).map(Number), phase: 'starting', detail: 'Loading model', progress: null, error: null, since: +c.labels['local-ai.since'] || Date.now(), busy: false, container: c.name, apis: null, stats: null, misses: 0, seen: true };
     runs.set(id, r);
     event('info', 'run.adopted', { id, recipe: r.recipe });
   }
@@ -355,9 +356,8 @@ function describe(r) {
 
 export const all = () => [...runs.values()];
 // What the app is told about a run. Anything not named here stays inside the server.
-const SHOWN = ['id', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external'];
+const SHOWN = ['id', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external', 'reachable'];
 export const listRuns = () => all().sort((a, b) => a.id - b.id).map((r) => ({
-  ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch.ctx || 0, vision: !!find(r.recipe)?.launch.vision,
-  reachable: r.external ? r.reachable : !!shared || !/^127\./.test(HOST), // whether another machine can call it
+  ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch?.ctx || 0, vision: !!find(r.recipe)?.launch?.vision,
 }));
 
