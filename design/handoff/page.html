@@ -1,0 +1,279 @@
+<title>Local AI Build Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one long reference page under a sticky section bar; the map is a wide canvas that scrolls sideways inside itself. */
+:root {
+  --bg: #121211; --panel: #1a1918; --raise: #222120; --line: #2f2e2b; --text: #ecEae6; --muted: #a6a39d; --accent: #f2efe9; --ink: #12120f;
+  --ui: "Hanken Grotesk", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { background: var(--bg); color: var(--text); font: 400 14px/1.55 var(--ui); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+code, pre { font-family: var(--mono); font-size: 12px; }
+.wrap { max-width: 1180px; margin: 0 auto; }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px))); padding: 0 max(16px, env(safe-area-inset-left, 0px)); }
+.bar .wrap { display: flex; align-items: center; gap: 18px; height: 52px; overflow-x: auto; scrollbar-width: none; }
+.bar .wrap::-webkit-scrollbar { display: none; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -.02em; white-space: nowrap; }
+.brand i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.bar nav { display: flex; gap: 2px; }
+.bar nav a { padding: 6px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.bar nav a:hover { color: var(--text); background: var(--panel); }
+header.top { padding-block: 56px 32px; display: grid; gap: 28px; }
+h1 { margin: 0; font: 600 clamp(28px, 4vw, 40px)/1.1 var(--ui); letter-spacing: -.03em; text-wrap: balance; max-width: 22ch; }
+.lede { margin: 0; max-width: 68ch; color: #d6d3cd; font-size: 15px; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px 36px; font-variant-numeric: tabular-nums; }
+.facts div { display: flex; flex-direction: column; }
+.facts b { font: 600 22px/1.1 var(--ui); letter-spacing: -.02em; }
+.facts span { color: var(--muted); font-size: 12px; }
+section.part { padding-block: 40px; border-top: 1px solid var(--line); }
+h2 { margin: 0 0 6px; font: 600 22px/1.2 var(--ui); letter-spacing: -.02em; }
+.intro { margin: 0 0 22px; color: var(--muted); max-width: 70ch; }
+h3 { margin: 0; font: 600 15px/1.3 var(--ui); }
+
+/* Map */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: -8px 0 14px; color: var(--muted); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend svg { flex: none; }
+.mapbox { position: relative; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); scrollbar-color: var(--line) transparent; }
+.mapin { position: relative; display: flex; flex-direction: column; gap: 26px; padding: 22px 22px 26px; width: max-content; }
+#edges { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+#edges path { fill: none; stroke: var(--muted); stroke-width: 1.2; opacity: .14; transition: opacity .15s; }
+#edges path.event { stroke-dasharray: 4 4; }
+#edges.focus path { opacity: .03; }
+#edges.focus path.out { stroke: var(--accent); opacity: .95; stroke-width: 1.6; }
+#edges.focus path.in { stroke: #8f8c86; opacity: .8; }
+.lane { display: grid; grid-template-columns: 150px auto; gap: 18px; align-items: start; }
+.lname { position: sticky; left: 0; z-index: 2; padding: 6px 10px 8px 0; background: var(--panel); display: flex; flex-direction: column; gap: 4px; }
+.lname b { font-size: 13px; }
+.lname span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.lcards { display: flex; gap: 26px; }
+.node { position: relative; z-index: 1; width: 84px; display: flex; flex-direction: column; gap: 6px; font: 500 11px/1.3 var(--ui); color: var(--muted); text-align: left; background: none; border: 0; padding: 0; cursor: pointer; }
+.node img { display: block; width: 84px; height: 168px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); background: var(--bg); }
+.node:hover img, .node.on img { box-shadow: 0 0 0 1px var(--accent); }
+.node.on span, .node:hover span { color: var(--text); }
+.node.dim { opacity: .35; }
+.pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; min-height: 22px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.pick b { color: var(--text); font-weight: 600; }
+
+/* Which screen, and the lifecycle */
+.two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+ol.ladder { margin: 0; padding: 0; list-style: none; counter-reset: n; display: flex; flex-direction: column; }
+ol.ladder { max-width: 900px; }
+ol.ladder li { counter-increment: n; display: grid; grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--line); }
+ol.ladder li::before { content: counter(n); color: var(--muted); font: 500 12px var(--mono); font-variant-numeric: tabular-nums; }
+ol.ladder li span { color: #d6d3cd; }
+ol.ladder li b { font-weight: 500; text-align: right; }
+.diagram { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px; }
+.diagram svg { display: block; min-width: 760px; width: 100%; max-width: 1100px; height: auto; }
+.diagram text { font-family: var(--ui); fill: var(--text); }
+.diagram .sub { fill: var(--muted); font-size: 10.5px; }
+.diagram .phase { fill: var(--raise); stroke: var(--line); }
+.diagram .ready { fill: var(--accent); stroke: none; }
+.diagram .bad { fill: none; stroke: #b0102f; stroke-dasharray: 3 3; }
+.diagram .arrow { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+.diagram .arrow.fail { stroke: #b0102f; stroke-dasharray: 4 3; }
+.note { margin-top: 12px; color: var(--muted); font-size: 12px; max-width: 70ch; }
+
+/* Screen specs */
+.lanespec { padding-top: 10px; }
+.lh { font-size: 17px; margin-top: 26px; }
+.ln { margin: 0 0 6px; color: var(--muted); }
+.spec { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 22px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.spec > img { width: 120px; height: 240px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); background: var(--panel); }
+.sbody { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.sbody p { margin: 0; max-width: 78ch; color: #d6d3cd; }
+.shead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.shead code { color: var(--muted); }
+.spec:target > img { box-shadow: 0 0 0 1px var(--accent); }
+.from { color: var(--muted); font-size: 12px; }
+.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+.t th { text-align: left; font: 500 11px var(--ui); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; padding: 0 12px 6px 0; border-bottom: 1px solid var(--line); }
+.t td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.t td:first-child { width: 30%; }
+.t td:nth-child(2) { width: 28%; }
+.t code { color: #d6d3cd; overflow-wrap: anywhere; }
+.t.ev td:first-child { width: 30%; }
+.tablebox { overflow-x: auto; }
+
+/* API and data */
+.api { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13px; }
+.api th { text-align: left; font: 500 11px var(--ui); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; padding: 0 14px 8px 0; border-bottom: 1px solid var(--line); }
+.api td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.api td:nth-child(2) { width: 38%; }
+.api td code { overflow-wrap: anywhere; }
+.purp { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.st { display: inline-block; min-width: 50px; padding: 2px 8px; border-radius: 10px; font: 500 11px var(--ui); text-align: center; white-space: nowrap; }
+.st.exists { box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
+.st.extend { box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); }
+.st.new { background: var(--accent); color: var(--ink); }
+.types { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 16px; }
+.type { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.thead { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 14px 0; }
+.thead code { color: var(--muted); }
+.type pre { margin: 0; padding: 10px 14px 14px; overflow-x: auto; color: #d6d3cd; line-height: 1.55; }
+
+/* Desktop and open questions */
+.desk { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 22px; }
+.desk figure { margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.desk img { width: 100%; height: auto; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); }
+.desk figcaption { color: var(--muted); font-size: 12px; }
+.desk figcaption b { color: var(--text); font-weight: 500; }
+ul.qs { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; max-width: 86ch; }
+ul.qs li { padding: 14px 0; border-bottom: 1px solid var(--line); }
+ul.qs b { display: block; margin-bottom: 3px; }
+ul.qs span { color: #d6d3cd; }
+footer { padding-block: 40px 64px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); }
+
+@media (max-width: 760px) {
+  .two { grid-template-columns: minmax(0, 1fr); }
+  .spec { grid-template-columns: minmax(0, 1fr); }
+  .spec > img { width: 110px; height: 220px; }
+  .t td:first-child, .t td:nth-child(2) { width: auto; }
+  .lane { grid-template-columns: 112px auto; }
+}
+</style>
+
+<div class="bar"><div class="wrap"><span class="brand"><i></i>Local AI build map</span><nav aria-label="Sections"><a href="#map">Screen map</a><a href="#which">Which screen</a><a href="#screens">Screens</a><a href="#api">API</a><a href="#data">Data</a><a href="#desktop">Desktop</a><a href="#open">Open questions</a></nav></div></div>
+<div class="wrap">
+<header class="top">
+  <h1>Everything the Local AI app shows, and what it calls to show it</h1>
+  <p class="lede">The design is final. This is the developer's handoff: every screen in the phone-sized panel, how you get from one to the next, what each screen reads from the server, and which routes exist today in <code>local-ai-sandbox/server</code> versus which are new. The desktop fullscreen app shows the same screens as pages under a top bar. Numbers inside the screens are sample data.</p>
+  <div class="facts"><div><b>__NSCREENS__</b><span>screens</span></div><div><b>__NLANES__</b><span>journeys</span></div><div><b>__NEDGES__</b><span>ways between them</span></div><div><b>__NEXISTS__</b><span>routes exist</span></div><div><b>__NEXTEND__</b><span>to extend</span></div><div><b>__NNEW__</b><span>new routes</span></div></div>
+</header>
+
+<section class="part" id="map">
+  <h2>Screen map</h2>
+  <p class="intro">One row per journey. Pick a screen to see where it leads (bright) and what leads to it (grey). The machine name and the menu in the header reach Machines and Settings from every screen, so those lines are left out.</p>
+  <div class="legend"><span><svg width="34" height="8" aria-hidden="true"><path d="M1 4h32" stroke="currentColor" stroke-width="1.4"/></svg>You tap something</span><span><svg width="34" height="8" aria-hidden="true"><path d="M1 4h32" stroke="currentColor" stroke-width="1.4" stroke-dasharray="4 4"/></svg>The server reports a change</span></div>
+  <div class="mapbox" id="mapbox"><div class="mapin" id="mapin"><svg id="edges" aria-hidden="true"></svg>__LANES__</div></div>
+  <div class="pick" id="pick" aria-live="polite">Pick a screen in the map.</div>
+</section>
+
+<section class="part" id="which">
+  <h2>Which screen to show</h2>
+  <p class="intro">The app keeps no screen state of its own for the main flow. It reads <code>GET /api/state</code> and picks the screen with the first rule that matches. Settings, Models, Usage and the other detail screens are ordinary navigation on top.</p>
+  <div class="two">
+    <ol class="ladder">__RESOLVE__</ol>
+    <div>
+      <div class="diagram"><svg viewBox="0 0 960 300" role="img" aria-label="Run lifecycle: queued, weights, image, starting, testing, ready, stopping; any step before ready can fail; ready can stop answering">
+        <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="#a6a39d"/></marker><marker id="ahr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="#b0102f"/></marker></defs>
+        <g font-size="13" font-weight="600">
+          <rect class="phase" x="10" y="40" width="104" height="40" rx="8"/><text x="62" y="65" text-anchor="middle">queued</text>
+          <rect class="phase" x="146" y="40" width="104" height="40" rx="8"/><text x="198" y="65" text-anchor="middle">weights</text>
+          <rect class="phase" x="282" y="40" width="104" height="40" rx="8"/><text x="334" y="65" text-anchor="middle">image</text>
+          <rect class="phase" x="418" y="40" width="104" height="40" rx="8"/><text x="470" y="65" text-anchor="middle">starting</text>
+          <rect class="phase" x="554" y="40" width="104" height="40" rx="8"/><text x="606" y="65" text-anchor="middle">testing</text>
+          <rect class="ready" x="690" y="40" width="104" height="40" rx="8"/><text x="742" y="65" text-anchor="middle" fill="#12120f" style="fill:#12120f">ready</text>
+          <rect class="phase" x="840" y="40" width="110" height="40" rx="8"/><text x="895" y="65" text-anchor="middle">stopping</text>
+          <rect class="bad" x="300" y="196" width="320" height="40" rx="8"/><text x="460" y="221" text-anchor="middle">failed</text>
+          <rect class="phase" x="690" y="196" width="140" height="40" rx="8"/><text x="760" y="221" text-anchor="middle">unresponsive</text>
+        </g>
+        <g class="sub" font-size="10.5">
+          <text class="sub" x="62" y="100" text-anchor="middle">waking</text>
+          <text class="sub" x="198" y="100" text-anchor="middle">dl · netwait</text><text class="sub" x="198" y="114" text-anchor="middle">checking</text>
+          <text class="sub" x="334" y="100" text-anchor="middle">waking</text>
+          <text class="sub" x="470" y="100" text-anchor="middle">waking, then slow</text>
+          <text class="sub" x="606" y="100" text-anchor="middle">waking</text>
+          <text class="sub" x="742" y="100" text-anchor="middle">awake · opened</text>
+          <text class="sub" x="895" y="100" text-anchor="middle">sleeping, then off</text>
+          <text class="sub" x="460" y="256" text-anchor="middle">room · quit · never · noengine · locked</text><text class="sub" x="460" y="270" text-anchor="middle">space · damaged · noconn, by failure.word</text>
+          <text class="sub" x="760" y="256" text-anchor="middle">noreply</text>
+        </g>
+        <g>
+          <path class="arrow" d="M114 60H144" marker-end="url(#ah)"/><path class="arrow" d="M250 60H280" marker-end="url(#ah)"/><path class="arrow" d="M386 60H416" marker-end="url(#ah)"/><path class="arrow" d="M522 60H552" marker-end="url(#ah)"/><path class="arrow" d="M658 60H688" marker-end="url(#ah)"/><path class="arrow" d="M794 60H838" marker-end="url(#ah)"/>
+          <path class="arrow fail" d="M198 120C198 170 320 170 330 194" marker-end="url(#ahr)"/><path class="arrow fail" d="M334 120C334 160 380 170 390 194" marker-end="url(#ahr)"/><path class="arrow fail" d="M470 120V194" marker-end="url(#ahr)"/><path class="arrow fail" d="M606 120C606 160 560 170 550 194" marker-end="url(#ahr)"/>
+          <path class="arrow" d="M730 82V194" marker-end="url(#ah)"/><path class="arrow" d="M790 194V84" marker-end="url(#ah)"/>
+          <text class="sub" x="696" y="150">no answer</text><text class="sub" x="796" y="150">answers again</text>
+        </g>
+      </svg></div>
+      <p class="note">Run phases from <code>engine.js</code>. Under each phase is the screen it shows. Stop and Cancel call <code>DELETE /api/runs/:port</code> from any phase. Two failures the engine can report, "GPU not reaching Docker" and "Driver problem", plus the fallback "Did not start", use the same failure layout with <code>failure.word</code> and <code>failure.line</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="part" id="screens">
+  <h2>Screens</h2>
+  <p class="intro">Each screen with what it reads and what each control does. "Calls" is the request a control makes; a dash means it only moves to another screen. Paths like <code>runs[].phase</code> are fields of <code>GET /api/state</code>.</p>
+  __SPECS__
+</section>
+
+<section class="part" id="api">
+  <h2>API</h2>
+  <p class="intro">Every route the app needs. Exists means it is in <code>server/index.js</code> today. Extend means the route exists and needs new fields. New routes are to build. The server keeps no gateway: engines serve the model APIs on their own ports, and these routes only manage them.</p>
+  <div class="tablebox"><table class="api"><thead><tr><th>Status</th><th>Route</th><th>Sends</th><th>Returns</th><th>Used by</th></tr></thead><tbody>__API__</tbody></table></div>
+</section>
+
+<section class="part" id="data">
+  <h2>Data</h2>
+  <p class="intro">The shapes the screens read. State is the one snapshot everything else hangs off; the rest are the new routes' answers.</p>
+  <div class="types">__TYPES__</div>
+</section>
+
+<section class="part" id="desktop">
+  <h2>Desktop</h2>
+  <p class="intro">The fullscreen desktop app has a top bar (Home, Models, Agents, Machines, Usage, Settings) and shows the same screens as full pages. Home is the painting with the three picks along the bottom. Keys: 1 to 6 jump to a section, Esc goes back, ← → change the pick, Enter starts.</p>
+  <div class="desk">__DESK__</div>
+</section>
+
+<section class="part" id="open">
+  <h2>Open questions</h2>
+  <p class="intro">Things the design shows that the build has to decide.</p>
+  <ul class="qs">
+    <li><b>Where requests come from, without a gateway</b><span>Engines answer on their own ports, so the server never sees a request. It can read client addresses from engine access logs (vLLM and SGLang print them) or sample open connections on each port. The app name only exists where an engine logs the User-Agent; otherwise the row says "Unknown app". Device names come from <code>tailscale whois</code>.</span></li>
+    <li><b>Agent installs and updates differ by system</b><span>Omarchy installs through mise, Hermes ships with its own desktop app, others use npm or a script. The app needs one install and one update command per agent per system, kept with the agent list.</span></li>
+    <li><b>Model cards need the base model's repo</b><span>The registry's <code>catalog.models[].hf</code> is often the quantized repo or missing (Gemma 4, Qwen3.8-Flash-Next). Add the base repo to the registry. Nemotron 3.5 Lightning has no card at all; the screen says so.</span></li>
+    <li><b>Usage needs two finer counters</b><span>Tokens per model per day are stored today. Today's chart needs hourly buckets and This run needs a counter that starts with the run.</span></li>
+    <li><b>App updates</b><span>Pick the release channel (GitHub Releases with electron-updater is the obvious one; the repo is private, so it needs a token or a public release repo). Engines live in Docker, so restarting the app never stops a model.</span></li>
+    <li><b>Your own picture</b><span>Stored on the machine running Local AI. Another device showing that machine shows its picture. More artwork can be added to the Background list as data.</span></li>
+    <li><b>Sample data in the design</b><span>Agent versions, the usage split by model, request sources, the app version and the Tailscale name are placeholders.</span></li>
+    <li><b>The phone app</b><span>Runs one small model on the phone itself, outside this server. Its screens are here; its runtime is a separate piece of work.</span></li>
+  </ul>
+</section>
+<footer>Local AI build map · design v2 · 9 November 2026 · generated from the design itself, so screens, controls and links match it exactly.</footer>
+</div>
+
+<script>
+const EDGES = __EDGES__;
+const box = document.getElementById('mapin'), svg = document.getElementById('edges'), pick = document.getElementById('pick');
+const nodes = Object.fromEntries([...box.querySelectorAll('.node')].map((n) => [n.dataset.id, n]));
+const titles = Object.fromEntries(Object.entries(nodes).map(([k, n]) => [k, n.title]));
+let chosen = null;
+function draw() {
+  const base = box.getBoundingClientRect();
+  svg.setAttribute('width', box.scrollWidth); svg.setAttribute('height', box.scrollHeight);
+  const r = (id) => { const b = nodes[id].querySelector('img').getBoundingClientRect(); return { l: b.left - base.left, r: b.right - base.left, t: b.top - base.top, b: b.bottom - base.top, cx: (b.left + b.right) / 2 - base.left, cy: (b.top + b.bottom) / 2 - base.top }; };
+  svg.innerHTML = EDGES.filter((e) => nodes[e.from] && nodes[e.to]).map((e) => {
+    const a = r(e.from), b = r(e.to), same = Math.abs(a.cy - b.cy) < 4;
+    let d;
+    if (same && b.cx > a.cx) d = `M${a.r} ${a.cy}C${a.r + 18} ${a.cy} ${b.l - 18} ${b.cy} ${b.l} ${b.cy}`;
+    else if (same) { const lift = 22 + Math.min(40, (a.cx - b.cx) / 12); d = `M${a.cx} ${a.t}C${a.cx} ${a.t - lift} ${b.cx} ${b.t - lift} ${b.cx} ${b.t}`; }
+    else { const down = b.cy > a.cy, y1 = down ? a.b : a.t, y2 = down ? b.t : b.b, k = Math.max(30, Math.abs(y2 - y1) / 2); d = `M${a.cx} ${y1}C${a.cx} ${y1 + (down ? k : -k)} ${b.cx} ${y2 + (down ? -k : k)} ${b.cx} ${y2}`; }
+    return `<path class="${e.kind}" data-from="${e.from}" data-to="${e.to}" d="${d}"/>`;
+  }).join('');
+  if (chosen) focus(chosen);
+}
+function focus(id) {
+  chosen = id;
+  svg.classList.toggle('focus', !!id);
+  const outs = new Set(), ins = new Set();
+  svg.querySelectorAll('path').forEach((p) => { const o = p.dataset.from === id, i = p.dataset.to === id; p.classList.toggle('out', o); p.classList.toggle('in', i && !o); if (o) outs.add(p.dataset.to); if (i) ins.add(p.dataset.from); });
+  Object.entries(nodes).forEach(([k, n]) => { n.classList.toggle('on', k === id); n.classList.toggle('dim', !!id && k !== id && !outs.has(k) && !ins.has(k)); n.setAttribute('aria-pressed', String(k === id)); });
+  if (!id) { pick.textContent = 'Pick a screen in the map.'; return; }
+  const list = (s) => [...s].map((k) => titles[k]).join(', ') || 'nothing';
+  pick.innerHTML = `<b>${titles[id]}</b><span>Leads to ${list(outs)}.</span><span>Reached from ${list(ins)}.</span><a href="#s-${id}">Open its spec</a>`;
+}
+box.addEventListener('click', (e) => { const n = e.target.closest('.node'); if (n) focus(chosen === n.dataset.id ? null : n.dataset.id); });
+box.addEventListener('pointerover', (e) => { const n = e.target.closest('.node'); if (n && !chosen && e.pointerType === 'mouse') { focus(n.dataset.id); chosen = null; } });
+box.addEventListener('pointerleave', () => { if (!chosen) focus(null); });
+addEventListener('resize', draw);
+document.fonts?.ready.then(draw);
+draw();
+</script>

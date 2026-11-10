@@ -1,0 +1,2502 @@
+[
+ {
+  "id": "off",
+  "title": "Off",
+  "lane": "Every day",
+  "row": 0,
+  "col": 0,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Nemotron 3.5 Fast",
+    "to": "off",
+    "attrs": {
+     "tier": "fast"
+    }
+   },
+   {
+    "label": "Details",
+    "to": "off",
+    "attrs": {
+     "exp": "fast"
+    }
+   },
+   {
+    "label": "Flash-Next Balanced",
+    "to": "off",
+    "attrs": {
+     "tier": "balanced"
+    }
+   },
+   {
+    "label": "Details",
+    "to": "off",
+    "attrs": {
+     "exp": "balanced"
+    }
+   },
+   {
+    "label": "GLM-5.3 Smart",
+    "to": "off",
+    "attrs": {
+     "tier": "smart"
+    }
+   },
+   {
+    "label": "Details",
+    "to": "off",
+    "attrs": {
+     "exp": "smart"
+    }
+   },
+   {
+    "label": "More models",
+    "to": "adv-models",
+    "attrs": {}
+   },
+   {
+    "label": "Start Flash-Next",
+    "to": "waking",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "waking",
+  "title": "Starting",
+  "lane": "Every day",
+  "row": 0,
+  "col": 1,
+  "next": [
+   {
+    "label": "It loaded",
+    "to": "awake",
+    "attr": ""
+   },
+   {
+    "label": "Taking longer",
+    "to": "slow",
+    "attr": ""
+   },
+   {
+    "label": "It failed",
+    "to": "room",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "awake",
+  "title": "Running",
+  "lane": "Every day",
+  "row": 0,
+  "col": 2,
+  "next": [
+   {
+    "label": "It stopped answering",
+    "to": "noreply",
+    "attr": ""
+   },
+   {
+    "label": "It crashed",
+    "to": "quit",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "37.7B Lifetime tokens",
+    "to": "usage",
+    "attrs": {}
+   },
+   {
+    "label": "Open Pi",
+    "to": "opened",
+    "attrs": {}
+   },
+   {
+    "label": "⌄",
+    "to": "chooser",
+    "attrs": {}
+   },
+   {
+    "label": "Stop",
+    "to": "sleeping",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "chooser",
+  "title": "Choose an agent",
+  "lane": "Every day",
+  "row": 0,
+  "col": 3,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "awake",
+    "attrs": {}
+   },
+   {
+    "label": "Pi Default",
+    "to": "opened",
+    "attrs": {
+     "agent": "Pi"
+    }
+   },
+   {
+    "label": "Claude Code",
+    "to": "opened",
+    "attrs": {
+     "agent": "Claude Code"
+    }
+   },
+   {
+    "label": "Codex",
+    "to": "opened",
+    "attrs": {
+     "agent": "Codex"
+    }
+   },
+   {
+    "label": "OpenCode",
+    "to": "opened",
+    "attrs": {
+     "agent": "OpenCode"
+    }
+   },
+   {
+    "label": "Oh My Pi",
+    "to": "opened",
+    "attrs": {
+     "agent": "Oh My Pi"
+    }
+   },
+   {
+    "label": "Hermes",
+    "to": "opened",
+    "attrs": {
+     "agent": "Hermes"
+    }
+   },
+   {
+    "label": "Crush Install",
+    "to": "opened",
+    "attrs": {
+     "install": "Crush"
+    }
+   },
+   {
+    "label": "Grok Install",
+    "to": "opened",
+    "attrs": {
+     "install": "Grok"
+    }
+   },
+   {
+    "label": "GitHub Copilot Install",
+    "to": "opened",
+    "attrs": {
+     "install": "GitHub Copilot"
+    }
+   },
+   {
+    "label": "Ori Install",
+    "to": "opened",
+    "attrs": {
+     "install": "Ori"
+    }
+   },
+   {
+    "label": "Antigravity Install",
+    "to": "opened",
+    "attrs": {
+     "install": "Antigravity"
+    }
+   }
+  ]
+ },
+ {
+  "id": "opened",
+  "title": "Agent opened",
+  "lane": "Every day",
+  "row": 0,
+  "col": 4,
+  "next": [
+   {
+    "label": "No terminal here",
+    "to": "runthis",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "37.7B Lifetime tokens",
+    "to": "usage",
+    "attrs": {}
+   },
+   {
+    "label": "Open Pi",
+    "to": "opened",
+    "attrs": {}
+   },
+   {
+    "label": "⌄",
+    "to": "chooser",
+    "attrs": {}
+   },
+   {
+    "label": "Stop",
+    "to": "sleeping",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "runthis",
+  "title": "No terminal on this machine",
+  "lane": "Every day",
+  "row": 0,
+  "col": 5,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "awake",
+    "attrs": {}
+   },
+   {
+    "label": "Copy",
+    "to": "awake",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "sleeping",
+  "title": "Stopping",
+  "lane": "Every day",
+  "row": 0,
+  "col": 6,
+  "next": [
+   {
+    "label": "GPU is free",
+    "to": "off",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "boot",
+  "title": "Opening the app",
+  "lane": "First time",
+  "row": 1,
+  "col": 0,
+  "next": [
+   {
+    "label": "GPU found",
+    "to": "first",
+    "attr": ""
+   },
+   {
+    "label": "No GPU",
+    "to": "nogpu",
+    "attr": ""
+   },
+   {
+    "label": "No Docker",
+    "to": "needsdocker",
+    "attr": ""
+   },
+   {
+    "label": "Server down",
+    "to": "cantconnect",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "first",
+  "title": "First time",
+  "lane": "First time",
+  "row": 1,
+  "col": 1,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Nemotron 3.5 Fast",
+    "to": "off",
+    "attrs": {
+     "tier": "fast"
+    }
+   },
+   {
+    "label": "Details",
+    "to": "off",
+    "attrs": {
+     "exp": "fast"
+    }
+   },
+   {
+    "label": "Flash-Next Balanced",
+    "to": "off",
+    "attrs": {
+     "tier": "balanced"
+    }
+   },
+   {
+    "label": "Details",
+    "to": "off",
+    "attrs": {
+     "exp": "balanced"
+    }
+   },
+   {
+    "label": "GLM-5.3 Smart",
+    "to": "off",
+    "attrs": {
+     "tier": "smart"
+    }
+   },
+   {
+    "label": "Details",
+    "to": "off",
+    "attrs": {
+     "exp": "smart"
+    }
+   },
+   {
+    "label": "More models",
+    "to": "adv-models",
+    "attrs": {}
+   },
+   {
+    "label": "Download Flash-Next",
+    "to": "dl",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "dl",
+  "title": "Downloading",
+  "lane": "First time",
+  "row": 1,
+  "col": 2,
+  "next": [
+   {
+    "label": "Finished",
+    "to": "checking",
+    "attr": ""
+   },
+   {
+    "label": "Network dropped",
+    "to": "netwait",
+    "attr": ""
+   },
+   {
+    "label": "No room",
+    "to": "space",
+    "attr": ""
+   },
+   {
+    "label": "Locked",
+    "to": "locked",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "first",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "netwait",
+  "title": "Network dropped",
+  "lane": "First time",
+  "row": 1,
+  "col": 3,
+  "next": [
+   {
+    "label": "Back online",
+    "to": "dl",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "first",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "checking",
+  "title": "Checking the files",
+  "lane": "First time",
+  "row": 1,
+  "col": 4,
+  "next": [
+   {
+    "label": "All good",
+    "to": "waking",
+    "attr": ""
+   },
+   {
+    "label": "A file was bad",
+    "to": "damaged",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "adv-models",
+  "title": "Advanced, models",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 1,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "Nanbeige4.3-33B Oct 2026 · vLLM · 256K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "0"
+    }
+   },
+   {
+    "label": "LFM2.5-24B Oct 2026 · vLLM · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "1"
+    }
+   },
+   {
+    "label": "GLM-5.3 Aug 2026 · vLLM · 320K 4 ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "2"
+    }
+   },
+   {
+    "label": "Qwen3.8-Flash-Next Aug 2026 · TabbyAPI · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "3"
+    }
+   },
+   {
+    "label": "Qwen3.8-Flash-Next Aug 2026 · SGLang · 256K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "4"
+    }
+   },
+   {
+    "label": "Ornith-1.5-35B Aug 2026 · SGLang · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "5"
+    }
+   },
+   {
+    "label": "Granite 4.2 30B Aug 2026 · vLLM · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "6"
+    }
+   },
+   {
+    "label": "Qwen3.8-27B Aug 2026 · SGLang · 256K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "7"
+    }
+   },
+   {
+    "label": "Qwen3.8-27B Aug 2026 · SGLang · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "8"
+    }
+   },
+   {
+    "label": "Qwen3.8-27B Aug 2026 · vLLM · 256K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "9"
+    }
+   },
+   {
+    "label": "Qwen3.8-27B Aug 2026 · TabbyAPI · 256K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "10"
+    }
+   },
+   {
+    "label": "Nemotron 3.5 Lightning 30B Aug 2026 · vLLM · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "11"
+    }
+   },
+   {
+    "label": "LFM2.5-2.6B Jul 2026 · SGLang · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "12"
+    }
+   },
+   {
+    "label": "Gemma 4 12B May 2026 · SGLang · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "13"
+    }
+   },
+   {
+    "label": "Gemma 4 26B A4B Mar 2026 · TabbyAPI · 128K ›",
+    "to": "model-page",
+    "attrs": {
+     "adv": "14"
+    }
+   }
+  ]
+ },
+ {
+  "id": "model-page",
+  "title": "Advanced, one model",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 3,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "adv-models",
+    "attrs": {}
+   },
+   {
+    "label": "Use",
+    "to": "off",
+    "attrs": {
+     "all": "0"
+    }
+   },
+   {
+    "label": "Edit",
+    "to": "edit",
+    "attrs": {
+     "editr": "0"
+    }
+   }
+  ]
+ },
+ {
+  "id": "edit",
+  "title": "Advanced, edit",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 2,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "model-page",
+    "attrs": {}
+   },
+   {
+    "label": "Save",
+    "to": "model-page",
+    "attrs": {}
+   },
+   {
+    "label": "Reset",
+    "to": "model-page",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "settings",
+  "title": "Settings",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 0,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "off",
+    "attrs": {}
+   },
+   {
+    "label": "General",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Advanced",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "Home screen ›",
+    "to": "home-edit",
+    "attrs": {}
+   },
+   {
+    "label": "Background ›",
+    "to": "background",
+    "attrs": {}
+   },
+   {
+    "label": "Agents and folder ›",
+    "to": "agent",
+    "attrs": {}
+   },
+   {
+    "label": "Machines ›",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Usage ›",
+    "to": "usage",
+    "attrs": {}
+   },
+   {
+    "label": "Update to 0.9.3",
+    "to": "app-update",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "background",
+  "title": "Background",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 10,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "The Creation of Adam Grayscale In use",
+    "to": "background",
+    "attrs": {
+     "bg": "gray"
+    }
+   },
+   {
+    "label": "The Creation of Adam In colour",
+    "to": "background",
+    "attrs": {
+     "bg": "color"
+    }
+   },
+   {
+    "label": "Your own picture Choose a file",
+    "to": "background",
+    "attrs": {
+     "bg": "own"
+    }
+   },
+   {
+    "label": "None Plain dark",
+    "to": "background",
+    "attrs": {
+     "bg": "none"
+    }
+   }
+  ]
+ },
+ {
+  "id": "app-update",
+  "title": "App update",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 11,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Update automatically",
+    "to": "app-update",
+    "attrs": {
+     "appauto": "1"
+    }
+   },
+   {
+    "label": "Update and restart",
+    "to": "app-updating",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "app-updating",
+  "title": "App updating",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 12,
+  "next": [
+   {
+    "label": "Restarted",
+    "to": "settings",
+    "attr": "data-appdone=\"1\""
+   },
+   {
+    "label": "It failed",
+    "to": "app-fail",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "app-fail",
+  "title": "App update failed",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 13,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "app-updating",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "home-edit",
+  "title": "Edit home screen",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 1,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Show Picture",
+    "to": "home-edit",
+    "attrs": {
+     "wtoggle": "hands"
+    }
+   },
+   {
+    "label": "Show Model picks",
+    "to": "home-edit",
+    "attrs": {
+     "wtoggle": "models"
+    }
+   },
+   {
+    "label": "Show Live stats",
+    "to": "home-edit",
+    "attrs": {
+     "wtoggle": "stats"
+    }
+   },
+   {
+    "label": "Show Usage",
+    "to": "home-edit",
+    "attrs": {
+     "wtoggle": "usage"
+    }
+   },
+   {
+    "label": "Show GPUs",
+    "to": "home-edit",
+    "attrs": {
+     "wtoggle": "gpus"
+    }
+   }
+  ]
+ },
+ {
+  "id": "agent",
+  "title": "Agents and folder",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 2,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Pi 0.44.2 · Default",
+    "to": "agent",
+    "attrs": {
+     "agent": "Pi"
+    }
+   },
+   {
+    "label": "Update to 0.45.0",
+    "to": "agent",
+    "attrs": {
+     "upd": "Pi"
+    }
+   },
+   {
+    "label": "Claude Code 2.1.31",
+    "to": "agent",
+    "attrs": {
+     "agent": "Claude Code"
+    }
+   },
+   {
+    "label": "Codex 0.71.0",
+    "to": "agent",
+    "attrs": {
+     "agent": "Codex"
+    }
+   },
+   {
+    "label": "Update to 0.72.1",
+    "to": "agent",
+    "attrs": {
+     "upd": "Codex"
+    }
+   },
+   {
+    "label": "OpenCode 1.4.2",
+    "to": "agent",
+    "attrs": {
+     "agent": "OpenCode"
+    }
+   },
+   {
+    "label": "Oh My Pi 0.9.0",
+    "to": "agent",
+    "attrs": {
+     "agent": "Oh My Pi"
+    }
+   },
+   {
+    "label": "Hermes 2.3.1",
+    "to": "agent",
+    "attrs": {
+     "agent": "Hermes"
+    }
+   },
+   {
+    "label": "Update to 2.4.0",
+    "to": "agent",
+    "attrs": {
+     "upd": "Hermes"
+    }
+   },
+   {
+    "label": "Crush Not installed · 0.31.0 Install",
+    "to": "agent",
+    "attrs": {
+     "install": "Crush"
+    }
+   },
+   {
+    "label": "Grok Not installed · 1.2.0 Install",
+    "to": "agent",
+    "attrs": {
+     "install": "Grok"
+    }
+   },
+   {
+    "label": "GitHub Copilot Not installed · 1.6.3 Install",
+    "to": "agent",
+    "attrs": {
+     "install": "GitHub Copilot"
+    }
+   },
+   {
+    "label": "Ori Not installed · 0.3.1 Install",
+    "to": "agent",
+    "attrs": {
+     "install": "Ori"
+    }
+   },
+   {
+    "label": "Antigravity Not installed · 1.11.0 Install",
+    "to": "agent",
+    "attrs": {
+     "install": "Antigravity"
+    }
+   },
+   {
+    "label": "Update all (3)",
+    "to": "agent",
+    "attrs": {
+     "updall": "1"
+    }
+   }
+  ]
+ },
+ {
+  "id": "machines",
+  "title": "Machines",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 3,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "off",
+    "attrs": {}
+   },
+   {
+    "label": "pop-os 4× RTX PRO 6000 In use",
+    "to": "off",
+    "attrs": {
+     "use": "pop-os"
+    }
+   },
+   {
+    "label": "sero-omarchy Linux Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "sero-omarchy"
+    }
+   },
+   {
+    "label": "gpu-sandbox Linux Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "gpu-sandbox"
+    }
+   },
+   {
+    "label": "spark-2384 Linux Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "spark-2384"
+    }
+   },
+   {
+    "label": "spark-2822 Linux Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "spark-2822"
+    }
+   },
+   {
+    "label": "spark-557f Linux Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "spark-557f"
+    }
+   },
+   {
+    "label": "spark-de5c Linux Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "spark-de5c"
+    }
+   },
+   {
+    "label": "Sero’s MacBook Pro macOS Connect",
+    "to": "m-connect",
+    "attrs": {
+     "machine": "Sero’s MacBook Pro"
+    }
+   },
+   {
+    "label": "Sero’s Mac mini macOS Seen 8 days ago",
+    "to": "unreachable",
+    "attrs": {
+     "machine": "Sero’s Mac mini"
+    }
+   },
+   {
+    "label": "sero Linux Seen 28 days ago",
+    "to": "unreachable",
+    "attrs": {
+     "machine": "sero"
+    }
+   },
+   {
+    "label": "Add environment",
+    "to": "addmachine",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "addmachine",
+  "title": "Add an environment",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 4,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Add environment",
+    "to": "m-connect",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "advanced",
+  "title": "Settings, Advanced",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 0,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "off",
+    "attrs": {}
+   },
+   {
+    "label": "General",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Advanced",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "Models ›",
+    "to": "adv-models",
+    "attrs": {}
+   },
+   {
+    "label": "API endpoints ›",
+    "to": "endpoints",
+    "attrs": {}
+   },
+   {
+    "label": "Registry ›",
+    "to": "registry",
+    "attrs": {}
+   },
+   {
+    "label": "Hugging Face token ›",
+    "to": "hf-token",
+    "attrs": {}
+   },
+   {
+    "label": "Update to 0.9.3",
+    "to": "app-update",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "endpoints",
+  "title": "Advanced, endpoints",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 4,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "http://127.0.0.1:18701/v1 Copy",
+    "to": "endpoints",
+    "attrs": {
+     "copy": "1"
+    }
+   },
+   {
+    "label": "http://pop-os.tailnet.ts.net:18701/v1 Copy",
+    "to": "endpoints",
+    "attrs": {
+     "copy": "1"
+    }
+   },
+   {
+    "label": "sk-local-••••••3f9a Copy",
+    "to": "endpoints",
+    "attrs": {
+     "copy": "1"
+    }
+   }
+  ]
+ },
+ {
+  "id": "usage",
+  "title": "Usage",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 9,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "This run",
+    "to": "usage",
+    "attrs": {
+     "uspan": "run"
+    }
+   },
+   {
+    "label": "Today",
+    "to": "usage",
+    "attrs": {
+     "uspan": "today"
+    }
+   },
+   {
+    "label": "Month",
+    "to": "usage",
+    "attrs": {
+     "uspan": "month"
+    }
+   },
+   {
+    "label": "All time",
+    "to": "usage",
+    "attrs": {
+     "uspan": "all"
+    }
+   },
+   {
+    "label": "Days",
+    "to": "usage",
+    "attrs": {
+     "period": "days"
+    }
+   },
+   {
+    "label": "Weeks",
+    "to": "usage",
+    "attrs": {
+     "period": "weeks"
+    }
+   },
+   {
+    "label": "Months",
+    "to": "usage",
+    "attrs": {
+     "period": "months"
+    }
+   }
+  ]
+ },
+ {
+  "id": "logs",
+  "title": "Engine output",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 6,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "back",
+    "attrs": {}
+   },
+   {
+    "label": "Copy",
+    "to": "logs",
+    "attrs": {
+     "copy": "1"
+    }
+   }
+  ]
+ },
+ {
+  "id": "hf-token",
+  "title": "Advanced, Hugging Face token",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 8,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "Save",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "Remove token",
+    "to": "advanced",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "registry",
+  "title": "Advanced, registry",
+  "lane": "Advanced",
+  "row": 6,
+  "col": 7,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "advanced",
+    "attrs": {}
+   },
+   {
+    "label": "Check for updates",
+    "to": "registry",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "m-connect",
+  "title": "Connecting",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 5,
+  "next": [
+   {
+    "label": "It has Local AI",
+    "to": "m-linked",
+    "attr": "data-link=\"1\""
+   },
+   {
+    "label": "No Local AI yet",
+    "to": "m-install",
+    "attr": ""
+   },
+   {
+    "label": "No answer",
+    "to": "unreachable",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "machines",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "m-install",
+  "title": "Machine has no Local AI",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 6,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Install Local AI",
+    "to": "m-installing",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "machines",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "m-installing",
+  "title": "Installing",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 7,
+  "next": [
+   {
+    "label": "Done",
+    "to": "m-linked",
+    "attr": "data-link=\"1\""
+   },
+   {
+    "label": "SSH refused",
+    "to": "unreachable",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "machines",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "m-linked",
+  "title": "Connected",
+  "lane": "Details and settings",
+  "row": 2,
+  "col": 8,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Use this machine",
+    "to": "off",
+    "attrs": {
+     "use": "sero-omarchy"
+    }
+   },
+   {
+    "label": "Back",
+    "to": "machines",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "room",
+  "title": "Too big for the GPU",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 0,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Try Fast",
+    "to": "off",
+    "attrs": {
+     "tier": "fast"
+    }
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "quit",
+  "title": "Engine crashed",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 1,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "waking",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "never",
+  "title": "Never finished loading",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 2,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "waking",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "noengine",
+  "title": "Engine download failed",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 3,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "waking",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "locked",
+  "title": "Model needs a token",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 4,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Add token",
+    "to": "hf-token",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "space",
+  "title": "Disk is full",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 5,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Choose folder",
+    "to": "agent",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "damaged",
+  "title": "Bad download",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 6,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Download again",
+    "to": "dl",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "noconn",
+  "title": "Internet dropped",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 7,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "waking",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "noreply",
+  "title": "Model went quiet",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 8,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Restart",
+    "to": "waking",
+    "attrs": {}
+   },
+   {
+    "label": "Stop",
+    "to": "sleeping",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "slow",
+  "title": "Slower than usual",
+  "lane": "When something fails",
+  "row": 3,
+  "col": 9,
+  "next": [
+   {
+    "label": "It loaded",
+    "to": "awake",
+    "attr": ""
+   },
+   {
+    "label": "Gave up",
+    "to": "never",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "nogpu",
+  "title": "No GPU on this computer",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 0,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Add machine",
+    "to": "addmachine",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "needsdocker",
+  "title": "Docker not installed",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 1,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Install Docker",
+    "to": "dockeroff",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "dockeroff",
+  "title": "Docker not running",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 2,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Turn on",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "nothing",
+  "title": "No model for this GPU",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 3,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Add machine",
+    "to": "addmachine",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "busy",
+  "title": "Another program has the GPU",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 4,
+  "next": [
+   {
+    "label": "It finished",
+    "to": "off",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "needs",
+  "title": "Not enough free GPUs",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 5,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Switch to this model",
+    "to": "waking",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "cantconnect",
+  "title": "App lost the server",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 6,
+  "next": [
+   {
+    "label": "It came back",
+    "to": "off",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "unreachable",
+  "title": "Machine offline",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 7,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "m-connect",
+    "attrs": {}
+   },
+   {
+    "label": "This computer",
+    "to": "off",
+    "attrs": {
+     "use": "pop-os"
+    }
+   }
+  ]
+ },
+ {
+  "id": "key",
+  "title": "Opened from another device",
+  "lane": "When it can’t start",
+  "row": 4,
+  "col": 8,
+  "next": [
+   {
+    "label": "Wrong key",
+    "to": "key",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Connect",
+    "to": "off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-get",
+  "title": "Phone, first time",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 0,
+  "next": [
+   {
+    "label": "On mobile data",
+    "to": "p-data",
+    "attr": ""
+   },
+   {
+    "label": "No room",
+    "to": "p-space",
+    "attr": ""
+   },
+   {
+    "label": "Phone too small",
+    "to": "p-small",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Download 1.1 GB",
+    "to": "p-dl",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-data",
+  "title": "Phone, mobile data",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 1,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Wait",
+    "to": "p-get",
+    "attrs": {}
+   },
+   {
+    "label": "Download anyway",
+    "to": "p-dl",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-dl",
+  "title": "Phone, downloading",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 2,
+  "next": [
+   {
+    "label": "Finished",
+    "to": "p-off",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "p-get",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-off",
+  "title": "Phone, off",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 3,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Start",
+    "to": "p-waking",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-waking",
+  "title": "Phone, starting",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 4,
+  "next": [
+   {
+    "label": "It loaded",
+    "to": "p-ready",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Cancel",
+    "to": "p-off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-ready",
+  "title": "Phone, running",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 5,
+  "next": [
+   {
+    "label": "Phone got hot",
+    "to": "p-hot",
+    "attr": ""
+   },
+   {
+    "label": "Phone closed it",
+    "to": "p-paused",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "41K Lifetime tokens",
+    "to": "usage",
+    "attrs": {}
+   },
+   {
+    "label": "Chat",
+    "to": "p-chat",
+    "attrs": {}
+   },
+   {
+    "label": "Stop",
+    "to": "p-off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-chat",
+  "title": "Phone, chat",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 6,
+  "next": [],
+  "controls": [
+   {
+    "label": "Close",
+    "to": "p-ready",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-hot",
+  "title": "Phone, too hot",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 7,
+  "next": [
+   {
+    "label": "Cooled off",
+    "to": "p-ready",
+    "attr": ""
+   }
+  ],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "41K Lifetime tokens",
+    "to": "usage",
+    "attrs": {}
+   },
+   {
+    "label": "Chat",
+    "to": "p-chat",
+    "attrs": {}
+   },
+   {
+    "label": "Stop",
+    "to": "p-off",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-paused",
+  "title": "Phone, closed by the system",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 8,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Resume",
+    "to": "p-waking",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-space",
+  "title": "Phone, full",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 9,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Engine output",
+    "to": "logs",
+    "attrs": {}
+   },
+   {
+    "label": "Try again",
+    "to": "p-get",
+    "attrs": {}
+   },
+   {
+    "label": "Back",
+    "to": "p-get",
+    "attrs": {}
+   }
+  ]
+ },
+ {
+  "id": "p-small",
+  "title": "Phone, can’t run it",
+  "lane": "On a phone",
+  "row": 5,
+  "col": 10,
+  "next": [],
+  "controls": [
+   {
+    "label": "Machine: pop-os",
+    "to": "machines",
+    "attrs": {}
+   },
+   {
+    "label": "Settings",
+    "to": "settings",
+    "attrs": {}
+   },
+   {
+    "label": "Use pop-os",
+    "to": "off",
+    "attrs": {
+     "use": "pop-os"
+    }
+   }
+  ]
+ }
+]

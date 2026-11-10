@@ -1,0 +1,678 @@
+<title>Local AI Fullscreen</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+/* The Local AI brand on a pan-and-zoom board: charcoal, hairlines, mono for words and labels, Geist for sentences, the dot hands edge to edge. */
+:root { --ground: #101010; --bg: #161616; --surface: #1c1c1c; --line: #2e2e2e; --text: #ecEAE6; --muted: #8c8a86; --accent: #f2efe9; --red: #dc143c; --ui: Geist, system-ui, sans-serif; --display: "Instrument Serif", Georgia, serif; --dw: 400; --ds: italic; --dl: -.02em; --dsize: 38px; --dst: 100%; color-scheme: dark; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--ground); color: var(--text); font: 14px/1.45 var(--ui); overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+#view { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+#view.drag { cursor: grabbing; }
+#board { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+#board.ease { transition: transform .45s cubic-bezier(.2,.7,.2,1); }
+.frame { position: absolute; width: 260px; }
+.title, .label { font: 400 12px/1.3 var(--ui); color: var(--muted); }
+.title { height: 26px; }
+.rowname { position: absolute; font: var(--ds) var(--dw) 20px/1 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); white-space: nowrap; }
+.arrow { position: absolute; color: var(--muted); font: 400 18px var(--ui); }
+.screen { width: 260px; height: 520px; box-sizing: border-box; padding: 10px 14px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; display: flex; flex-direction: column; gap: 10px; cursor: default; overflow: hidden; }
+.cur .screen { border-color: var(--accent); }
+.play .frame:not(.cur), .play .rowname, .play .arrow, .play #brand { visibility: hidden; }
+
+.top { display: flex; justify-content: space-between; align-items: center; min-height: 32px; margin-right: -8px; }
+.top .mark { font: 500 13px var(--ui); letter-spacing: -.03em; }
+.top .mark { width: auto; height: 32px; color: var(--text); }
+.top button:not(.mark) { width: 40px; height: 32px; color: var(--muted); font: 400 15px var(--ui); }
+canvas.art { display: block; width: 260px; height: 128px; margin: 0 -14px; flex: none; }
+.word { font: var(--ds) var(--dw) var(--dsize)/1.05 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); text-align: center; text-wrap: balance; }
+.line { font: 400 13px/1.4 var(--ui); color: var(--muted); text-align: center; min-height: 20px; font-variant-numeric: tabular-nums; }
+.sp { flex: 1; }
+.home { display: flex; flex-direction: column; gap: 10px; }
+.scroll { scrollbar-width: none; overflow-x: hidden; }
+.scroll::-webkit-scrollbar { display: none; }
+.scroll.home { margin: 0 -14px; padding: 0 14px; }
+.scroll.home > * { flex: none; }
+.ic { display: inline-flex; color: var(--muted); }
+.icn { font: 400 12px var(--ui); color: var(--muted); margin-left: 2px; font-variant-numeric: tabular-nums; }
+.ics { display: inline-flex; align-items: center; gap: 7px; flex: none; }
+.mrow { border-radius: 8px; }
+.mrow.on { background: var(--surface); }
+.mhead { display: flex; align-items: center; }
+.mpick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 42px; padding: 0 10px; text-align: left; font: 500 14px var(--ui); color: var(--muted); }
+.mrow.on .mpick { color: var(--text); }
+.mpick small { font: 400 12px var(--ui); color: var(--muted); }
+.plus { width: 40px; height: 42px; font: 400 16px var(--ui); color: var(--muted); }
+.mdetail { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.kv.small .label, .kv.small b { padding: 6px 0; font-size: 12px; }
+.kv.small b { font-weight: 500; }
+.arow { border-bottom: 1px solid var(--line); }
+.ahead { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 52px; text-align: left; }
+.at { min-width: 0; }
+.at b { display: block; font: 500 14px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.at small { display: block; margin-top: 1px; font: 400 12px var(--ui); color: var(--muted); }
+.arow .mdetail { padding: 0 0 12px; }
+.editrow { display: flex; align-items: center; justify-content: space-between; min-height: 44px; border-bottom: 1px solid var(--line); font: 400 14px var(--ui); }
+.editrow div { display: flex; }
+.editrow button { width: 36px; height: 40px; color: var(--muted); font: 400 15px var(--ui); }
+.editrow button[disabled] { opacity: .3; cursor: default; }
+.wtitle { display: flex; justify-content: space-between; font: 500 13px var(--ui); }
+.wtitle span { color: var(--muted); font-weight: 400; font-size: 12px; }
+.wbtn { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; }
+.minical { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-template-columns: repeat(12, 1fr); gap: 2px; }
+.minical i { display: block; aspect-ratio: 1; border-radius: 2px; }
+.gpu { display: grid; grid-template-columns: 38px 1fr 62px; gap: 8px; align-items: center; font: 400 12px var(--ui); color: var(--muted); font-variant-numeric: tabular-nums; }
+.gpu i { display: block; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.gpu i u { display: block; height: 100%; background: var(--text); text-decoration: none; }
+.gpu span:last-child { text-align: right; }
+.hero b { display: block; font: 600 24px/1.1 var(--ui); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.hero span { display: block; margin-top: 3px; font: 400 12px var(--ui); color: var(--muted); }
+.cal { display: grid; gap: 2px; }
+.cal.days { grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-template-columns: repeat(var(--cols), 1fr); }
+.cal.weeks { grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal button, .cal i { display: block; aspect-ratio: 1; border-radius: 2px; }
+.cal.weeks button { border-radius: 4px; }
+.cal button.sel { outline: 1px solid var(--text); outline-offset: 0; }
+.cal.months { grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.cal.months button { aspect-ratio: auto; height: 58px; padding: 8px; border-radius: 6px; text-align: left; font: 400 12px var(--ui); }
+.cal.months b { display: block; margin-top: 3px; font: 600 14px var(--ui); font-variant-numeric: tabular-nums; }
+.cal-months { display: flex; justify-content: space-between; font: 400 11px var(--ui); color: var(--muted); }
+.readout { display: flex; flex-direction: column; gap: 1px; font: 400 12px var(--ui); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { font-weight: 500; color: var(--text); }
+.legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; font: 400 11px var(--ui); color: var(--muted); }
+.legend i { width: 9px; height: 9px; border-radius: 2px; }
+.legend span { margin: 0 3px; }
+.linkstat { display: block; width: 100%; text-align: left; }
+.composer { display: flex; align-items: center; gap: 6px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; }
+.trig { flex: 1; min-width: 0; height: 36px; padding: 0 8px; text-align: left; border-radius: 7px; font: 500 14px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trig:hover { background: var(--surface); }
+.trig small { margin-left: 6px; font: 400 12px var(--ui); color: var(--muted); }
+.gosm { height: 36px; padding: 0 16px; border-radius: 7px; background: var(--accent); color: #12120f; font: 500 14px var(--ui); white-space: nowrap; }
+.pop { position: absolute; left: 14px; right: 14px; bottom: 66px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+.pop button { display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; padding: 0 10px; border-radius: 6px; text-align: left; font: 500 14px var(--ui); }
+.pop button:hover { background: #262523; }
+.pop small { flex: 1; font: 400 12px var(--ui); color: var(--muted); }
+.pop u { text-decoration: none; font-size: 13px; }
+.pop .more { font-weight: 400; color: var(--muted); border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; margin-top: 4px; }
+.mark i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 2px; }
+.starts { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+.starts button { display: flex; justify-content: space-between; align-items: center; height: 68px; padding: 0 16px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line); }
+.starts b { font: var(--ds) var(--dw) 26px/1 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); }
+.starts small { font: 400 13px var(--ui); color: var(--muted); }
+.starts button.main { background: var(--accent); color: #12120f; box-shadow: none; }
+.starts button.main small { color: #55524c; }
+.starts .more { height: 36px; box-shadow: none; justify-content: center; color: var(--muted); font: 400 13px var(--ui); }
+.slide-pick { position: relative; height: 52px; margin: 0 -14px; overflow: hidden; }
+.slide-pick div { position: absolute; left: 50%; top: 0; display: flex; }
+.slide-pick button { width: 116px; height: 52px; color: var(--muted); font: var(--ds) var(--dw) 22px/1 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); }
+.slide-pick button.on { color: var(--text); font-size: 32px; }
+.quiet { display: block; margin: -2px auto 0; min-height: 36px; color: var(--muted); font: 400 14px var(--ui); }
+.sheet-wrap { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 14px 14px; background: var(--surface); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; display: flex; flex-direction: column; gap: 2px; }
+.sheet-wrap .grab { width: 34px; height: 3px; border-radius: 2px; background: var(--line); margin: 0 auto 10px; }
+.sheet-row { display: flex; justify-content: space-between; align-items: center; width: 100%; height: 54px; }
+.sheet-row b { font: var(--ds) var(--dw) 24px/1 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); color: var(--muted); }
+.sheet-row.on b { color: var(--text); }
+.sheet-row small { font: 400 13px var(--ui); color: var(--muted); }
+.dimmed { opacity: .25; pointer-events: none; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.screen { position: relative; }
+.pk-list button { display: flex; justify-content: space-between; align-items: baseline; width: 100%; padding: 7px 0; color: var(--muted); transition: color .2s; }
+.pk-list button.on { color: var(--text); }
+.pk-list b { font: var(--ds) var(--dw) 30px/1.1 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); }
+.pk-list small { font: 400 13px var(--ui); }
+.tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+.tabs button { height: 44px; color: var(--muted); font: 500 14px var(--ui); }
+.tabs button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--text); }
+.tabs.two { display: flex; flex: none; width: 100%; margin: 0 0 4px; }
+.tabs.two button { flex: 1; }
+.arrows { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; }
+.arrows button { height: 64px; font: 400 26px var(--ui); color: var(--muted); }
+.arrows div { text-align: center; }
+.arrows .word { font-size: calc(var(--dsize) * .86); }
+.seg { display: flex; gap: 8px; }
+.seg span { flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
+.seg span.on { color: var(--text); border-color: var(--text); }
+.slide { height: 28px; position: relative; }
+.slide::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 1px; background: var(--line); }
+.slide i { position: absolute; top: 7px; left: 34%; width: 14px; height: 14px; border-radius: 50%; background: var(--text); }
+.word.wd { display: block; width: 100%; }
+.wd .ch { font: 400 18px var(--ui); color: var(--muted); margin-left: 6px; vertical-align: 6px; font-style: normal; }
+.dd { display: flex; justify-content: space-between; align-items: center; width: 100%; height: 44px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; font: 500 14px var(--ui); }
+.dd span { color: var(--muted); }
+.link { display: block; margin: -4px auto 0; min-height: 32px; color: var(--muted); font: 400 13px var(--ui); text-decoration: underline; text-underline-offset: 3px; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; margin-right: -6px; padding-right: 6px; }
+.item.tall { min-height: 52px; }
+.item span b { display: block; font-weight: 500; }
+.item span small { display: block; margin-top: 1px; }
+.group { margin: 12px 0 4px; }
+.group:first-child { margin-top: 0; }
+.stats.twoup { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bar { height: 1px; background: var(--line); }
+.bar i { display: block; height: 1px; background: var(--accent); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; }
+.stat { border-top: 1px solid var(--line); padding-top: 8px; }
+.stat b { display: block; font: 600 18px/1 var(--ui); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.stat.live b { color: var(--accent); }
+.stat .label { display: block; margin-top: 5px; }
+.row { display: grid; grid-template-columns: 8px 76px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 44px; border-bottom: 1px solid var(--line); text-align: left; font: 400 13px var(--ui); }
+.row u { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--muted); box-sizing: border-box; text-decoration: none; }
+.row.on u { background: var(--accent); border-color: var(--accent); }
+.row.on { font-weight: 500; }
+.row em { font: 400 13px var(--ui); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.row.on span { color: var(--text); }
+.item { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 44px; border-bottom: 1px solid var(--line); text-align: left; font: 400 14px var(--ui); }
+.item small { color: var(--muted); font: 400 12px var(--ui); }
+.item[disabled] { color: var(--muted); cursor: default; }
+.btn { display: block; width: 100%; height: 40px; border-radius: 8px; font: 500 14px var(--ui); text-align: center; box-shadow: inset 0 0 0 1px var(--line); }
+.btn:hover:not([disabled]) { background: var(--surface); }
+.go { background: var(--accent); color: #12120f; box-shadow: none; font-weight: 600; }
+.btn.go:hover:not([disabled]) { background: var(--accent); filter: brightness(1.08); }
+.neg { box-shadow: inset 0 0 0 1px var(--red); }
+.btn[disabled] { color: var(--muted); cursor: default; }
+.two { display: flex; gap: 8px; }
+.two .btn:first-child { flex: 1; }
+.two .btn:last-child { width: 44px; flex: none; color: var(--muted); }
+.head { font: var(--ds) var(--dw) 20px/1.2 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); }
+.kv { display: grid; grid-template-columns: 1fr auto; align-items: baseline; }
+.kv .label, .kv b { border-bottom: 1px solid var(--line); padding: 11px 0; }
+.kv b { font: 500 14px var(--ui); text-align: right; font-variant-numeric: tabular-nums; }
+.box { font: 400 12px/1.6 var(--ui); border: 1px solid var(--line); border-radius: 4px; padding: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.field { height: 44px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 4px; padding: 0 12px; display: flex; align-items: center; color: var(--muted); font: 400 13px var(--ui); }
+.bubble { padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; max-width: 85%; font-size: 13px; }
+.bubble.me { align-self: flex-end; }
+.next { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.next button { min-height: 34px; padding: 0 10px; border: 1px dashed #5e5c59; border-radius: 4px; font: 400 11px var(--ui); color: var(--muted); }
+.next button:hover { color: var(--text); border-color: var(--text); }
+#tools { position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; z-index: 5; }
+#tools button { min-width: 44px; height: 44px; padding: 0 12px; font: 400 12px var(--ui); white-space: nowrap; }
+#tools button + button { border-left: 1px solid var(--line); }
+#tools button[aria-pressed="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--text); }
+#tools .th { color: var(--muted); }
+#tools .lab { display: flex; align-items: center; padding: 0 2px 0 10px; font: 400 11px var(--ui); color: var(--muted); }
+#brand { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); top: calc(14px + env(safe-area-inset-top, 0px)); font: 500 18px var(--ui); letter-spacing: -.03em; z-index: 5; pointer-events: none; }
+@media (max-width: 520px) { #tools button { padding: 0 6px; min-width: 32px; } #out, #in, #canvas, #fit { display: none; } }
+@media (prefers-reduced-motion: reduce) { #board.ease { transition: none; } }
+</style>
+<div id="view"><div id="board"></div></div>
+<div id="brand">Local AI</div>
+<div id="tools">
+  <button id="back" aria-label="Back to the previous screen">←</button>
+  <button id="canvas">Canvas</button>
+  <button id="play">Click through</button>
+  <button id="out" aria-label="Zoom out">−</button>
+  <button id="in" aria-label="Zoom in">+</button>
+  <button id="fit">All</button>
+</div>
+<script>
+const DOTS = __HANDS__;
+const RECIPES = __RECIPES__;
+const adam = new Image(), god = new Image();
+adam.src = 'data:image/webp;base64,__ADAM__'; god.src = 'data:image/webp;base64,__GOD__';
+const THEMES = { A: { accent: '#f2efe9', art: 'fresco', model: true, labels: { off: 'Off', start: 'Starting', run: 'Running' } } };
+const FONTS = {
+  1: { display: '"Hanken Grotesk", system-ui, sans-serif', ds: 'normal', dw: 600, dsize: '24px', dl: '-.02em', dst: '100%', ui: '"Hanken Grotesk", system-ui, sans-serif' },
+  2: { display: 'Archivo, system-ui, sans-serif', ds: 'normal', dw: 600, dsize: '30px', dl: '-.02em', dst: '125%', ui: 'Archivo, system-ui, sans-serif' },
+  3: { display: '"Cormorant Garamond", Georgia, serif', ds: 'normal', dw: 500, dsize: '48px', dl: '-.015em', dst: '100%', ui: '"Hanken Grotesk", system-ui, sans-serif' },
+};
+let theme = 'A', font = '1', picking = 'start';
+const ST = (key, model, detail = '', keep = true) => { const t = THEMES[theme], l = t.labels[key]; return t.model ? [model, detail ? `${l} · ${detail}` : l] : [l, keep ? (detail ? `${model} · ${detail}` : model) : detail]; };
+const T = {
+  fast: { n: 'Fast', m: 'Nemotron 3.5', ai: 13, gb: '22 GB', now: 298, pre: 3900, speeds: [['C1', '357']] },
+  balanced: { n: 'Balanced', m: 'Flash-Next', ai: 40, gb: '63 GB', now: 141, pre: 2400, speeds: [['C1', '165'], ['C2', '290']] },
+  smart: { n: 'Smart', m: 'GLM-5.3', ai: 45, gb: '316 GB', now: 69, pre: 1300, speeds: [['C1', '81']] },
+};
+let tier = 'balanced';
+const m = () => T[tier];
+const STEP_X = 340, STEP_Y = 720, W = 260, H = 620;
+const b = (label, go, cls = '', extra = '') => `<button class="btn ${cls}" data-go="${go}" ${extra}>${label}</button>`;
+const off = (label) => `<button class="btn" disabled>${label}</button>`;
+const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { return null; } return v; };
+const BGS = [['gray', 'The Creation of Adam', 'Grayscale'], ['color', 'The Creation of Adam', 'In colour'], ['own', 'Your own picture', 'Choose a file'], ['none', 'None', 'Plain dark']];
+let ownPic = store('la-bg-own'), bg = store('la-bg') || 'gray';
+if (!BGS.some((x) => x[0] === bg) || (bg === 'own' && !ownPic)) bg = 'gray';
+const bgFrame = () => `${close('settings')}<div class="head">Background</div><div class="scroll">${BGS.map(([k, name, note]) => `<button class="item" data-go="background" data-bg="${k}"><span class="bgrow"><i class="bgthumb bg-${k}"></i><span><b>${name}</b><small>${k === 'own' && ownPic ? 'Choose another' : note}</small></span></span><small>${k === bg ? 'In use' : ''}</small></button>`).join('')}</div>`;
+let full = false, untested = null, gpuHere = 'this GPU';
+const others = () => [...linked].filter((n) => n !== here);
+const noneSay = (id) => (id === 'nogpu' ? ['No GPU here', 'This computer can’t run models'] : ['Nothing fits', `No tested models for ${gpuHere}`]);
+const useElsewhere = (o) => (o ? `${b(`Use ${o}`, 'off', 'go', `data-use="${o}"`)}${b('Add machine', 'addmachine')}` : b('Add machine', 'addmachine', 'go'));
+const canFull = () => innerWidth >= 640;
+const menuIcon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+const fsIcon = (out) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${out ? '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>' : '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'}</svg>`;
+const fsBtn = () => (canFull() ? `<button data-fs aria-label="${full ? 'Exit fullscreen' : 'Fullscreen'}" title="${full ? 'Exit fullscreen' : 'Fullscreen'}">${fsIcon(full)}</button>` : '');
+const menu = () => `<div class="top"><button class="mark chip" data-go="machines" aria-label="Machine: ${here}"><i></i>${here}</button><span class="topr chip">${fsBtn()}<button data-go="settings" aria-label="Settings" title="Settings">${menuIcon}</button></span></div>`;
+const closeIcon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+const close = (go) => `<div class="top"><span class="mark">Local AI</span><button class="x" data-go="${go}" aria-label="Close">${closeIcon}</button></div>`;
+const art = (pose, p = 0, rate = 0) => `<canvas class="art" data-pose="${pose}" data-p="${p}" data-rate="${rate}" aria-hidden="true"></canvas>`;
+const status = (pose, word, line = '', p = 0, rate = 0, drop = false) => `${art(pose, p, rate)}${drop && THEMES[theme].model ? `<button class="word wd" data-go="picker">${word}<span class="ch">⌄</span></button>` : `<div class="word">${word}</div>`}<div class="line">${line}</div>`;
+const bar = (pct) => `<div class="bar"><i style="width:${pct}%"></i></div>`;
+const stat = (label, value, live) => `<div class="stat${live ? ' live' : ''}"><b ${live ? `data-now="${value}"` : ''}>${value}</b><span class="label">${label}</span></div>`;
+const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}K` : n >= 1000 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n)));
+const cell = (label, value, attr = '', live = false) => `<div class="stat${live ? ' live' : ''}"><b ${attr}>${fmt(value)}</b><span class="label">${label}</span></div>`;
+const running = (decode, prefill, session, life) => `<div class="stats twoup">${cell('Decode tok/s', decode, `data-now="${decode}"`, true)}${cell('Prefill tok/s', prefill, `data-now="${prefill}"`)}${cell('Session tokens', session, `data-grow="${session}" data-by="${decode}"`)}<button class="linkstat" data-go="usage">${cell('Lifetime tokens', life, `data-grow="${life}" data-by="${decode}"`)}</button></div>`;
+const USAGE = __USAGE__;
+const LIFETIME = USAGE.reduce((n, d) => n + d[1] + d[2], 0);
+const LEVELS = ['#232220', '#45433f', '#6f6c66', '#9c9891', '#c8c4bc', '#f2efe9'];
+let period = 'days';
+const day = (iso) => new Date(`${iso}T00:00:00Z`);
+const say = (d, o) => d.toLocaleDateString('en-US', { timeZone: 'UTC', ...o });
+const plus = (d, n) => new Date(d.getTime() + n * 864e5);
+const monday = (d) => plus(d, -((d.getUTCDay() + 6) % 7));
+// Every period is a list of { label, tokens, requests }; a missing day is a real zero, not a gap.
+function periods() {
+  const known = new Map(USAGE.map(([d, read, wrote, req]) => [d, { tokens: read + wrote, requests: req }]));
+  const first = day(USAGE[0][0]), last = day(USAGE[USAGE.length - 1][0]);
+  const all = [];
+  for (let d = first; d <= last; d = plus(d, 1)) all.push({ d, ...(known.get(d.toISOString().slice(0, 10)) || { tokens: 0, requests: 0 }) });
+  if (period === 'days') return all.map((x) => ({ ...x, label: say(x.d, { month: 'short', day: 'numeric' }) }));
+  const group = new Map();
+  for (const x of all) {
+    const key = period === 'weeks' ? monday(x.d).getTime() : Date.UTC(x.d.getUTCFullYear(), x.d.getUTCMonth(), 1);
+    const g = group.get(key) || { d: new Date(key), tokens: 0, requests: 0 };
+    g.tokens += x.tokens; g.requests += x.requests;
+    group.set(key, g);
+  }
+  return [...group.values()].map((g) => ({ ...g, label: period === 'weeks' ? `Week of ${say(g.d, { month: 'short', day: 'numeric' })}` : say(g.d, { month: 'long' }) }));
+}
+// Usage is very uneven, so shades are quantiles of the active periods rather than a straight scale.
+function levels(list) {
+  const on = list.map((x) => x.tokens).filter(Boolean).sort((a, b) => a - b);
+  const cuts = [0.25, 0.5, 0.75, 0.9].map((q) => on[Math.floor(q * on.length)]);
+  return (v) => (v ? 1 + cuts.filter((c) => v >= c).length : 0);
+}
+// Sample split of each day's tokens across the models in use at the time (the server will record the real one per request).
+const MIX = [['Qwen3.8-27B', '2026-05-14', 3], ['Gemma 4 26B A4B', '2026-06-20', 1], ['Nemotron 3.5', '2026-07-28', 2], ['Flash-Next', '2026-08-30', 5], ['GLM-5.3', '2026-09-24', 3]];
+const USPANS = [['run', 'This run'], ['today', 'Today'], ['month', 'Month'], ['all', 'All time']];
+const HOURS = [1, 1, 0, 0, 0, 0, 1, 2, 4, 7, 9, 10, 8, 9, 11, 12, 10];
+let uspan = 'all';
+const split = (iso, tokens, into) => { const on = MIX.filter((x) => x[1] <= iso), w = on.reduce((n, x) => n + x[2], 0); for (const [n, , k] of on) into.set(n, (into.get(n) || 0) + tokens * k / w); };
+function usageData() {
+  const last = USAGE[USAGE.length - 1], month = last[0].slice(0, 7), by = new Map();
+  const sum = (list) => list.reduce((a, [, r, w, q]) => ({ tokens: a.tokens + r + w, wrote: a.wrote + w, requests: a.requests + q }), { tokens: 0, wrote: 0, requests: 0 });
+  const cumul = (list) => { let n = 0; return list.map(([iso, r, w]) => ({ label: say(day(iso), { month: 'short', day: 'numeric' }), v: (n += r + w) })); };
+  if (uspan === 'run') {
+    const t = 18240, pts = Array.from({ length: 15 }, (_, i) => ({ label: `${i} min`, v: Math.round(t * (i / 14) ** 1.15) }));
+    by.set(m().m, t);
+    return { ...{ tokens: t, wrote: 2510, requests: 14 }, sub: `${m().m} · running for 14 min`, points: pts, by };
+  }
+  if (uspan === 'today') {
+    const tot = last[1] + last[2], all = HOURS.reduce((a, b) => a + b, 0); let n = 0;
+    const pts = HOURS.map((h, i) => ({ label: `${String(i).padStart(2, '0')}:00`, v: Math.round((n += h) / all * tot) }));
+    split(last[0], tot, by);
+    return { ...sum([last]), sub: say(day(last[0]), { weekday: 'long', month: 'short', day: 'numeric' }), points: pts, by };
+  }
+  const list = uspan === 'month' ? USAGE.filter((d) => d[0].startsWith(month)) : USAGE;
+  for (const [iso, r, w] of list) split(iso, r + w, by);
+  return { ...sum(list), sub: uspan === 'month' ? say(day(last[0]), { month: 'long', year: 'numeric' }) : `Since ${say(day(USAGE[0][0]), { month: 'short', day: 'numeric' })}`, points: cumul(list), by };
+}
+function growth(points) {
+  const W = 232, H = 84, top = points[points.length - 1].v || 1, n = points.length - 1 || 1;
+  const xy = points.map((p, i) => [(i / n) * W, H - 2 - (p.v / top) * (H - 6)]);
+  const line = xy.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const enc = encodeURIComponent(JSON.stringify(points.map((p) => [p.label, p.v])));
+  return `<div class="growth" data-points="${enc}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Tokens served over time, rising to ${fmt(top)}"><line class="gbase" x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}"/><polygon class="garea" points="0,${H - 1} ${line} ${W},${H - 1}"/><polyline class="gline" points="${line}"/><line class="gcross" x1="${W}" y1="0" x2="${W}" y2="${H}"/></svg><div class="gaxis"><span>${points[0].label}</span><span>${points[points.length - 1].label}</span></div><div class="readout" data-gread><b>${points[points.length - 1].label}</b><span>${fmt(top)} tokens so far</span></div></div>`;
+}
+function usageBody() {
+  const u = usageData(), total = [...u.by.values()].reduce((a, b) => a + b, 0) || 1;
+  const models = [...u.by].sort((a, b) => b[1] - a[1]).map(([n, v]) => `<div class="umodel"><span>${n}</span><b>${fmt(v)}</b><span>${Math.round(v / total * 100)}%</span><i><u style="width:${(v / total * 100).toFixed(1)}%"></u></i></div>`).join('');
+  return `<div class="ugrid"><section class="usec"><div class="useg" role="tablist">${USPANS.map(([k, l]) => `<button role="tab" aria-selected="${k === uspan}" class="${k === uspan ? 'on' : ''}" data-go="usage" data-uspan="${k}">${l}</button>`).join('')}</div><div class="hero"><b>${fmt(u.tokens)}</b><span>tokens · ${u.sub}</span></div><div class="umeta"><span><b>${fmt(u.wrote)}</b> generated</span><span><b>${u.requests.toLocaleString('en-US')}</b> requests</span></div><div class="label">Growth</div>${growth(u.points)}<div class="label">By model</div><div class="umodels">${models}</div></section><section class="usec"><div class="label">Activity</div><div class="tabs">${[['days', 'Days'], ['weeks', 'Weeks'], ['months', 'Months']].map(([k, l]) => `<button class="${k === period ? 'on' : ''}" data-go="usage" data-period="${k}">${l}</button>`).join('')}</div>${calendar()}<div class="legend"><span>Less</span>${LEVELS.map((c) => `<i style="background:${c}"></i>`).join('')}<span>More</span></div></section></div>`;
+}
+const readout = (x) => `<b>${x.label}</b><span>${fmt(x.tokens)} tokens · ${x.requests.toLocaleString('en-US')} requests</span>`;
+function calendar() {
+  const list = periods(), level = levels(list), last = list.length - 1;
+  const data = (x, i) => `data-cell="${encodeURIComponent(readout(x))}" aria-label="${x.label}: ${fmt(x.tokens)} tokens" class="${i === last ? 'sel' : ''}"`;
+  let grid;
+  if (period === 'days') {
+    const lead = (list[0].d.getUTCDay() + 6) % 7, cols = Math.ceil((lead + list.length) / 7);
+    const seen = new Set();
+    const marks = list.filter((x) => { const k = x.d.getUTCMonth(); if (seen.has(k)) return false; seen.add(k); return true; }).filter((_, i) => i % 2 === 0).map((x) => `<span>${say(x.d, { month: 'short' })}</span>`).join('');
+    grid = `<div class="cal-months">${marks}</div><div class="cal days" style="--cols:${cols}">${'<i></i>'.repeat(lead)}${list.map((x, i) => `<button ${data(x, i)} style="background:${LEVELS[level(x.tokens)]}"></button>`).join('')}</div>`;
+  } else if (period === 'weeks') {
+    grid = `<div class="cal weeks">${list.map((x, i) => `<button ${data(x, i)} style="background:${LEVELS[level(x.tokens)]}"></button>`).join('')}</div>`;
+  } else {
+    grid = `<div class="cal months">${list.map((x, i) => { const l = level(x.tokens); return `<button ${data(x, i)} style="background:${LEVELS[l]};color:${l >= 3 ? '#12120f' : 'inherit'}">${say(x.d, { month: 'short' })}<b>${fmt(x.tokens)}</b></button>`; }).join('')}</div>`;
+  }
+  return `${grid}<div class="readout" data-readout>${readout(list[last])}</div>`;
+}
+const I = {
+  vision: ['<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>', 'Vision'],
+  think: ['<path d="M9 18h6M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/>', 'Thinking'],
+  tools: ['<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>', 'Tool calls'],
+  kv: ['<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>', 'KV cache'],
+  gpu: ['<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M9 2v2M15 20v2M9 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/>', 'GPUs'],
+};
+const icon = (k, extra = '') => `<span class="ic" role="img" aria-label="${I[k][1]}${extra}" title="${I[k][1]}${extra}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k][0]}</svg></span>`;
+const caps = (r) => [r.vision && icon('vision'), r.think && icon('think'), r.tools && icon('tools'), r.kv && icon('kv', `: ${r.kv}`), r.cards > 1 && `<span class="ics" style="gap:0">${icon('gpu', `: ${r.cards}`)}<span class="icn">${r.cards}</span></span>`].filter(Boolean).join('');
+const recOf = { fast: RECIPES.find((r) => r.name.startsWith('Nemotron')), balanced: RECIPES.find((r) => r.name === 'Qwen3.8-Flash-Next' && r.engine === 'TabbyAPI'), smart: RECIPES.find((r) => r.name === 'GLM-5.3') };
+let expanded = null, advOpen = null, editing = recOf.balanced, HOME = ['hands', 'models', 'stats'];
+const detail = (r, icons = true) => `<div class="mdetail">${icons ? `<div class="ics">${caps(r)}</div>` : ''}<div class="kv small"><span class="label">Intelligence</span><b>${r.ai ?? '—'}</b><span class="label">C1 speed</span><b>${r.c1 ? `${r.c1}/s` : '—'}</b><span class="label">Context</span><b>${r.ctx}</b><span class="label">Engine</span><b>${r.engine}</b><span class="label">KV cache</span><b>${r.kv || '—'}</b><span class="label">Download</span><b>${r.gb}</b></div></div>`;
+const modelRow = (k) => { const on = k === tier, r = k === 'custom' ? editing : recOf[k]; return `<div class="mrow${on ? ' on' : ''}"><div class="mhead"><button class="mpick" data-go="off" data-tier="${k}">${T[k].m}<small>${T[k].n}</small></button><button class="plus" data-go="off" data-exp="${k}" aria-label="Details">${expanded === k ? '−' : '+'}</button></div>${expanded === k ? `${detail(r)}<div class="mdetail" style="padding-top:0">${b('Edit', 'edit', '', `data-editr="${RECIPES.indexOf(r)}"`)}</div>` : ''}</div>`; };
+const WMETA = { hands: 'Picture', models: 'Model picks', stats: 'Live stats', usage: 'Usage', gpus: 'GPUs' };
+const WDESC = { hands: 'The painting and what’s happening', models: 'Fast, balanced and smart', stats: 'Speed and tokens while running', usage: 'Tokens served, by day', gpus: 'Memory on each GPU' };
+let ORDER = ['hands', 'models', 'stats', 'usage', 'gpus'];
+const gripIcon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+const sw = (on, attrs, label) => `<button class="switch${on ? ' on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" ${attrs}></button>`;
+function miniUsage() {
+  const keep = period; period = 'days'; const all = periods(); period = keep;
+  const level = levels(all), last = all.slice(-84);
+  return `<button class="wbtn" data-go="usage"><span class="wtitle">Usage<span>${fmt(LIFETIME)} served</span></span><span class="minical">${last.map((x) => `<i style="background:${LEVELS[level(x.tokens)]}"></i>`).join('')}</span></button>`;
+}
+const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${[0, 1, 2, 3].map((g) => `<div class="gpu"><span>GPU ${g}</span><i><u style="width:96%"></u></i><span>92 of 96 GB</span></div>`).join('')}</div>`;
+const WBODY = {
+  hands: (ph) => (ph === 'off' ? `${art('apart')}<div class="line">${untested ? `Made for ${untested} · untested here` : 'Starts in about 2 min'}</div>` : ph === 'first' ? `${art('apart')}<div class="line">${m().gb} to download</div>` : status('work', ...(ph === 'opened' ? ST('run', m().m, `${agent} is open`, false) : ST('run', m().m)), 1, m().now)),
+  models: (ph) => (ph === 'off' || ph === 'first' ? `<div>${(tier === 'custom' ? [...TIERS, 'custom'] : TIERS).map(modelRow).join('')}<button class="quiet" style="margin-top:4px" data-go="adv-models">More models</button></div>` : ''),
+  stats: (ph) => (ph === 'run' || ph === 'opened' ? running(m().now, m().pre, 18240, LIFETIME) : ''),
+  usage: () => miniUsage(),
+  gpus: () => gpuRows(),
+};
+const home = (ph) => `<div class="scroll home">${HOME.map((k) => WBODY[k](ph)).join('')}</div>`;
+const TIERS = ['fast', 'balanced', 'smart'];
+const composer = (go, label) => `<div class="composer"><button class="trig" data-go="off-open">${m().m}<small>${m().n}</small></button><button class="gosm" data-go="${go}">${label}</button></div>`;
+const choose = (go, label, note) => `${art('apart')}<div class="line">${note}</div><div class="sp"></div>${composer(go, label)}`;
+const popover = () => `<div class="pop">${TIERS.map((k) => `<button data-go="off" data-tier="${k}">${T[k].m}<small>${T[k].n}</small><u>${k === tier ? '✓' : ''}</u></button>`).join('')}<button class="more" data-go="allmodels">More models</button></div>`;
+const settingsTabs = (on) => `<div class="tabs two"><button class="${on === 'settings' ? 'on' : ''}" data-go="settings">General</button><button class="${on === 'advanced' ? 'on' : ''}" data-go="advanced">Advanced</button></div>`;
+const dd = () => (THEMES[theme].model ? '' : `<button class="dd" data-go="picker">${m().n ? `${m().n} · ` : ''}${m().m}<span>⌄</span></button>`);
+const details = () => '<button class="link" data-go="model">Details</button>';
+const rows = () => ['fast', 'balanced', 'smart'].map((k) => `<button class="row${k === tier ? ' on' : ''}" data-go="off" data-tier="${k}"><u></u>${T[k].n}<em>${T[k].m}</em><span>${T[k].speeds[0][1]}/s</span></button>`).join('');
+const CARDS = __CARDS__;
+const cardHtml = (r) => { const c = CARDS[r.name]; return `<div class="label group">Model card</div>${c ? `<div class="cardsrc"><a href="https://huggingface.co/${c.repo}" target="_blank" rel="noopener">${c.repo}</a>${c.license ? ` · ${c.license}` : ''}${c.downloads != null ? ` · ${fmt(c.downloads)} downloads` : ''}</div><div class="mdcard">${c.html}</div>` : '<div class="line" style="text-align:left">This model has no card on Hugging Face</div>'}`; };
+// [device, app, requests today, last seen, known on the tailnet]
+const SOURCES = [['pop-os', 'Pi', 1204, 'Now', 1], ['Sero’s MacBook Pro', 'Claude Code', 312, '4 min ago', 1], ['sero-omarchy', 'OpenCode', 88, '1 h ago', 1], ['100.101.7.12', 'curl', 3, '2 h ago', 0]];
+const ALL = RECIPES.map((r) => [r.name, r.date, r.ai, r.c1, r.gb]);
+// [name, installed, version here, newest version]
+const AGENTS = [['Pi', 1, '0.44.2', '0.45.0'], ['Claude Code', 1, '2.1.31', '2.1.31'], ['Codex', 1, '0.71.0', '0.72.1'], ['OpenCode', 1, '1.4.2', '1.4.2'], ['Oh My Pi', 1, '0.9.0', '0.9.0'], ['Hermes', 1, '2.3.1', '2.4.0'], ['Crush', 0, '', '0.31.0'], ['Grok', 0, '', '1.2.0'], ['GitHub Copilot', 0, '', '1.6.3'], ['Ori', 0, '', '0.3.1'], ['Antigravity', 0, '', '1.11.0']];
+const outdated = () => AGENTS.filter((a) => a[1] && a[2] !== a[3]);
+const TAIL = [['sero-omarchy', 'Linux', 1], ['gpu-sandbox', 'Linux', 1], ['spark-2384', 'Linux', 1], ['spark-2822', 'Linux', 1], ['spark-557f', 'Linux', 1], ['spark-de5c', 'Linux', 1], ['Sero’s MacBook Pro', 'macOS', 1], ['Sero’s Mac mini', 'macOS', 0, '8 days ago'], ['sero', 'Linux', 0, '28 days ago']];
+let agent = 'Pi', here = 'pop-os', mach = 'sero-omarchy';
+const linked = new Set(['pop-os']);
+const INSTALLS = {}, FAILED_ONCE = new Set();
+const agentRow = (n, ok, go) => {
+  const tag = `data-agentrow="${n}" data-rowgo="${go}"`, state = INSTALLS[n], [, , ver, next] = AGENTS.find((a) => a[0] === n);
+  if (go === 'agent') {
+    if (state === 'run' || state === 'upd') return `<div class="item vrow busy" ${tag}><span><b>${n}</b><small>${state === 'upd' ? `Updating to ${next}…` : 'Installing…'}</small></span><i class="instbar"></i></div>`;
+    if (!ok) return `<button class="item vrow" ${tag} data-go="agent" data-install="${n}"><span><b>${n}</b><small>${state === 'fail' ? 'Couldn’t install' : `Not installed · ${next}`}</small></span><span class="inst">${state === 'fail' ? 'Try again' : 'Install'}</span></button>`;
+    return `<div class="item vrow" ${tag}><button class="vpick" data-go="agent" data-agent="${n}"><span><b>${n}</b><small>${ver}${n === agent ? ' · Default' : ''}</small></span></button>${ver === next ? '<small>Up to date</small>' : `<button class="inst vact" data-go="agent" data-upd="${n}">Update to ${next}</button>`}</div>`;
+  }
+  if (ok) return `<button class="item" ${tag} data-go="${go}" data-agent="${n}">${n}${n === agent ? '<small>Default</small>' : state === 'done' ? '<small>Installed</small>' : ''}</button>`;
+  if (state === 'run') return `<div class="item busy" ${tag}>${n}<small>Installing…</small><i class="instbar"></i></div>`;
+  return `<button class="item" ${tag} data-go="${go}" data-install="${n}">${n}<small>${state === 'fail' ? 'Couldn’t install · ' : ''}<span class="inst">${state === 'fail' ? 'Try again' : 'Install'}</span></small></button>`;
+};
+const agentList = (go) => AGENTS.map(([n, ok]) => agentRow(n, ok, go)).join('');
+function repaintAgent(n) { const ok = AGENTS.find((a) => a[0] === n)[1]; document.querySelectorAll(`[data-agentrow="${n}"]`).forEach((row) => { row.outerHTML = agentRow(n, ok, row.dataset.rowgo); }); }
+function startUpdate(list) {
+  for (const n of list) { INSTALLS[n] = 'upd'; repaintAgent(n); }
+  setTimeout(() => { for (const n of list) { const a = AGENTS.find((x) => x[0] === n); a[2] = a[3]; INSTALLS[n] = 'done'; } render(); }, 2200);
+}
+function startInstall(n) {
+  INSTALLS[n] = 'run'; repaintAgent(n);
+  setTimeout(() => {
+    if (n === 'Antigravity' && !FAILED_ONCE.has(n)) { FAILED_ONCE.add(n); INSTALLS[n] = 'fail'; } else { const a = AGENTS.find((x) => x[0] === n); a[1] = 1; a[2] = a[3]; INSTALLS[n] = 'done'; }
+    repaintAgent(n);
+  }, 2400);
+}
+const failed = (word, line, first = b('Try again', 'waking', 'go'), second = b('Back', 'off')) => () => `${menu()}${status('broken', word, line)}<button class="link" data-go="logs">Engine output</button><div class="sp"></div>${first}${second}`;
+let appVer = '0.9.2', appNext = '0.9.3', appAuto = false;
+const vfoot = () => `<div class="vfoot"><span>Local AI ${appVer}</span>${appNext ? `<button data-go="app-update">Update to ${appNext}</button>` : '<span>Up to date</span>'}</div>`;
+const pick = (name, go, note = '') => `<button class="item" data-go="${go}">${name}${note ? `<small>${note}</small>` : ''}</button>`;
+const awake = (open) => () => `${menu()}${home(open ? 'opened' : 'run')}<div class="two">${b(`Open ${agent}`, 'opened', 'go')}${b('⌄', 'chooser')}</div>${b('Stop', 'sleeping', 'neg')}`;
+
+// [id, title, row, column, screen, what happens next]
+const F = [
+  ['off', 'Off', 0, 0, () => `${menu()}${home('off')}${b(`Start ${m().m}`, 'waking', 'go')}`],
+  ['waking', 'Starting', 0, 1, () => `${menu()}${status('reach', ...ST('start', m().m, 'About 2 min', false), 0.55)}${bar(55)}<div class="sp"></div>${b('Cancel', 'off', 'neg')}`, [['It loaded', 'awake'], ['Taking longer', 'slow'], ['It failed', 'room']]],
+  ['awake', 'Running', 0, 2, awake(false), [['It stopped answering', 'noreply'], ['It crashed', 'quit']]],
+  ['chooser', 'Choose an agent', 0, 3, () => `${close('awake')}<div class="head">Open with</div><div class="scroll">${agentList('opened')}</div>`],
+  ['opened', 'Agent opened', 0, 4, awake(true), [['No terminal here', 'runthis']]],
+  ['runthis', 'No terminal on this machine', 0, 5, () => `${close('awake')}<div class="head">Run this</div><div class="box">cd ~/code &amp;&amp; env PI_CODING_AGENT_DIR=~/.local-ai/agents/pi pi --provider la-self-18701 --model ${m().m}</div><div class="sp"></div>${b('Copy', 'awake', 'go')}`],
+  ['sleeping', 'Stopping', 0, 6, () => `${menu()}${status('reach', 'Stopping', 'Freeing the GPU', 0.2)}<div class="sp"></div>`, [['GPU is free', 'off']]],
+
+
+
+  ['boot', 'Opening the app', 1, 0, () => `${menu()}${status('apart', 'Local AI', 'Looking for your GPU')}<div class="sp"></div>`, [['GPU found', 'first'], ['No GPU', 'nogpu'], ['No Docker', 'needsdocker'], ['Server down', 'cantconnect']]],
+  ['first', 'First time', 1, 1, () => `${menu()}${home('first')}${b(`Download ${m().m}`, 'dl', 'go')}`],
+  ['dl', 'Downloading', 1, 2, () => `${menu()}${status('reach', 'Downloading', `12 of ${m().gb}`, 0.19)}${bar(19)}<div class="sp"></div>${b('Cancel', 'first', 'neg')}`, [['Finished', 'checking'], ['Network dropped', 'netwait'], ['No room', 'space'], ['Locked', 'locked']]],
+  ['netwait', 'Network dropped', 1, 3, () => `${menu()}${status('reach', 'Waiting for network', 'Picks up where it stopped', 0.19)}${bar(19)}<div class="sp"></div>${b('Cancel', 'first', 'neg')}`, [['Back online', 'dl']]],
+  ['checking', 'Checking the files', 1, 4, () => `${menu()}${status('reach', 'Checking', 'Making sure it arrived whole', 0.4)}${bar(96)}<div class="sp"></div>`, [['All good', 'waking'], ['A file was bad', 'damaged']]],
+
+  ['adv-models', 'Advanced, models', 6, 1, () => `${close('advanced')}<div class="head">Models</div><div class="label">Runs on this machine, newest first</div><div class="scroll">${RECIPES.map((r, i) => `<div class="arow"><button class="ahead" data-go="model-page" data-adv="${i}"><span class="at"><b>${r.name}</b><small>${r.date} · ${r.engine} · ${r.ctx}</small></span><span class="ics">${caps(r)}<span class="chev">›</span></span></button></div>`).join('')}</div>`],
+  ['model-page', 'Advanced, one model', 6, 3, () => { const i = advOpen ?? 0, r = RECIPES[i]; return `${close('adv-models')}<div class="scroll"><div class="head">${r.name}</div><div class="line" style="text-align:left">${r.date} · ${r.engine} · ${r.ctx}</div>${detail(r)}${cardHtml(r)}</div><div class="two">${b('Use', 'off', 'go', `data-all="${i}"`)}${b('Edit', 'edit', '', `data-editr="${i}" style="width:auto;flex:1"`)}</div>`; }],
+  ['edit', 'Advanced, edit', 6, 2, () => `${close('model-page')}<div class="head">${editing.name}</div><div class="line" style="text-align:left">${editing.engine}</div><div class="scroll home" style="gap:8px"><div class="label">Context ${editing.ctx}</div><div class="slide"><i></i></div><div class="label">GPUs</div><div class="seg">${[1, 2, 4].map((n) => `<span class="${n === editing.cards ? 'on' : ''}">${n}</span>`).join('')}</div><div class="label">Requests at once</div><div class="seg">${[1, 2, 4, 8].map((n) => `<span class="${n === editing.seqs ? 'on' : ''}">${n}</span>`).join('')}</div><div class="label">KV cache</div><div class="field">${editing.kv || 'Off'}</div><div class="label">Extra arguments</div><div class="box">--mem-fraction-static 0.92</div></div>${b('Save', 'model-page', 'go')}${b('Reset', 'model-page')}`],
+  ['settings', 'Settings', 2, 0, () => `${close('off')}${settingsTabs('settings')}${pick('Home screen', 'home-edit', '›')}${pick('Background', 'background', '›')}${pick('Agents and folder', 'agent', '›')}${pick('Machines', 'machines', '›')}${pick('Usage', 'usage', '›')}<div class="sp"></div>${vfoot()}`],
+  ['background', 'Background', 2, 10, bgFrame],
+  ['app-update', 'App update', 2, 11, () => `${close('settings')}<div class="head">Local AI ${appNext || appVer}</div><div class="line" style="text-align:left">${appNext ? `You have ${appVer}` : 'You have the newest version'}</div><div class="label group">What’s new</div><ul class="notes"><li>Faster switching between models</li><li>Shows where API requests come from</li><li>Fixes for AMD cards</li></ul><div class="sp"></div><div class="hrow plain"><span class="hname"><b>Update automatically</b><small>Models keep running while it restarts</small></span>${sw(appAuto, 'data-go="app-update" data-appauto="1"', 'Update automatically')}</div>${appNext ? b('Update and restart', 'app-updating', 'go') : ''}`],
+  ['app-updating', 'App updating', 2, 12, () => `${menu()}${status('reach', 'Updating', `Local AI ${appNext || appVer}`, 0.5)}${bar(50)}<div class="sp"></div><div class="line">Models keep running</div>`, [['Restarted', 'settings', 'data-appdone="1"'], ['It failed', 'app-fail']]],
+  ['app-fail', 'App update failed', 2, 13, () => `${menu()}${status('broken', 'Update failed', `Still on ${appVer}`)}<div class="sp"></div>${b('Try again', 'app-updating', 'go')}${b('Back', 'settings')}`],
+  ['home-edit', 'Edit home screen', 2, 1, () => `${close('settings')}<div class="head">Home screen</div><div class="line" style="text-align:left">Switch on what Home shows. Drag to change the order.</div><div class="scroll" data-sort>${ORDER.map((k) => `<div class="hrow${HOME.includes(k) ? '' : ' hidden'}" data-key="${k}"><button class="grip" data-key="${k}" aria-label="Move ${WMETA[k]}. Use the arrow keys" title="Drag to reorder">${gripIcon}</button><span class="hname"><b>${WMETA[k]}</b><small>${WDESC[k]}</small></span>${sw(HOME.includes(k), `data-go="home-edit" data-wtoggle="${k}"`, `Show ${WMETA[k]}`)}</div>`).join('')}</div>`],
+
+  ['agent', 'Agents and folder', 2, 2, () => `${close('settings')}<div class="head">Agents</div><div class="line" style="text-align:left">Open uses the default. Tap one to make it the default.</div><div class="scroll">${agentList('agent')}</div>${outdated().length ? b(`Update all (${outdated().length})`, 'agent', '', 'data-updall="1"') : ''}<div class="label">Folder</div><div class="field">~/code</div>`],
+  ['machines', 'Machines', 2, 3, () => `${close('off')}<div class="head">Machines</div><div class="scroll"><div class="label group">Connected</div>${[...linked].map((n) => `<button class="item" data-go="off" data-use="${n}"><span><b>${n}</b><small>${n === 'pop-os' ? '4× RTX PRO 6000' : 'Connected'}</small></span><small>${n === here ? 'In use' : ''}</small></button>`).join('')}<div class="label group">On your Tailscale</div>${TAIL.filter(([n]) => !linked.has(n)).map(([n, os, up, seen]) => (up ? `<button class="item" data-go="m-connect" data-machine="${n}"><span><b>${n}</b><small>${os}</small></span><small>Connect</small></button>` : `<button class="item" data-go="unreachable" data-machine="${n}"><span><b>${n}</b><small>${os}</small></span><small>Seen ${seen}</small></button>`)).join('')}</div>${b('Add environment', 'addmachine')}`],
+  ['addmachine', 'Add an environment', 2, 4, () => `${close('machines')}<div class="head">Add environment</div><div class="label">Host</div><div class="field">sero-omarchy.ts.net</div><div class="label">Pairing code</div><div class="field">••••••</div><div class="sp"></div>${b('Add environment', 'm-connect', 'go')}`],
+  ['advanced', 'Settings, Advanced', 6, 0, () => `${close('off')}${settingsTabs('advanced')}${pick('Models', 'adv-models', '›')}${pick('API endpoints', 'endpoints', '›')}${pick('Registry', 'registry', '›')}${pick('Hugging Face token', 'hf-token', '›')}<div class="sp"></div>${vfoot()}`],
+
+  ['endpoints', 'Advanced, endpoints', 6, 4, () => `${close('advanced')}<div class="head">API endpoints</div><div class="scroll"><div class="label">On this computer</div><button class="addr" data-go="endpoints" data-copy="1"><span>http://127.0.0.1:18701/v1</span><small>Copy</small></button><div class="label">On your Tailscale</div><button class="addr" data-go="endpoints" data-copy="1"><span>http://${here}.tailnet.ts.net:18701/v1</span><small>Copy</small></button><div class="label">Key</div><button class="addr" data-go="endpoints" data-copy="1"><span>sk-local-••••••3f9a</span><small>Copy</small></button><div class="kv"><span class="label">OpenAI chat</span><b>Yes</b><span class="label">OpenAI Responses</span><b>Yes</b><span class="label">Anthropic messages</span><b>No</b></div><div class="label group">Where requests come from today</div>${SOURCES.map(([dev, app, n, when, known]) => `<div class="src"><span><b>${dev}</b><small>${app}${known ? '' : ' · not on your Tailscale'}</small></span><span><b>${n.toLocaleString('en-US')}</b><small>${when}</small></span></div>`).join('')}</div>`],
+  ['usage', 'Usage', 2, 9, () => `${close('settings')}<div class="head">Usage</div><div class="scroll">${usageBody()}</div>`],
+  ['logs', 'Engine output', 6, 6, () => `${close('back')}<div class="head">Engine output</div><div class="line" style="text-align:left">The last lines before it stopped</div><div class="box mono" style="flex:1">Loading weights 61/61<br>KV cache: 18.4 GB free<br>CUDA error: out of memory<br>Engine exited with code 1</div>${b('Copy', 'logs', 'go', 'data-copy="1"')}`],
+  ['hf-token', 'Advanced, Hugging Face token', 6, 8, () => `${close('advanced')}<div class="head">Hugging Face token</div><div class="line" style="text-align:left">Some models are locked until you accept their terms on Hugging Face. A read token lets Local AI download them.</div><div class="label">Token</div><div class="field">hf_••••••••••••••••Qx2</div><a class="link" style="margin:2px 0 0;text-align:left" href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">Make a token on Hugging Face</a><div class="sp"></div>${b('Save', 'advanced', 'go')}${b('Remove token', 'advanced', 'neg')}`],
+  ['registry', 'Advanced, registry', 6, 7, () => `${close('advanced')}<div class="head">Registry</div><div class="kv"><span class="label">Source</span><b>local-ai-registry</b><span class="label">Commit</span><b>9e828b8</b><span class="label">Recipes</span><b>339</b><span class="label">Scores from</span><b>5 Oct</b></div><div class="sp"></div>${b('Check for updates', 'registry', 'go')}`],
+  ['m-connect', 'Connecting', 2, 5, () => `${menu()}${status('reach', 'Connecting', mach, 0.5)}<div class="sp"></div>${b('Cancel', 'machines', 'neg')}`, [['It has Local AI', 'm-linked', 'data-link="1"'], ['No Local AI yet', 'm-install'], ['No answer', 'unreachable']]],
+  ['m-install', 'Machine has no Local AI', 2, 6, () => `${menu()}${status('apart', 'Not set up', `${mach} doesn’t have Local AI`)}<div class="sp"></div>${b('Install Local AI', 'm-installing', 'go')}${b('Back', 'machines')}`],
+  ['m-installing', 'Installing', 2, 7, () => `${menu()}${status('reach', 'Installing', `On ${mach}`, 0.6)}${bar(60)}<div class="sp"></div>${b('Cancel', 'machines', 'neg')}`, [['Done', 'm-linked', 'data-link="1"'], ['SSH refused', 'unreachable']]],
+  ['m-linked', 'Connected', 2, 8, () => `${menu()}${status('touch', 'Connected', mach)}<div class="sp"></div>${b('Use this machine', 'off', 'go', `data-use="${mach}"`)}${b('Back', 'machines')}`],
+
+  ['room', 'Too big for the GPU', 3, 0, failed('Ran out of room', 'Too big for the free GPU memory', b('Try Fast', 'off', 'go', 'data-tier="fast"'))],
+  ['quit', 'Engine crashed', 3, 1, failed('Stopped', 'It quit on its own')],
+  ['never', 'Never finished loading', 3, 2, failed('Never woke up', 'Gave up after 2 hours')],
+  ['noengine', 'Engine download failed', 3, 3, failed('No engine', 'Could not get the engine')],
+  ['locked', 'Model needs a token', 3, 4, failed('Locked model', 'Needs a Hugging Face token', b('Add token', 'hf-token', 'go'))],
+  ['space', 'Disk is full', 3, 5, failed('Not enough space', 'Needs 63 GB, 12 GB free', b('Choose folder', 'agent', 'go'))],
+  ['damaged', 'Bad download', 3, 6, failed('Download damaged', 'One file came through wrong', b('Download again', 'dl', 'go'))],
+  ['noconn', 'Internet dropped', 3, 7, failed('No connection', 'Check your network')],
+  ['noreply', 'Model went quiet', 3, 8, () => `${menu()}${status('broken', 'No reply', 'Last heard 2 min ago')}<div class="sp"></div>${b('Restart', 'waking', 'go')}${b('Stop', 'sleeping', 'neg')}`],
+  ['slow', 'Slower than usual', 3, 9, () => `${menu()}${status('reach', 'Taking longer', 'Usually 3 min, now 5', 0.7)}${bar(70)}<div class="sp"></div>${b('Cancel', 'off', 'neg')}`, [['It loaded', 'awake'], ['Gave up', 'never']]],
+
+  ['nogpu', 'No GPU on this computer', 4, 0, () => `${menu()}${status('apart', ...noneSay('nogpu'))}<div class="sp"></div>${useElsewhere(others()[0])}`],
+  ['needsdocker', 'Docker not installed', 4, 1, () => `${menu()}${status('apart', 'Needs Docker', 'One free install')}<div class="sp"></div>${b('Install Docker', 'dockeroff', 'go')}`],
+  ['dockeroff', 'Docker not running', 4, 2, () => `${menu()}${status('apart', 'Docker is off', 'Turn it on to start models')}<div class="sp"></div>${b('Turn on', 'off', 'go')}`],
+  ['nothing', 'No model for this GPU', 4, 3, () => `${menu()}${status('apart', ...noneSay('nothing'))}<div class="sp"></div>${useElsewhere(others()[0])}`],
+  ['busy', 'Another program has the GPU', 4, 4, () => `${menu()}${status('apart', 'GPU in use', 'Another program has it')}${dd()}<div class="sp"></div>${off('Start')}`, [['It finished', 'off']]],
+  ['needs', 'Not enough free GPUs', 4, 5, () => `${menu()}${status('apart', ...ST('off', m().m, 'Needs 4 free GPUs, 2 free', false))}<div class="sp"></div>${off('Start')}${b('Switch to this model', 'waking')}`],
+  ['cantconnect', 'App lost the server', 4, 6, () => `${menu()}${status('broken', 'Can’t connect', 'Trying again')}<div class="sp"></div>`, [['It came back', 'off']]],
+  ['unreachable', 'Machine offline', 4, 7, () => `${menu()}${status('broken', 'Can’t reach it', mach)}<div class="sp"></div>${b('Try again', 'm-connect', 'go')}${b('This computer', 'off', '', 'data-use="pop-os"')}`],
+  ['key', 'Opened from another device', 4, 8, () => `${menu()}<div class="head" style="margin-top:24px">Enter the key</div><div class="line" style="text-align:left">It’s on the machine running Local AI</div><div class="field">Key</div><div class="sp"></div>${b('Connect', 'off', 'go')}`, [['Wrong key', 'key']]],
+
+  ['p-get', 'Phone, first time', 5, 0, () => `${menu()}${status('apart', ...ST('off', 'LFM3-1.7B', 'Not downloaded'))}<div class="sp"></div>${b('Download 1.1 GB', 'p-dl', 'go')}`, [['On mobile data', 'p-data'], ['No room', 'p-space'], ['Phone too small', 'p-small']]],
+  ['p-data', 'Phone, mobile data', 5, 1, () => `${menu()}${status('apart', 'On mobile data', 'Wait for Wi-Fi?')}<div class="sp"></div>${b('Wait', 'p-get', 'go')}${b('Download anyway', 'p-dl')}`],
+  ['p-dl', 'Phone, downloading', 5, 2, () => `${menu()}${status('reach', 'Downloading', '0.4 of 1.1 GB', 0.36)}${bar(36)}<div class="sp"></div>${b('Cancel', 'p-get', 'neg')}`, [['Finished', 'p-off']]],
+  ['p-off', 'Phone, off', 5, 3, () => `${menu()}${status('apart', ...ST('off', 'LFM3-1.7B'))}<div class="sp"></div>${b('Start', 'p-waking', 'go')}`],
+  ['p-waking', 'Phone, starting', 5, 4, () => `${menu()}${status('reach', ...ST('start', 'LFM3-1.7B', 'A few seconds', false), 0.6)}${bar(60)}<div class="sp"></div>${b('Cancel', 'p-off', 'neg')}`, [['It loaded', 'p-ready']]],
+  ['p-ready', 'Phone, running', 5, 5, () => `${menu()}${status('work', ...ST('run', 'LFM3-1.7B'), 1, 26)}${running(26, 640, 3120, 41000)}<div class="sp"></div>${b('Chat', 'p-chat', 'go')}${b('Stop', 'p-off', 'neg')}`, [['Phone got hot', 'p-hot'], ['Phone closed it', 'p-paused']]],
+  ['p-chat', 'Phone, chat', 5, 6, () => `${close('p-ready')}<div class="bubble me">Summarise this note</div><div class="bubble">Here’s the short version…</div><div class="sp"></div><div class="field">Message</div>`],
+  ['p-hot', 'Phone, too hot', 5, 7, () => `${menu()}${status('touch', 'Cooling down', 'Running slower for a bit')}${running(11, 300, 3120, 41000)}<div class="sp"></div>${b('Chat', 'p-chat', 'go')}${b('Stop', 'p-off', 'neg')}`, [['Cooled off', 'p-ready']]],
+  ['p-paused', 'Phone, closed by the system', 5, 8, () => `${menu()}${status('apart', 'Paused', 'The phone closed it')}<div class="sp"></div>${b('Resume', 'p-waking', 'go')}`],
+  ['p-space', 'Phone, full', 5, 9, failed('Not enough space', 'Free up 1.1 GB', b('Try again', 'p-get', 'go'), b('Back', 'p-get'))],
+  ['p-small', 'Phone, can’t run it', 5, 10, () => `${menu()}${status('broken', 'Too small', 'This phone can’t run it')}<div class="sp"></div>${b('Use pop-os', 'off', 'go', 'data-use="pop-os"')}`],
+];
+const ROWS = ['Every day', 'First time', 'Details and settings', 'When something fails', 'When it can’t start', 'On a phone', 'Advanced'];
+const pos = new Map(F.map((f) => [f[0], { x: f[3] * STEP_X, y: f[2] * STEP_Y }]));
+const view = document.getElementById('view'), board = document.getElementById('board');
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let cur = 'off', x = 0, y = 0, s = 0.9, mode = 'play';
+const trail = [];
+
+// The brand's dot hands, pulled apart or brought together. Gold light travels out from the fingertips while tokens flow.
+function drawFresco(g, CW, CH, pose, p, t, rate) {
+  const sep = pose === 'apart' ? 1 : pose === 'reach' ? 1 - p : pose === 'broken' ? 1.3 : 0, h = 190, w = h * 776 / 500, life = Math.max(0, Math.min(1, 1 - sep));
+  const out = sep * 46, down = pose === 'broken' ? 12 : 0, y = (CH - h) / 2 + down;
+  g.filter = `saturate(${life}) brightness(${pose === 'broken' ? 0.3 : 0.5 + 0.5 * life})`;
+  if (adam.complete) g.drawImage(adam, CW / 2 - w - out, y, w, h);
+  if (god.complete) g.drawImage(god, CW / 2 + out, y, w, h);
+  g.filter = 'none';
+  const accent = THEMES[theme].accent;
+  g.strokeStyle = g.fillStyle = accent;
+  if (pose === 'touch' || pose === 'work') {
+    const glow = g.createRadialGradient(CW / 2, CH / 2, 0, CW / 2, CH / 2, 34);
+    glow.addColorStop(0, accent); glow.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalCompositeOperation = 'screen'; g.globalAlpha = 0.7; g.fillStyle = glow; g.fillRect(CW / 2 - 34, CH / 2 - 34, 68, 68); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  }
+  if (pose === 'work' && !calm) for (let j = 0; j < 2; j++) {
+    const ph = (t * (0.0006 + rate / 200000) + j / 2) % 1;
+    g.globalAlpha = (1 - ph) * 0.7; g.lineWidth = 1;
+    g.beginPath(); g.arc(CW / 2, CH / 2, 8 + ph * 70, 0, 6.2832); g.stroke(); g.globalAlpha = 1;
+  }
+}
+function draw(c, t) {
+  const pr = 2, CW = 260, CH = 128, k = 0.215, pose = c.dataset.pose, p = +c.dataset.p, rate = +c.dataset.rate;
+  if (c.width !== CW * pr) { c.width = CW * pr; c.height = CH * pr; }
+  const g = c.getContext('2d');
+  g.setTransform(pr, 0, 0, pr, 0, 0);
+  g.clearRect(0, 0, CW, CH);
+  if (THEMES[theme].art === 'fresco') return drawFresco(g, CW, CH, pose, p, t, rate);
+  const sep = pose === 'apart' ? 1 : pose === 'reach' ? 1 - p : pose === 'broken' ? 1.25 : 0;
+  const dx = 217 - 272 * sep, dy = 36.5 * Math.max(0, 1 - sep), broken = pose === 'broken', wave = pose === 'work' && !calm;
+  const speed = 0.0024 + (Math.min(rate, 400) / 400) * 0.006;
+  for (let i = 0; i < DOTS.length; i++) {
+    const d = DOTS[i], left = d[0] < 1630;
+    const px = d[0] + (left ? dx : -dx);
+    let py = d[1] + (left ? -dy : dy);
+    if (broken) py += ((Math.sin(i * 12.9898) * 43758.5453) % 1) * 60;
+    const X = CW / 2 + (px - 1629.5) * k, Y = CH / 2 + (py - 1132.5) * k;
+    if (X < -3 || X > CW + 3 || Y < -3 || Y > CH + 3) continue;
+    let a = broken ? 0.3 : 0.5 + 0.5 * Math.max(0, 1 - sep), r = Math.max((d[2] ? 6.5 : 2.8) * k * 1.05, 0.5), fill = d[2] ? '#ECEAE6' : '#6A6865';
+    if (wave) {
+      const far = Math.hypot(px - 1629.5, py - 1132.5);
+      const crest = Math.pow(Math.max(0, Math.sin(far * 0.011 - t * speed)), 6) * Math.max(0.3, 1 - far / 2600);
+      if (crest > 0.12) { fill = THEMES[theme].accent; a = Math.min(1, 0.45 + crest); r *= 1 + 0.6 * crest; }
+    }
+    g.globalAlpha = a; g.fillStyle = fill;
+    g.beginPath(); g.arc(X, Y, r, 0, 6.2832); g.fill();
+  }
+  g.globalAlpha = 1;
+  if (pose === 'touch' || pose === 'work') { g.fillStyle = THEMES[theme].accent; g.beginPath(); g.arc(CW / 2, CH / 2, 3.2, 0, 6.2832); g.fill(); }
+}
+function paintVisible() {
+  const selector = mode === 'play' ? '.frame.cur canvas.art' : 'canvas.art:not([data-done])';
+  document.querySelectorAll(selector).forEach((c) => { const r = c.getBoundingClientRect(); if (r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight) { draw(c, 1400); c.dataset.done = '1'; } });
+}
+let paintQueued = false;
+const queuePaint = () => { if (paintQueued) return; paintQueued = true; requestAnimationFrame(() => { paintQueued = false; paintVisible(); }); };
+function paintAll() { document.querySelectorAll('canvas.art[data-done]').forEach((c) => delete c.dataset.done); paintVisible(); }
+(function loop(t) {
+  const c = document.querySelector('.frame.cur canvas.art[data-pose="work"]');
+  if (c) draw(c, t);
+  requestAnimationFrame(loop);
+})(0);
+setInterval(() => {
+  if (calm) return;
+  document.querySelectorAll('.frame.cur [data-now], #fs [data-now]').forEach((n) => { n.textContent = fmt(Math.max(1, +n.dataset.now * (0.92 + Math.random() * 0.16))); });
+  document.querySelectorAll('.frame.cur [data-grow], #fs [data-grow]').forEach((n) => { n.dataset.grow = +n.dataset.grow + +n.dataset.by; n.textContent = fmt(+n.dataset.grow); });
+}, 900);
+
+function render() {
+  board.innerHTML = ROWS.map((r, i) => `<div class="rowname" style="left:0;top:${i * STEP_Y - 50}px">${r}</div>`).join('')
+    + [0, 1, 2, 3, 4, 5].map((c) => `<div class="arrow" style="left:${c * STEP_X + W + 32}px;top:270px">→</div>`).join('')
+    + F.map(([id, title, , , screen, next]) => `<section class="frame${id === cur ? ' cur' : ''}" id="f-${id}" style="left:${pos.get(id).x}px;top:${pos.get(id).y}px"><div class="title">${title}</div><div class="screen">${screen()}</div>${next ? `<div class="next">${next.map(([l, g, a]) => `<button data-go="${g}" ${a || ''}>${l} →</button>`).join('')}</div>` : ''}</section>`).join('');
+  paintAll();
+}
+function applyStyle() {
+  const t = FONTS[font], r = document.documentElement.style;
+  for (const [k, v] of Object.entries({ '--accent': THEMES.A.accent, '--display': t.display, '--ds': t.ds, '--dw': t.dw, '--dsize': t.dsize, '--dl': t.dl, '--dst': t.dst, '--ui': t.ui })) r.setProperty(k, v);
+  document.querySelectorAll('[data-f]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === font)));
+  document.querySelectorAll('[data-p]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.p === picking)));
+  render();
+}
+function apply(ease) { board.classList.toggle('ease', !!ease); board.style.transform = `translate(${x}px,${y}px) scale(${s})`; queuePaint(); if (ease) setTimeout(queuePaint, 480); }
+function center(id, ease = true) {
+  const p = pos.get(id), vw = innerWidth, vh = innerHeight;
+  if (mode === 'play') s = Math.min(vw / (W + 40), (vh - 90) / (H - 60), vw < 700 ? 1.3 : 1);
+  else s = Math.max(0.55, Math.min(1, s));
+  x = vw / 2 - (p.x + W / 2) * s;
+  y = (vh - 60) / 2 - (p.y + 286) * s;
+  apply(ease);
+}
+function mark(id) { document.querySelector('.frame.cur')?.classList.remove('cur'); document.getElementById(`f-${id}`)?.classList.add('cur'); cur = id; }
+function go(id, remember = true) { if (!pos.has(id)) return; if (remember && id !== cur) trail.push(cur); mark(id); center(id); }
+function setMode(next) {
+  mode = next;
+  document.documentElement.classList.toggle('play', mode === 'play');
+  document.getElementById('play').setAttribute('aria-pressed', String(mode === 'play'));
+  document.getElementById('canvas').setAttribute('aria-pressed', String(mode === 'canvas'));
+  if (mode === 'canvas') s = 0.9;
+  center(cur);
+}
+function zoomAt(cx, cy, f) { const n = Math.max(0.12, Math.min(1.8, s * f)); x = cx - (cx - x) * (n / s); y = cy - (cy - y) * (n / s); s = n; apply(false); }
+function fit() {
+  if (mode === 'play') setMode('canvas');
+  const cols = Math.max(...F.map((f) => f[3])) + 1, w = cols * STEP_X, h = ROWS.length * STEP_Y;
+  s = Math.min((innerWidth - 40) / w, (innerHeight - 100) / h);
+  x = (innerWidth - w * s) / 2; y = 50 + 50 * s;
+  apply(true);
+}
+function showCell(c) {
+  const box = c.closest('.screen');
+  box.querySelector('.cal .sel')?.classList.remove('sel');
+  c.classList.add('sel');
+  box.querySelector('[data-readout]').innerHTML = decodeURIComponent(c.dataset.cell);
+}
+board.addEventListener('pointerover', (e) => { const c = e.target.closest('[data-cell]'); if (c && e.pointerType === 'mouse') showCell(c); });
+const onTap = (e) => {
+  if (moved) return;
+  const c = e.target.closest('[data-cell]');
+  if (c) { showCell(c); return; }
+  const t = e.target.closest('[data-go]');
+  if (!t || t.disabled) return;
+  const d = t.dataset;
+  if (d.install) { startInstall(d.install); return; }
+  if (d.bg) { pickBg(d.bg); return; }
+  if (d.upd) { startUpdate([d.upd]); return; }
+  if (d.updall) { startUpdate(outdated().map((a) => a[0])); return; }
+  if (d.copy) { t.classList.add('copied'); setTimeout(() => t.classList.remove('copied'), 1200); return; }
+  if (t.dataset.go === 'back') { go(trail.pop() || 'off', false); return; }
+  let redraw = false;
+  if (d.tier && d.tier !== tier) { tier = d.tier; redraw = true; }
+  if (d.all) { const [n, , ai, c1, gb] = ALL[+d.all]; editing = RECIPES[+d.all]; T.custom = { n: '', m: n, ai, gb, now: Math.round((c1 || 80) * 0.85), pre: 2400, speeds: c1 ? [['C1', String(c1)]] : [] }; tier = 'custom'; redraw = true; }
+  if (d.agent) { agent = d.agent; redraw = true; }
+  if (d.machine) { mach = d.machine; redraw = true; }
+  if (d.link) { linked.add(mach); redraw = true; }
+  if (d.use) { here = d.use; untested = null; redraw = true; }
+  if (d.period) { period = d.period; redraw = true; }
+  if (d.uspan) { uspan = d.uspan; redraw = true; }
+  if (d.appauto) { appAuto = !appAuto; redraw = true; }
+  if (d.appdone) { appVer = appNext; appNext = null; redraw = true; }
+  if (d.exp) { expanded = expanded === d.exp ? null : d.exp; redraw = true; }
+  if (d.adv) { advOpen = +d.adv; redraw = true; }
+  if (d.editr) { editing = RECIPES[+d.editr]; redraw = true; }
+  if (d.wtoggle) { const k = d.wtoggle, show = !HOME.includes(k); HOME = ORDER.filter((x) => (x === k ? show : HOME.includes(x))); redraw = true; }
+  if (redraw) render();
+  if (t.dataset.go !== cur) go(t.dataset.go);
+};
+board.addEventListener('click', onTap);
+const points = new Map();
+let moved = false, startDist = 0;
+view.addEventListener('pointerdown', (e) => { if (e.target.closest('.scroll')) return; points.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = false; if (points.size === 2) { const [a, c] = [...points.values()]; startDist = Math.hypot(a.x - c.x, a.y - c.y); } view.classList.add('drag'); });
+view.addEventListener('pointermove', (e) => {
+  const prev = points.get(e.pointerId);
+  if (!prev) return;
+  const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+  if (points.size === 1 && !moved && Math.hypot(dx, dy) < 3) return;
+  points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  moved = true;
+  if (points.size === 2) { const [a, c] = [...points.values()], d = Math.hypot(a.x - c.x, a.y - c.y); if (startDist) zoomAt((a.x + c.x) / 2, (a.y + c.y) / 2, d / startDist); startDist = d; return; }
+  x += dx; y += dy; apply(false);
+});
+const lift = (e) => { points.delete(e.pointerId); if (!points.size) { view.classList.remove('drag'); setTimeout(() => { moved = false; }, 0); } };
+view.addEventListener('pointerup', lift); view.addEventListener('pointercancel', lift);
+view.addEventListener('wheel', (e) => { if (e.target.closest('.scroll')) return; e.preventDefault(); if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01)); else { x -= e.deltaX; y -= e.deltaY; apply(false); } }, { passive: false });
+window.addEventListener('resize', () => { if (mode === 'play') center(cur, false); });
+document.getElementById('back').onclick = () => { if (trail.length) go(trail.pop(), false); };
+document.getElementById('canvas').onclick = () => setMode('canvas');
+document.getElementById('play').onclick = () => setMode('play');
+document.getElementById('in').onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 1.25);
+document.getElementById('out').onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 0.8);
+document.getElementById('fit').onclick = fit;
+document.querySelectorAll('[data-f]').forEach((b) => { b.onclick = () => { font = b.dataset.f; applyStyle(); }; });
+document.querySelectorAll('[data-p]').forEach((b) => { b.onclick = () => { picking = b.dataset.p; applyStyle(); }; });
+applyStyle();
+adam.onload = god.onload = paintAll;
+setMode(mode);
+document.fonts?.ready.then(paintAll);
+</script>
