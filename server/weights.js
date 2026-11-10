@@ -75,6 +75,8 @@ const weightsOf = (launch) => [].concat(launch.weights || []).filter(Boolean);
 const weightDir = (w) => (w.layout === 'hub' ? join(HF_HOME, 'hub', `models--${w.repo.replace('/', '--')}`, 'snapshots', w.revision) : join(MODELS, `${w.repo.split('/').pop()}-${w.revision.slice(0, 8)}`));
 const weightMount = (w) => (w.path ? `${w.path}:${w.at}:ro` : w.layout === 'hub' ? `${join(HF_HOME, 'hub')}:${w.at}/hub:ro` : `${weightDir(w)}:${w.at}:ro`);
 
+// Where a weight lives on this machine: its own folder, or the one it was downloaded to.
+export const dirOf = (w) => w.path || weightDir(w);
 const markerOf = (w) => join(weightDir(w), `.complete-${createHash('sha256').update(String(w.files || '')).digest('hex').slice(0, 12)}`);
 // The docker arguments that put the weights inside the engine's container.
 export const mounts = (launch) => [...weightsOf(launch).flatMap((w) => ['-v', weightMount(w)]), ...(weightsOf(launch).some((w) => w.layout === 'hub') ? ['-e', 'HF_HUB_OFFLINE=1'] : [])];

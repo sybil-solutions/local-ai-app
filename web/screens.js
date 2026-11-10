@@ -7,7 +7,8 @@ import { miniUsage, usageBody } from './usage.js';
 export const offLine = (c) => (!c.ready ? `${c.sizeGb ? `${Math.round(c.sizeGb)} GB` : 'Model'} to download`
   : group()?.untested ? `Made for ${esc(group().untested)} · untested here` : c.loadS ? `Starts in about ${mins(c.loadS)} min` : 'Ready to start');
 const detail = (r) => `<div class="mdetail"><div class="ics">${caps(r)}</div><div class="kv small">${kv(facts(r))}</div></div>`;
-const editBtn = (r, extra = '') => a('Edit', 'model', '', `data-id="${esc(r.id)}" data-go="edit" ${extra}`);
+// Recipes that run outside Docker (MLX on a Mac) can't be edited on the Edit screen, so they get no Edit button.
+const editBtn = (r, extra = '') => (r.host ? '' : a('Edit', 'model', '', `data-id="${esc(r.id)}" data-go="edit" ${extra}`));
 const modelRow = (r) => `<div class="mrow${r.id === chosen().id ? ' on' : ''}"><div class="mhead">`
   + `<button class="mpick" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${r.tier || ''}</small></button>`
   + `<button class="plus" data-act="expand" data-id="${esc(r.id)}" aria-label="Details">${icon(s.expanded === r.id ? 'minus' : 'plus', 14)}</button></div>`
@@ -22,7 +23,7 @@ export const BLOCKS = {
   gpus: gpuRows,
 };
 const home = (ph) => `<div class="scroll home">${HOME().map((k) => BLOCKS[k](ph)).join('')}</div>`;
-export const startBtn = () => a(`${chosen().ready ? 'Start' : 'Download'} ${esc(chosen().name)}`, 'start', 'go');
+export const startBtn = () => a(chosen().ready ? 'Run' : 'Download', 'start', 'go');
 export const openBtns = () => `<div class="two">${agentName() ? a(`Open ${esc(agentName())}`, 'open', 'go') : b('Choose an agent', 'chooser', 'go')}${b(icon('down'), 'chooser', '', 'aria-label="Choose an agent"')}</div>`;
 export const stopBtn = () => (run().external ? '' : a('Stop', 'stop', 'neg'));
 
@@ -79,8 +80,8 @@ export const cardHtml = (r) => {
 // The main button on a model's page: start it, pick it for Home, or swap it for the one running.
 export function useBtn(r) {
   const live = run(), id = `data-id="${esc(r.id)}"`;
-  if (live) return live.recipe === r.id ? '' : a(live.external ? `Start ${esc(r.name)}` : 'Switch to this model', 'switch', 'go', id);
-  return r.id === chosen()?.id ? a(`${r.ready ? 'Start' : 'Download'} ${esc(r.name)}`, 'start', 'go', 'data-go="home"') : a('Use', 'pick', 'go', `${id} data-go="home"`);
+  if (live) return live.recipe === r.id ? '' : a(live.external ? 'Run' : 'Switch to this model', 'switch', 'go', id);
+  return r.id === chosen()?.id ? a(r.ready ? 'Run' : 'Download', 'start', 'go', 'data-go="home"') : a('Use', 'pick', 'go', `${id} data-go="home"`);
 }
 
 export const CTX = [8192, 16384, 32768, 65536, 131072, 204800, 262144, 524288, 1048576];
@@ -96,7 +97,7 @@ export function editBody() {
     + `${a('Save', 'saveedit', 'go')}${d.local ? a('Reset', 'resetedit') : ''}`;
 }
 
-const BGS = [['gray', 'The Creation of Adam', 'Grayscale'], ['color', 'The Creation of Adam', 'In colour'], ['own', 'Your own picture', 'Choose a file'], ['none', 'None', 'Plain dark']];
+const BGS = [['fresco', 'The Creation of Adam', 'Michelangelo'], ['own', 'Your own picture', 'Choose a file'], ['none', 'None', 'Plain dark']];
 const BLOCK_NAMES = { hands: ['Picture', 'The painting and its light'], models: ['Model picks', 'Fast, balanced and smart'], stats: ['Live stats', 'Speed and tokens, live'], usage: ['Usage', 'Tokens served, by day'], gpus: ['GPUs', 'Memory on each GPU'] };
 const addr = (text, show) => `<button class="addr" data-act="copy" data-copy="${esc(text)}"><span>${esc(show ?? text)}</span><small>Copy</small></button>`;
 const yes = (apis, k) => (apis ? (apis.includes(k) ? 'Yes' : 'No') : '—');
@@ -162,7 +163,9 @@ export const SCREENS = {
   background: () => {
     const row = ([k, name, hint]) => `<button class="item" data-act="bg" data-bg="${k}"><span class="bgrow"><i class="bgthumb bg-${k}"></i><span><b>${name}</b><small>${k === 'own' && s.snap.picture ? 'Choose another' : hint}</small></span></span>`
       + `<small>${k === document.documentElement.dataset.bg ? 'In use' : ''}</small></button>`;
-    return `${close()}<div class="head">Background</div><div class="scroll">${BGS.map(row).join('')}</div>`;
+    const { bg, tone } = document.documentElement.dataset;
+    const mono = bg === 'none' ? '' : `<div class="hrow plain"><span class="hname"><b>Black and white</b><small>${tone === 'gray' ? 'Stays grey while a model runs' : 'Lights up in colour while a model runs'}</small></span>${toggle(tone === 'gray', 'data-act="tone"', 'Black and white')}</div>`;
+    return `${close()}<div class="head">Background</div><div class="scroll">${BGS.map(row).join('')}${mono}</div>`;
   },
   agent: () => `${close()}<div class="head">Agents</div>${left('Open uses the default. Tap one to make it the default.')}<div class="scroll">${agentList('agent')}</div>${agentsFoot()}`,
   machines: () => {

@@ -2,6 +2,7 @@
 # Installs Local AI for this user: the files, a service that keeps the server running, and an app-menu entry on Omarchy.
 # With Tailscale running, the app also answers on this machine's tailnet address, so your other machines can connect to it.
 set -e
+[ "$(uname -s)" = Linux ] || { echo "This installer sets up a Linux user service. On a Mac, use the Local AI app."; exit 1; }
 SRC="$(cd "$(dirname "$0")" && pwd)"
 DEST="${LOCAL_AI_DIR:-$HOME/.local/share/local-ai}"
 NODE="$(command -v node || true)"
@@ -10,7 +11,8 @@ if [ -z "$NODE" ] && command -v mise >/dev/null; then mise use -g node@lts && NO
 [ -n "$NODE" ] || { echo "Local AI needs Node.js 20 or newer. Install it, then run this again."; exit 1; }
 "$NODE" -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' || { echo "Local AI needs Node.js 20 or newer; this is $("$NODE" --version)."; exit 1; }
 mkdir -p "$DEST" "$HOME/.config/systemd/user"
-if [ "$SRC" != "$DEST" ]; then cp -r "$SRC/server" "$SRC/web" "$SRC/package.json" "$SRC/install.sh" "$DEST/"; fi
+# server/ and web/ are replaced whole, so a file a newer version removed does not linger and get loaded.
+if [ "$SRC" != "$DEST" ]; then rm -rf "$DEST/server" "$DEST/web" && cp -r "$SRC/server" "$SRC/web" "$SRC/package.json" "$SRC/install.sh" "$DEST/"; fi
 UNIT="$HOME/.config/systemd/user/local-ai.service"
 # A value as systemd reads it inside double quotes.
 quoted() { printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/%/%%/g'; }
@@ -39,7 +41,7 @@ systemctl --user enable --now local-ai.service
 systemctl --user restart local-ai.service
 PORT="$(echo "$SETTINGS" | sed -n 's/.*LOCAL_AI_PORT=\([0-9]*\).*/\1/p')"
 URL="http://127.0.0.1:${PORT:-18700}"
-for i in $(seq 1 40); do curl -s -m 1 "$URL/api/health" >/dev/null && break; sleep 0.25; done
+for _ in $(seq 1 40); do curl -s -m 1 "$URL/api/health" >/dev/null && break; sleep 0.25; done
 curl -s -m 2 "$URL/api/health" >/dev/null || { echo "The server did not start. See: journalctl --user -u local-ai -n 40"; exit 1; }
 if command -v omarchy-webapp-install >/dev/null; then
   timeout 30 omarchy-webapp-install "Local AI" "$URL" "$URL/icon.png" </dev/null >/dev/null 2>&1 && echo "Added Local AI to the app menu." || echo "Could not add the app-menu entry. Add it from the Omarchy menu: Install > Web App, with $URL"
