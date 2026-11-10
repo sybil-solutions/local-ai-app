@@ -154,7 +154,7 @@ try {
   await chat(port, false);
   const counted = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2050 && r; }, 15000);
   check('counts its tokens from /metrics', counted.stats.used === 2050, `used ${counted.stats.used}`);
-  check('reports its prefill speed, not its prompt tokens a second', counted.stats.pps === 2000, `pps ${counted.stats.pps}`);
+  check('reports its prefill speed, not its prompt tokens a second', counted.stats.pps === 2000 && counted.stats.ppsEst === false, JSON.stringify(counted.stats));
   await chat(port, false, 'short');
   const after = await until('the short request to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2300 && r; }, 15000);
   check('a short prefill does not drag the prefill speed down', after.stats.pps === 2000, `pps ${after.stats.pps}`);
@@ -183,7 +183,11 @@ try {
     await chat(id, true);
     const used = await until('host tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === id); return r?.stats?.used >= 4032 && r; }, 20000);
     check('counts host tokens at its own port, without the measurement', used.stats.used === 4032, `used ${used.stats.used}`);
-    check('reports host prefill speed', used.stats.pps > 0, `pps ${used.stats.pps}`);
+    check('with no engine timings, host prefill is an estimate from the wait for the first token, and says so', used.stats.pps > 0 && used.stats.ppsEst === true, JSON.stringify(used.stats));
+    // The engine queues this one for 0.5 s and reports 2000 tokens computed in 0.1 s: 20,000 tok/s, not 2000 / 0.6 s.
+    await chat(id, true, 'timings');
+    const timed = await until('engine timings to be used', async () => { const r = (await state()).runs.find((x) => x.id === id); return r?.stats?.ppsEst === false && r; }, 20000);
+    check('engine-reported prefill timing replaces the estimate and leaves queue time out', timed.stats.pps === 20000, JSON.stringify(timed.stats));
     const logs = await api(`/api/runs/${id}/logs?tail=50`);
     check('shows the engine log', /POST \/v1\/chat\/completions/.test(logs.json?.text || ''));
     const ends = await api('/api/endpoints');

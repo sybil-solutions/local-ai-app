@@ -143,7 +143,7 @@ Run    = { id,            // the port it serves on
            phase,         // queued · weights · image · starting · testing · ready · unresponsive · stopping · failed
            detail, progress, error, failure: { word, line }, view: { line, p, word? },   // word only when it failed
            ctx, vision,
-           served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active },   // pps: prefill speed, see below
+           served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, ppsEst, used, active },   // pps: prefill speed; ppsEst: it is an estimate, see below
            external,                                           // true for a model Local AI found but did not start
            reachable }                                         // whether another machine can call it
 ```
@@ -168,7 +168,7 @@ Run    = { id,            // the port it serves on
 | `docker` | `run`, `stop`, `rm`, `ps`, `logs`, `pull`, `image inspect`. Containers carry `local-ai=1` and `local-ai.port`, `.recipe`, `.gpus`, `.since`. |
 | `nvidia-smi` | GPUs and their memory. On Apple silicon `sysctl` and `vm_stat` instead. |
 | `python3`, `pip` | On Apple silicon: a venv per host recipe and its pinned packages. `ps` and `lsof` check a remembered engine before it is adopted. |
-| An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time it spent doing it (vLLM's histograms; llama.cpp's own gauge; for others, prompt tokens that missed the cache over the window). Prefills under 1,000 tokens are left out, since they time the engine's overhead more than its speed, and the number shown is the average over the last five minutes of prefills, so it stays between prompts. Until the app has seen a prefill it shows the engine's lifetime average, never 0. Prompt tokens served from the prefix cache are not prefill. |
+| An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time the engine says that took: vLLM's histograms, llama.cpp's own gauge, or the `timings` a host engine reports in its answers. Where the engine reports no such timing the number is an estimate, shown as "Prefill tok/s (est.)": for a host engine (mlx_lm.server), uncached prompt tokens over the wait for the first streamed token, which also holds queueing and the first decode step; for the rest, prompt tokens that missed the cache over the window. The two are never mixed. Prefills under 1,000 tokens are left out, since they time the engine's overhead more than its speed, and the number shown is the average over the last five minutes of prefills, so it stays between prompts. Until the app has seen a prefill it shows the engine's lifetime average, never 0. Prompt tokens served from the prefix cache are not prefill. |
 | `ss` or `lsof` | Listening ports, to find models started elsewhere. |
 | `tailscale` | `status --json` (this machine and yours), `whois --json` (who is asking). |
 | Hugging Face | Weights, and model cards. The token is read from `HF_TOKEN` or the HF cache's `token` file. |
