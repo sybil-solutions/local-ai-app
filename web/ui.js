@@ -54,7 +54,7 @@ export const status = (pose, word, line = '', p = 0) => `${art(pose, p)}<div cla
 export const fsBtn = () => (canFull() ? `<button data-act="fs" aria-label="${s.full ? 'Exit fullscreen' : 'Fullscreen'}" title="${s.full ? 'Exit fullscreen' : 'Fullscreen'}">${icon(s.full ? 'shrink' : 'grow')}</button>` : '');
 const bare = '<div class="top"><span class="mark">Local AI</span></div>';
 export const menu = () => (s.snap
-  ? `<div class="top"><button class="mark chip" data-go="machines" aria-label="Machine: ${esc(here())}"><i></i>${esc(here())}</button><span class="topr chip">${fsBtn()}<button data-go="settings" aria-label="Settings" title="Settings">${icon('menu')}</button></span></div>`
+  ? `<div class="top"><button class="mark chip" data-go="machines" aria-label="Machine: ${esc(here())}"><i></i><span class="who">${esc(here())}</span></button><span class="topr chip">${fsBtn()}<button data-go="settings" aria-label="Settings" title="Settings">${icon('menu')}</button></span></div>`
   : bare);
 export const close = (go = 'back') => `<div class="top"><span class="mark">Local AI</span><button class="x" data-go="${go}" aria-label="Close">${icon('close')}</button></div>`;
 export const notice = () => (s.note ? `<button class="notice" data-act="dismiss" title="Dismiss">${esc(s.note)}</button>` : '');
