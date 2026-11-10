@@ -47,7 +47,7 @@ flowchart LR
 
 - **One snapshot.** Every two seconds the server looks at the GPUs (`nvidia-smi`), its containers (`docker ps`), and each engine (`/v1/models`, `/metrics`). The result is one JSON snapshot. The app long-polls it and redraws; nothing else is pushed, and the app keeps no state of its own about the machine.
 - **Docker is the record.** A run is a container labelled `local-ai=1` with its recipe, port and GPUs in labels. Restart the server and it adopts whatever is still running.
-- **Models it didn't start.** Anything on the machine that answers `/v1/models` is shown as running too, with its stats and its address. Local AI never stops those.
+- **Models it didn't start.** Every 30 seconds it asks each listening port for `/v1/models`. Whatever answers is shown as running too, with its stats and its address, and is never stopped. The same model id on several ports (an engine and a proxy in front of it) is shown once, on the lowest port.
 - **Which screen.** The app shows the first screen its rules match for the snapshot (`resolve()` in `web/state.js`): can't connect, needs a key, Docker off, no GPU, downloading, starting, running, failed, and so on. Settings, Models and the rest are ordinary screens opened on top.
 - **Your machines.** Machines signed in to your Tailscale account trust each other: one click connects them, and the page opens on any of them without typing the key. Anything else needs the key.
 
@@ -121,10 +121,10 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
   docker: { ok, error },
   gpus: [{ index, name, total, used, util, power, temp }],     // memory in MiB
   free: [index],
-  groups: [{ card, name, supported, untested, gpus: [index],   // one per kind of GPU; untested names the card it borrows recipes from
-             tiers: { fastest, balanced, smartest }, recipes: [Recipe], hidden }],
+  groups: [{ card, name, untested, gpus: [index],              // one per kind of GPU; untested names the card it borrows recipes from
+             tiers: { fastest, balanced, smartest }, recipes: [Recipe] }],
   runs: [Run],
-  usage: { today, week, all, days: [{ d, v }], models: [{ name, in, out, req }] },
+  usage: { all, days: [{ d, v }] },                            // tokens ever, and per day for the last twelve weeks
   catalog: { at, error, count, id },
   last,                                                        // the recipe started most recently
   devices: [{ i, name, url, online, error, state }],           // state is that machine's own snapshot
@@ -139,7 +139,7 @@ Run    = { id,            // the port it serves on
            recipe, name, url, gpus, since, readyAt, expected,
            phase,         // queued · weights · image · starting · testing · ready · unresponsive · stopping · failed
            detail, progress, error, failure: { word, line }, view: { line, p },
-           served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active, queued, ttft },
+           served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active },
            external, reachable }                               // set on a model Local AI found but did not start
 ```
 
@@ -172,9 +172,9 @@ A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` wit
 
 ## Who can reach what
 
-- The key in `config.json` guards the API. The page gets it written in when opened on the machine itself, or from another machine signed in to your Tailscale account.
+- The key in `config.json` guards the API. The page gets it written in when opened on the machine itself, or from another machine signed in to your Tailscale account (Tailscale says who is asking, and the request must be addressed to this machine's own tailnet name).
 - Engines have no key of their own. Anything that can reach an engine's port can use the model, so keep the server on loopback or a private network such as Tailscale.
-- Model cards are other people's Markdown: tags are stripped before they are shown.
+- Model cards are other people's Markdown: their tags are stripped, the text is escaped, and only the app's own tags are written, in one pass.
 
 ## Working on it
 

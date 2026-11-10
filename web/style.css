@@ -143,7 +143,7 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .cardsrc { font: 400 12px var(--ui); color: var(--muted); overflow-wrap: anywhere; }
 .cardsrc a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
 .mdcard { font: 400 12px/1.6 var(--ui); color: #d6d3cd; overflow-wrap: anywhere; }
-.mdcard h1, .mdcard h2, .mdcard h3, .mdcard h4 { font: 600 14px/1.3 var(--ui); color: var(--text); margin: 16px 0 6px; }
+.mdcard h2, .mdcard h3, .mdcard h4, .mdcard h5 { font: 600 14px/1.3 var(--ui); color: var(--text); margin: 16px 0 6px; }
 .mdcard p, .mdcard ul, .mdcard ol { margin: 0 0 8px; }
 .mdcard ul, .mdcard ol { padding-left: 18px; }
 .mdcard img { max-width: 100%; height: auto; }
@@ -153,7 +153,7 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .mdcard pre { overflow-x: auto; padding: 8px; border-radius: 4px; background: var(--surface); font-size: 11px; }
 .mdcard code { font-size: 11px; }
 .pg .mdcard, .mright .mdcard { font-size: 13px; max-width: 760px; }
-.mright .mdcard h1, .mright .mdcard h2 { font-size: 16px; }
+.mright .mdcard h2 { font-size: 16px; }
 
 /* Agents, Home screen order, and Background. */
 .vrow { gap: 10px; }

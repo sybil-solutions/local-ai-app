@@ -8,7 +8,7 @@ export const mins = (seconds) => Math.max(1, Math.round(seconds / 60));
 export const ago = (when) => { const m = Math.round((Date.now() - new Date(when)) / 60000); return m < 1 ? 'Now' : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
 
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
-export const svg = (d, size = 16, paint = LINE) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" ${paint} aria-hidden="true">${d}</svg>`;
+const svg = (d, size = 16, paint = LINE) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" ${paint} aria-hidden="true">${d}</svg>`;
 const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',

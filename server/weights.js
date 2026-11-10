@@ -95,7 +95,8 @@ export async function download(launch, signal, report) {
     const total = files.reduce((n, f) => n + f.size, 0);
     mkdirSync(dest, { recursive: true });
     const space = statfsSync(dest);
-    const needed = files.filter((f) => !existsSync(join(dest, f.path))).reduce((n, f) => n + f.size, 0);
+    const have = (p) => (existsSync(p) ? statSync(p).size : 0); // a part already downloaded needs no more room
+    const needed = files.filter((f) => !existsSync(join(dest, f.path))).reduce((n, f) => n + f.size - have(join(dest, `${f.path}.part`)), 0);
     if (space.bavail * space.bsize < needed) throw new Error(`Needs ${Math.ceil(needed / 1e9)} GB free in ${dest}`);
     const seen = new Map();
     const pending = [...files];

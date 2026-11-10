@@ -12,7 +12,7 @@ const modelRow = (r) => `<div class="mrow${r.id === chosen().id ? ' on' : ''}"><
   + `<button class="mpick" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${r.tier || ''}</small></button>`
   + `<button class="plus" data-act="expand" data-id="${esc(r.id)}" aria-label="Details">${icon(s.expanded === r.id ? 'minus' : 'plus', 14)}</button></div>`
   + `${s.expanded === r.id ? `${detail(r)}<div class="mdetail" style="padding-top:0">${editBtn(r)}</div>` : ''}</div>`;
-export const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => `<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0)}%"></u></i><span>${Math.round((g.used || 0) / 1024)} of ${Math.round(g.total / 1024)} GB</span></div>`).join('')}</div>`;
+const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => `<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0)}%"></u></i><span>${Math.round((g.used || 0) / 1024)} of ${Math.round(g.total / 1024)} GB</span></div>`).join('')}</div>`;
 export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.external ? 'Running · started outside Local AI' : 'Running');
 export const BLOCKS = {
   hands: (ph) => (ph === 'off' ? `${art('apart')}<div class="line">${offLine(chosen())}</div>` : status('work', run().name, ph === 'opened' ? `Running · ${runLine(run(), true)}` : runLine(run()), 1)),
@@ -47,8 +47,10 @@ export const agentsFoot = () => `${outdated().length ? a(`Update all (${outdated
 
 // A model card is someone else's Markdown, so every tag in it is dropped and only our own are written.
 export function markdown(text) {
-  const inline = (t) => esc(t).replace(/!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)/g, '<img alt="$1" src="$2" loading="lazy">')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  // One pass over the escaped text: what a rule writes is never read again by another rule, so a card can't smuggle markup through one into the next.
+  const RULES = /!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*/g;
+  const inline = (t) => esc(t).replace(RULES, (_, alt, src, text, href, code, bold) => (src ? `<img alt="${alt}" src="${src}" loading="lazy">`
+    : href ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>` : code ? `<code>${code}</code>` : `<b>${bold}</b>`));
   const out = [];
   let list = null, code = null, table = false, para = [];
   const flush = () => { if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`); if (list) out.push(`</${list}>`); if (table) out.push('</table>'); para = []; list = null; table = false; };
@@ -180,6 +182,7 @@ export const SCREENS = {
     + `${all().map((r) => `<div class="arow"><button class="ahead" data-act="model" data-id="${esc(r.id)}" data-go="model-page"><span class="at"><b>${esc(r.name)}</b><small>${meta(r)}</small></span><span class="ics">${caps(r)}<span class="chev">${icon('right', 14)}</span></span></button></div>`).join('')}</div>`,
   'model-page': () => {
     const r = all().find((x) => x.id === s.modelOpen) || chosen();
+    if (!r) return `${close()}${left('This model is no longer in the list')}`;
     return `${close()}<div class="scroll"><div class="head">${esc(r.name)}</div>${left(meta(r))}${detail(r)}${cardHtml(r)}</div><div class="two">${useBtn(r) || '<button class="btn" disabled>Running</button>'}${editBtn(r, 'style="width:auto;flex:1"')}</div>`;
   },
   edit: () => `${close()}${editBody()}`,
@@ -198,8 +201,8 @@ export const SCREENS = {
       + `${c.error ? left('Couldn’t reach it. Using the saved list.') : ''}<div class="sp"></div>${a('Check for updates', 'refresh', 'go')}`;
   },
   'hf-token': () => `${close()}<div class="head">Hugging Face token</div>${left('Some models are locked until you accept their terms on Hugging Face. A read token lets Local AI download them.')}`
-    + `${field('token', 'Token', s.snap.hfToken ? `Saved, ends in ${esc(s.snap.hfToken)}` : 'hf_…', 'password')}<a class="link" style="margin:2px 0 0;text-align:left" href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">Make a token on Hugging Face</a>`
-    + `<div class="sp"></div>${a('Save', 'savetoken', 'go')}${s.snap.hfToken ? a('Remove token', 'removetoken', 'neg') : ''}`,
+    + `${field('token', 'Token', D().hfToken ? `Saved, ends in ${esc(D().hfToken)}` : 'hf_…', 'password')}<a class="link" style="margin:2px 0 0;text-align:left" href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">Make a token on Hugging Face</a>`
+    + `<div class="sp"></div>${a('Save', 'savetoken', 'go')}${D().hfToken ? a('Remove token', 'removetoken', 'neg') : ''}`,
   'app-update': () => {
     const v = s.snap.app, named = /^\d/.test(v.latest || '');
     const about = v.latest ? `You have ${esc(v.version)}` : v.can ? 'You have the newest version' : 'This copy wasn’t installed from its repo, so it can’t update itself';

@@ -49,7 +49,8 @@ export const poll = () => Promise.all(config.devices.map(async (device) => {
   try {
     const res = await fetch(`${device.url}/api/state`, { headers: { authorization: `Bearer ${device.key}` }, signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error(res.status === 401 ? 'Wrong key' : `Answered ${res.status}`);
-    remote.set(device.url, { online: true, error: null, state: await res.json() });
+    // Its own connected machines are left out, or two machines connected to each other would nest each other's snapshots without end.
+    remote.set(device.url, { online: true, error: null, state: { ...(await res.json()), devices: [] } });
   } catch (e) {
     const was = remote.get(device.url);
     remote.set(device.url, { online: false, error: e.name === 'TimeoutError' ? 'Not responding' : e.cause?.code || e.message, state: was?.state || null });
@@ -73,17 +74,18 @@ export async function add({ url, key, name }) {
   return { ok: true };
 }
 
-export function remove(i) {
+export function remove(index) {
+  const i = index === null ? -1 : +index;
   if (!config.devices[i]) fail(404, 'No such device');
   config.devices.splice(i, 1);
   saveConfig();
   return { ok: true };
 }
 
-// Runs any API call on a connected machine and hands back its answer untouched.
+// Runs any API call on a connected machine and hands back its answer as it came.
 export async function forward(i, method, path, body) {
   const device = config.devices[i] || fail(404, 'No such device');
   const reply = await fetch(`${device.url}/api/${path}`, { method, body: method === 'GET' ? undefined : JSON.stringify(body), headers: { authorization: `Bearer ${device.key}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(60000) })
     .catch((e) => fail(502, `${device.name} is unreachable: ${e.cause?.code || e.message}`));
-  return { status: reply.status, text: await reply.text() };
+  return { status: reply.status, type: reply.headers.get('content-type') || 'application/json', body: Buffer.from(await reply.arrayBuffer()) };
 }

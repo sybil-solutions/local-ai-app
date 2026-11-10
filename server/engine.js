@@ -113,7 +113,13 @@ async function launch(r, recipe) {
   }
 }
 
-export async function start(id, picked) {
+let starting = Promise.resolve();
+export function start(id, picked) {
+  const begun = starting.then(() => begin(id, picked));
+  starting = begun.catch(() => {});
+  return begun;
+}
+async function begin(id, picked) {
   const recipe = find(id) || fail(404, 'No such recipe');
   const why = blocked(id);
   if (why) fail(409, why);
@@ -126,7 +132,7 @@ export async function start(id, picked) {
   const need = recipe.launch.cards || 1;
   const free = freeGpus().filter((g) => cardFor(g) === recipe.card).map((g) => g.index);
   const gpus = picked?.length ? picked : free.slice(0, need);
-  if (gpus.length !== need || gpus.some((g) => !free.includes(g))) fail(409, `Needs ${need} free GPU${need > 1 ? 's' : ''}; ${free.length} free`);
+  if (new Set(gpus).size !== need || gpus.some((g) => !free.includes(g))) fail(409, `Needs ${need} free GPU${need > 1 ? 's' : ''}; ${free.length} free`);
   const r = { id: port, recipe: id, name: label(id), url: `http://${ENGINE_HOST}:${port}`, gpus, phase: 'queued', detail: 'Queued', progress: null, error: null, since: Date.now(), busy: true, abort: new AbortController(), apis: null, stats: null, misses: 0 };
   runs.set(port, r);
   config.last = id;
@@ -188,7 +194,7 @@ function startMeasure(r) {
   update(r, { tried: true, measureAbort: new AbortController(), measuring: 1 });
   measure({ id: r.recipe, url: r.url, model: r.served, seqs: recipe?.launch.seqs || 1, signal: r.measureAbort.signal, onLevel: (c) => { r.measuring = c; } })
     .catch((e) => { if (!r.measureAbort?.signal.aborted) event('warn', 'speed.failed', { id: r.recipe, error: e.message }); })
-    .finally(() => update(r, { measuring: 0, measureAbort: null }));
+    .finally(() => update(r, { measuring: 0, measureAbort: null, benchmarked: true }));
 }
 export const cancelMeasure = (rawId) => runs.get(+rawId)?.measureAbort?.abort();
 export function measureNow(rawId) {
@@ -247,14 +253,16 @@ async function reconcile(c, listedAt) {
   }
   const up = await probe(r);
   const now = Date.now();
+  if (runs.get(id) !== r || r.phase === 'stopping') return; // stopped while we were asking
   if (up && r.phase !== 'ready' && !r.replying) {
     update(r, { phase: 'testing', detail: 'Asking it one question', replying: true });
     testReply(r).then((ok) => {
       r.replying = false;
       if (!ok || runs.get(r.id) !== r || r.phase !== 'testing') return;
+      const adopted = r.seen; // already running when we found it, so its age is not a load time
       const seconds = Math.round((Date.now() - r.since) / 1000);
       update(r, { phase: 'ready', detail: null, error: null, failure: null, seen: true, readyAt: Date.now() });
-      saveLoad(r.recipe, seconds);
+      if (!adopted) saveLoad(r.recipe, seconds);
       event('info', 'run.ready', { id: r.id, recipe: r.recipe, seconds });
     });
   }
@@ -283,7 +291,7 @@ async function discover(now) {
   scanned = now;
   const text = (process.platform === 'darwin' ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnH'])).stdout;
   const open = new Map([...text.matchAll(/(\S+):(\d+)\s/g)].map((m) => [+m[2], !/^(127\.|\[::1\])/.test(m[1])]));
-  const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && (p < PORT || p > PORT + 99) && !runs.has(p)).sort((a, b) => a - b).map(async (port) => {
+  const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p)).sort((a, b) => a - b).map(async (port) => {
     try { const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await res.json()).data?.[0]?.id]; } catch { return [port, null]; }
   }));
   const known = new Set([...runs.values()].map((r) => r.served));
