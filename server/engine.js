@@ -132,7 +132,7 @@ async function begin(id, picked) {
   const need = recipe.launch.cards || 1;
   const free = freeGpus().filter((g) => cardFor(g) === recipe.card).map((g) => g.index);
   const gpus = picked?.length ? picked : free.slice(0, need);
-  if (new Set(gpus).size !== need || gpus.some((g) => !free.includes(g))) fail(409, `Needs ${need} free GPU${need > 1 ? 's' : ''}; ${free.length} free`);
+  if (gpus.length !== need || new Set(gpus).size !== need || gpus.some((g) => !free.includes(g))) fail(409, `Needs ${need} free GPU${need > 1 ? 's' : ''}; ${free.length} free`);
   const r = { id: port, recipe: id, name: label(id), url: `http://${ENGINE_HOST}:${port}`, gpus, phase: 'queued', detail: 'Queued', progress: null, error: null, since: Date.now(), busy: true, abort: new AbortController(), apis: null, stats: null, misses: 0 };
   runs.set(port, r);
   config.last = id;
@@ -271,7 +271,8 @@ async function reconcile(c, listedAt) {
     if (!up && r.misses >= 15) { update(r, { phase: 'unresponsive', detail: null, heard: now - r.misses * 2000 }); event('warn', 'run.unresponsive', { id: r.id }); }
     else {
       await usage.scrape(r, now);
-      if (up && !r.measuring && !r.tried && !speedOf(r.recipe) && !r.stats?.active && now - r.readyAt > 3000) startMeasure(r);
+      const still = runs.get(id) === r && r.phase === 'ready'; // it may have been stopped while we were reading it
+      if (still && up && !r.measuring && !r.tried && !speedOf(r.recipe) && !r.stats?.active && now - r.readyAt > 3000) startMeasure(r);
     }
   } else if (!r.seen && r.phase !== 'failed' && now - r.since > START_DEADLINE) {
     setFailed(r, 'The engine did not become ready within 2 hours');
@@ -353,7 +354,10 @@ function describe(r) {
 }
 
 export const all = () => [...runs.values()];
-export const listRuns = () => [...runs.values()].sort((a, b) => a.id - b.id).map(({ abort, measureAbort, busy, misses, scraped, seen, touched, replying, tried, heard, series, used, ...r }) => ({
-  ...r, view: describe(runs.get(r.id)), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch.ctx || 0, vision: !!find(r.recipe)?.launch.vision, card: find(r.recipe)?.card || null,
+// What the app is told about a run. Anything not named here stays inside the server.
+const SHOWN = ['id', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external'];
+export const listRuns = () => all().sort((a, b) => a.id - b.id).map((r) => ({
+  ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch.ctx || 0, vision: !!find(r.recipe)?.launch.vision,
+  reachable: r.external ? r.reachable : !!shared || !/^127\./.test(HOST), // whether another machine can call it
 }));
 

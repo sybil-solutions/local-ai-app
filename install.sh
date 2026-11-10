@@ -12,9 +12,11 @@ if [ -z "$NODE" ] && command -v mise >/dev/null; then mise use -g node@lts && NO
 mkdir -p "$DEST" "$HOME/.config/systemd/user"
 if [ "$SRC" != "$DEST" ]; then cp -r "$SRC/server" "$SRC/web" "$SRC/package.json" "$SRC/install.sh" "$DEST/"; fi
 UNIT="$HOME/.config/systemd/user/local-ai.service"
+# A value as systemd reads it inside double quotes.
+quoted() { printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/%/%%/g'; }
 # Settings given now stay with the service; ones given at an earlier install are kept.
 SETTINGS="$(for v in LOCAL_AI_HOST LOCAL_AI_SHARE LOCAL_AI_PORT LOCAL_AI_HOME LOCAL_AI_MODELS LOCAL_AI_REGISTRY HF_HOME; do
-  if [ -n "${!v}" ]; then echo "Environment=\"$v=${!v}\""; else grep -s "^Environment=\"$v=" "$UNIT"; fi
+  if [ -n "${!v}" ]; then echo "Environment=\"$v=$(quoted "${!v}")\""; else grep -s "^Environment=\"\\?$v=" "$UNIT"; fi
 done; true)"
 cat > "$UNIT" <<UNIT
 [Unit]
@@ -22,9 +24,9 @@ Description=Local AI
 After=network-online.target
 
 [Service]
-ExecStart="$NODE" "$DEST/server/index.js"
-Environment=SHELL=${SHELL:-/bin/bash}
-Environment=PATH=$PATH
+ExecStart="$(quoted "$NODE")" "$(quoted "$DEST/server/index.js")"
+Environment="SHELL=$(quoted "${SHELL:-/bin/bash}")"
+Environment="PATH=$(quoted "$PATH")"
 $SETTINGS
 Restart=always
 RestartSec=2

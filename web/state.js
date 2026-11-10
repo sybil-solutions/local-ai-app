@@ -47,6 +47,7 @@ export function chosen() {
 }
 // The three picks, plus the chosen model when it is none of them.
 export const shown = () => { const three = picks(), c = chosen(); return c && !three.some((r) => r.id === c.id) ? [...three, c] : three; };
+export const cardKey = (id) => `${s.dev} ${id}`; // a recipe id can mean a different model on another machine
 export const newer = (a, b) => a.localeCompare(b, 'en', { numeric: true }) > 0;
 export const agentName = () => s.snap.agents.find((a) => a.id === s.snap.agent && a.installed)?.name;
 export const outdated = () => s.snap.agents.filter((a) => a.installed && a.version && a.latest && newer(a.latest, a.version) && a.job?.phase !== 'running');

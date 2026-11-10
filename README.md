@@ -47,7 +47,7 @@ flowchart LR
 
 - **One snapshot.** Every two seconds the server looks at the GPUs (`nvidia-smi`), its containers (`docker ps`), and each engine (`/v1/models`, `/metrics`). The result is one JSON snapshot. The app long-polls it and redraws; nothing else is pushed, and the app keeps no state of its own about the machine.
 - **Docker is the record.** A run is a container labelled `local-ai=1` with its recipe, port and GPUs in labels. Restart the server and it adopts whatever is still running.
-- **Models it didn't start.** Every 30 seconds it asks each listening port for `/v1/models`. Whatever answers is shown as running too, with its stats and its address, and is never stopped. The same model id on several ports (an engine and a proxy in front of it) is shown once, on the lowest port.
+- **Models it didn't start.** Every 30 seconds it asks each listening port above 1024, over loopback, for `/v1/models`. Whatever answers is shown as running too, with its stats and its address, and is never stopped. The same model id on several ports (an engine and a proxy in front of it) is shown once.
 - **Which screen.** The app shows the first screen its rules match for the snapshot (`resolve()` in `web/state.js`): can't connect, needs a key, Docker off, no GPU, downloading, starting, running, failed, and so on. Settings, Models and the rest are ordinary screens opened on top.
 - **Your machines.** Machines signed in to your Tailscale account trust each other: one click connects them, and the page opens on any of them without typing the key. Anything else needs the key.
 
@@ -140,7 +140,8 @@ Run    = { id,            // the port it serves on
            phase,         // queued · weights · image · starting · testing · ready · unresponsive · stopping · failed
            detail, progress, error, failure: { word, line }, view: { line, p },
            served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active },
-           external, reachable }                               // set on a model Local AI found but did not start
+           external,                                           // true for a model Local AI found but did not start
+           reachable }                                         // whether another machine can call it
 ```
 
 ### On disk (`~/.local-ai`)

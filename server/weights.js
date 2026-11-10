@@ -5,7 +5,6 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { find } from './recipes.js';
 import { at, event, sleep } from './util.js';
 
 const MODELS = process.env.LOCAL_AI_MODELS || at('models');
@@ -79,38 +78,46 @@ const weightMount = (w) => (w.path ? `${w.path}:${w.at}:ro` : w.layout === 'hub'
 const markerOf = (w) => join(weightDir(w), `.complete-${createHash('sha256').update(String(w.files || '')).digest('hex').slice(0, 12)}`);
 // The docker arguments that put the weights inside the engine's container.
 export const mounts = (launch) => [...weightsOf(launch).flatMap((w) => ['-v', weightMount(w)]), ...(weightsOf(launch).some((w) => w.layout === 'hub') ? ['-e', 'HF_HUB_OFFLINE=1'] : [])];
-export const onDisk = (id) => weightsOf(find(id).launch).every((w) => existsSync(w.path || markerOf(w)));
+export const onDisk = (launch) => weightsOf(launch).every((w) => existsSync(w.path || markerOf(w)));
 
 // Fetches whatever the recipe's weights still need. report() is told the phase, the detail line and the progress.
+const busy = new Map(); // one download at a time per folder, because two recipes can share the same weights
 export async function download(launch, signal, report) {
   for (const w of weightsOf(launch)) {
     if (w.path) { if (!existsSync(w.path)) throw new Error(`Weights folder ${w.path} does not exist`); continue; }
-    const dest = weightDir(w);
-    const marker = markerOf(w);
+    const dest = weightDir(w), marker = markerOf(w);
+    while (busy.has(dest) && !existsSync(marker)) {
+      report({ phase: 'weights', detail: 'Waiting for another download of these weights', progress: null });
+      await busy.get(dest).catch(() => {});
+      signal.throwIfAborted();
+    }
     if (existsSync(marker)) continue;
-    report({ phase: 'weights', detail: `Listing ${w.repo}`, progress: 0 });
-    const only = String(w.files || '').split(',').filter(Boolean);
-    const files = (await hfFiles(w.repo, w.revision, signal)).filter((f) => !only.length || only.includes(f.path));
-    if (only.length && files.length < only.length) throw new Error(`${w.repo} is missing some recipe files`);
-    const total = files.reduce((n, f) => n + f.size, 0);
-    mkdirSync(dest, { recursive: true });
-    const space = statfsSync(dest);
-    const have = (p) => (existsSync(p) ? statSync(p).size : 0); // a part already downloaded needs no more room
-    const needed = files.filter((f) => !existsSync(join(dest, f.path))).reduce((n, f) => n + f.size - have(join(dest, `${f.path}.part`)), 0);
-    if (space.bavail * space.bsize < needed) throw new Error(`Needs ${Math.ceil(needed / 1e9)} GB free in ${dest}`);
-    const seen = new Map();
-    const pending = [...files];
-    await Promise.all(Array.from({ length: 4 }, async () => {
-      for (let f = pending.shift(); f; f = pending.shift()) {
-        seen.set(f.path, 0);
-        const onBytes = (n) => {
-          seen.set(f.path, n === 0 ? 0 : seen.get(f.path) + n);
-          const done = [...seen.values()].reduce((a, b) => a + b, 0);
-          report({ detail: `${size(done, total)} of ${size(total, total)}`, progress: total ? Math.min(1, done / total) : 1 });
-        };
-        await fetchFile(w.repo, w.revision, f, dest, onBytes, signal);
-      }
-    }));
-    writeFileSync(marker, new Date().toISOString());
+    const job = fetchAll(w, dest, signal, report).then(() => writeFileSync(marker, new Date().toISOString()));
+    busy.set(dest, job);
+    try { await job; } finally { busy.delete(dest); }
   }
+}
+
+async function fetchAll(w, dest, signal, report) {
+  report({ phase: 'weights', detail: `Listing ${w.repo}`, progress: 0 });
+  const only = String(w.files || '').split(',').filter(Boolean);
+  const files = (await hfFiles(w.repo, w.revision, signal)).filter((f) => !only.length || only.includes(f.path));
+  if (only.length && files.length < only.length) throw new Error(`${w.repo} is missing some recipe files`);
+  const total = files.reduce((n, f) => n + f.size, 0);
+  mkdirSync(dest, { recursive: true });
+  const space = statfsSync(dest), have = (p) => (existsSync(p) ? statSync(p).size : 0); // a part already downloaded needs no more room
+  const needed = files.filter((f) => !existsSync(join(dest, f.path))).reduce((n, f) => n + f.size - have(join(dest, `${f.path}.part`)), 0);
+  if (space.bavail * space.bsize < needed) throw new Error(`Needs ${Math.ceil(needed / 1e9)} GB free in ${dest}`);
+  const seen = new Map(), pending = [...files];
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    for (let f = pending.shift(); f; f = pending.shift()) {
+      seen.set(f.path, 0);
+      const onBytes = (n) => {
+        seen.set(f.path, n === 0 ? 0 : seen.get(f.path) + n);
+        const done = [...seen.values()].reduce((a, b) => a + b, 0);
+        report({ detail: `${size(done, total)} of ${size(total, total)}`, progress: total ? Math.min(1, done / total) : 1 });
+      };
+      await fetchFile(w.repo, w.revision, f, dest, onBytes, signal);
+    }
+  }));
 }

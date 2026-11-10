@@ -43,9 +43,9 @@ export const a = (label, act, cls = '', extra = '') => `<button class="btn ${cls
 export const bar = (pct) => `<div class="bar"><i style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></i></div>`;
 export const toggle = (on, attrs, label) => `<button class="switch${on ? ' on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" ${attrs}></button>`;
 export const left = (text) => `<div class="line" style="text-align:left">${text}</div>`;
-export const item = (name, go, note = icon('right', 14)) => `<button class="item" data-go="${go}">${name}<small>${note}</small></button>`;
+export const item = (name, go) => `<button class="item" data-go="${go}">${name}<small>${icon('right', 14)}</small></button>`;
 export const kv = (rows) => rows.map(([k, v]) => `<span class="label">${k}</span><b>${v}</b>`).join('');
-export const stat = (label, value, live) => `<div class="stat${live ? ' live' : ''}"><b>${fmt(value)}</b><span class="label">${label}</span></div>`;
+const stat = (label, value, live) => `<div class="stat${live ? ' live' : ''}"><b>${fmt(value)}</b><span class="label">${label}</span></div>`;
 
 // The picture and the words under it. pose is apart, reach (p of the way), touch, work or broken.
 export const art = (pose, p = 0) => `<canvas class="art" data-pose="${pose}" data-p="${p}" aria-hidden="true"></canvas>`;
@@ -59,7 +59,7 @@ export const menu = () => (s.snap
 export const close = (go = 'back') => `<div class="top"><span class="mark">Local AI</span><button class="x" data-go="${go}" aria-label="Close">${icon('close')}</button></div>`;
 export const notice = () => (s.note ? `<button class="notice" data-act="dismiss" title="Dismiss">${esc(s.note)}</button>` : '');
 
-export const running = (r) => `<div class="stats twoup">${stat('Decode tok/s', r.stats?.tps || 0, true)}${stat('Prefill tok/s', r.stats?.pps || 0)}${stat('Session tokens', r.stats?.used || 0)}<button class="linkstat" data-go="usage">${stat('Lifetime tokens', D().usage.all)}</button></div>`;
+export const running = (r) => `<div class="stats">${stat('Decode tok/s', r.stats?.tps || 0, true)}${stat('Prefill tok/s', r.stats?.pps || 0)}${stat('Session tokens', r.stats?.used || 0)}<button class="linkstat" data-go="usage">${stat('Lifetime tokens', D().usage.all)}</button></div>`;
 export const meta = (r) => [r.released && new Date(`${r.released}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', year: 'numeric' }), r.engine, ctxOf(r.ctx)].filter(Boolean).join(' · ');
 // A model's numbers. The desktop page has room for two more rows; the panel names the engine instead.
 export const facts = (r, wide) => [
