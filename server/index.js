@@ -24,13 +24,13 @@ let shared = null; // this machine's tailnet address, once the app is also liste
 // The snapshot: what GET /api/state returns. Clients long-poll it and redraw from it; nothing else pushes.
 let snapshot = '{}', signature = '', version = 0, waiters = [];
 async function publish() {
-  const groups = recipes.groups(engine.status.gpus), list = await agents.list();
+  const groups = recipes.groups(engine.status.gpus), list = await agents.list(), term = await agents.terminalChoice();
   for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(recipes.find(r.id).launch);
   const state = {
     // Apple silicon runs its recipes as host programs, so Docker is only asked for where a container recipe needs it.
     name: hostname(), docker: engine.status.docker, needsDocker: !engine.status.gpus.length || !engine.status.gpus.every((g) => g.unified), gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
     usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
-    agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder,
+    agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder, ...term,
     home: config.home || null, background: config.background || 'fresco', tone: config.tone || null, picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
   };
   const text = JSON.stringify(state);
@@ -64,7 +64,8 @@ async function endpoints() {
   return { runs, key: config.key, sources: await usage.sources(engine.all()) };
 }
 
-function saveSettings({ b }) {
+async function saveSettings({ b }) {
+  if (typeof b.terminal === 'string') await agents.setTerminal(b.terminal);
   for (const k of ['folder', 'agent']) if (typeof b[k] === 'string') config[k] = b[k];
   if (['fresco', 'own', 'none'].includes(b.background)) config.background = b.background;
   if (['gray', 'color'].includes(b.tone)) config.tone = b.tone;

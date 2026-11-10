@@ -53,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
         for _ in range(n):
             self.wfile.write(b'data: ' + json.dumps({"choices": [{"index": 0, "delta": {"content": "ok "}}]}).encode() + b"\n\n")
             self.wfile.flush()
-            time.sleep(0.002)
+            time.sleep(0.01)  # far enough apart that tokens never arrive as one burst, which leaves nothing to time
         if (body.get("stream_options") or {}).get("include_usage"):
             last = {"choices": [], "usage": usage, **({"timings": {"prompt_n": 2000, "prompt_ms": 100.0}} if native else {})}
             self.wfile.write(b"data: " + json.dumps(last).encode() + b"\n\n")
