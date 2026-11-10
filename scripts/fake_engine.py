@@ -46,13 +46,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
         self.end_headers()
-        time.sleep(0.05)  # stands in for reading the prompt
+        # A request that says "timings" waits 0.5 s in a queue, then reports that reading its 2000 prompt tokens took
+        # 0.1 s, as llama.cpp-style servers do. Any other request reports no timings.
+        native = "timings" in json.dumps(body.get("messages"))
+        time.sleep(0.5 if native else 0.05)
         for _ in range(n):
             self.wfile.write(b'data: ' + json.dumps({"choices": [{"index": 0, "delta": {"content": "ok "}}]}).encode() + b"\n\n")
             self.wfile.flush()
             time.sleep(0.002)
         if (body.get("stream_options") or {}).get("include_usage"):
-            self.wfile.write(b"data: " + json.dumps({"choices": [], "usage": usage}).encode() + b"\n\n")
+            last = {"choices": [], "usage": usage, **({"timings": {"prompt_n": 2000, "prompt_ms": 100.0}} if native else {})}
+            self.wfile.write(b"data: " + json.dumps(last).encode() + b"\n\n")
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
         self.close_connection = True
