@@ -1,7 +1,7 @@
 // The desktop layout: a top bar, the painting as the room, Home along the bottom, and every other screen as a page.
 import { all, chosen, D, here, HOME, run, s, shown } from './state.js';
 import { agentList, agentsFoot, BLOCKS, cardHtml, editBody, elsewhere, offLine, openBtns, runLine, SCREENS, startBtn, STATE, stopBtn, useBtn } from './screens.js';
-import { bar, capNames, caps, ctxOf, esc, facts, fmt, fsBtn, kv, meta, running, vfoot } from './ui.js';
+import { bar, capNames, caps, ctxOf, esc, facts, fmt, fsBtn, icon, kv, meta, running, vfoot } from './ui.js';
 
 // [section, label, the screen it opens]. Keys 1 to 6 follow this order.
 export const NAV = [['home', 'Home', 'home'], ['models', 'Models', 'adv-models'], ['agents', 'Agents', 'agent'], ['machines', 'Machines', 'machines'], ['usage', 'Usage', 'usage'], ['settings', 'Settings', 'home-edit']];
@@ -26,7 +26,7 @@ export function homeHtml(id) {
   let inner;
   if (id === 'off') {
     const c = chosen();
-    const pick = (r) => `<button class="cpick${r.id === c.id ? ' on' : ''}" data-act="pick" data-id="${esc(r.id)}">${esc(r.name)}<small>${[r.tier, r.speed.c1 && `${Math.round(r.speed.c1)}/s`].filter(Boolean).join(' · ')}</small></button>`;
+    const pick = (r) => `<button class="cpick${r.id === c.id ? ' on' : ''}" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${[r.tier, r.speed.c1 && `${Math.round(r.speed.c1)}/s`].filter(Boolean).join(' · ')}</small></button>`;
     inner = strip(esc(c.name), offLine(c), `<div class="cpicks">${HOME().includes('models') ? shown().map(pick).join('') : ''}</div>`, `<button class="quiet" data-nav="adv-models">More models</button>${startBtn()}`);
   } else if (id === 'awake' || id === 'opened') {
     const r = run(), sub = [esc(runLine(r, id === 'opened')), all().find((x) => x.id === r.recipe)?.engine, r.ctx && ctxOf(r.ctx)].filter(Boolean).join(' · ');
@@ -60,5 +60,5 @@ export function pageHtml(page) {
     return `<div class="ssplit"><div class="smenu">${SETTINGS.map(([id, label]) => `<button class="${id === on ? 'on' : ''}" data-nav="${id}">${label}</button>`).join('')}${vfoot()}</div><div class="pg">${body(on)}</div></div>`;
   }
   const top = NAV.some((n) => n[2] === page) || page === 'key';
-  return `<div class="pwrap pg${page === 'usage' ? ' wide' : ''}">${top ? '' : '<button class="pback" data-go="back">‹ Back</button>'}${body(page)}</div>`;
+  return `<div class="pwrap pg${page === 'usage' ? ' wide' : ''}">${top ? '' : `<button class="pback" data-go="back">${icon('left', 14)}Back</button>`}${body(page)}</div>`;
 }
