@@ -68,7 +68,7 @@ export function resolve() {
     const late = r.phase === 'starting' && r.expected && (Date.now() - r.since) / 1000 > r.expected * 1.5;
     return { weights: 'dl', ready: s.opened === r.id ? 'opened' : 'awake', unresponsive: 'noreply', stopping: 'sleeping', failed: 'failed' }[r.phase] || (late ? 'slow' : 'waking');
   }
-  if (!d.docker.ok && d.gpus.length) return /not installed/.test(d.docker.error) ? 'needsdocker' : 'dockeroff';
+  if (!d.docker.ok && d.gpus.length && d.needsDocker !== false) return /not installed/.test(d.docker.error) ? 'needsdocker' : 'dockeroff';
   if (!d.gpus.length) return 'nogpu';
   const c = chosen();
   if (!c) return d.catalog.count ? 'nothing' : 'nocatalog';

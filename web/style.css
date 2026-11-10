@@ -173,7 +173,7 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .hname small { display: block; margin-top: 1px; font: 400 12px var(--ui); color: var(--muted); }
 .bgrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .bgthumb { flex: none; width: 46px; height: 28px; border-radius: 3px; border: 1px solid var(--line); background: var(--paint) 49% 56% / 240% auto no-repeat; }
-.bg-gray { filter: grayscale(1); }
+[data-tone=gray] .bgthumb { filter: grayscale(1); }
 .bg-own { background-image: var(--own, none); background-size: cover; background-position: center; }
 .bg-none { background: var(--bg); }
 .bgrow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -249,20 +249,14 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 #art img { position: absolute; max-width: none; }
 #art .mono { filter: grayscale(1) brightness(.4) contrast(1.05); }
 #art .color { filter: grayscale(1) brightness(.84) contrast(1.08); -webkit-mask-image: radial-gradient(circle at var(--gx) var(--gy), #000 calc(var(--r) * .72), transparent var(--r)); mask-image: radial-gradient(circle at var(--gx) var(--gy), #000 calc(var(--r) * .72), transparent var(--r)); }
-.glow, .spark { position: absolute; left: var(--gx); top: var(--gy); border-radius: 50%; opacity: 0; transition: opacity 1s .4s; pointer-events: none; }
-.glow { width: 120px; height: 120px; margin: -60px 0 0 -60px; background: radial-gradient(closest-side, rgba(255,255,255,.95), rgba(255,255,255,0)); }
-.spark { width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; background: #fff; box-shadow: 0 0 12px 3px #fff; }
-#art.work .glow { opacity: .75; animation: fspulse var(--beat, 1s) ease-in-out infinite alternate; }
-#art.work .spark { opacity: 1; }
-@keyframes fspulse { from { transform: scale(.75); } to { transform: scale(1.15); } }
-[data-bg=color] #art .color, [data-bg=own] #art .color { filter: brightness(.9) contrast(1.04); }
+[data-tone=color] #art .color { filter: brightness(.9) contrast(1.04); }
 [data-bg=none] #art { display: none; }
 html:not([data-bg=none]) .frame .screen:has(canvas.art) { position: relative; isolation: isolate; }
 html:not([data-bg=none]) .frame .screen canvas.art { visibility: hidden; }
-html:not([data-bg=none]) .frame .screen:has(canvas.art)::before, html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: radial-gradient(circle at 130px 116px, rgba(255,255,255,.9), rgba(255,255,255,0) 20px), var(--pimg); background-position: 0 0, var(--ppos); background-size: auto, var(--psz); background-repeat: no-repeat; -webkit-mask-image: linear-gradient(#000 156px, transparent 281px); mask-image: linear-gradient(#000 156px, transparent 281px); }
+html:not([data-bg=none]) .frame .screen:has(canvas.art)::before, html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: none, var(--pimg); background-position: 0 0, var(--ppos); background-size: auto, var(--psz); background-repeat: no-repeat; -webkit-mask-image: linear-gradient(#000 156px, transparent 281px); mask-image: linear-gradient(#000 156px, transparent 281px); }
 html:not([data-bg=none]) .frame .screen:has(canvas.art)::before { background-image: none, var(--pimg); filter: grayscale(1) brightness(.4) contrast(1.05); }
 html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { filter: grayscale(1) brightness(.84) contrast(1.08); -webkit-mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); -webkit-mask-composite: source-in; mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-composite: intersect; }
-html[data-bg=color] .frame .screen:has(canvas.art)::after, html[data-bg=own] .frame .screen:has(canvas.art)::after { filter: brightness(.9) contrast(1.04); }
+html[data-tone=color] .frame .screen:has(canvas.art)::after { filter: brightness(.9) contrast(1.04); }
 
 /* Desktop layout: the top bar, Home along the bottom, and pages. */
 #fs { display: none; }
