@@ -47,7 +47,8 @@ function serve(handler) {
 
 // An engine started outside the app, with vLLM's counters. Each request reads 2000 prompt tokens in 1 s, then a short
 // follow-up reads 200 in 0.5 s, too few to time: the speed shown stays 2000.
-const counters = { prompt_tokens_total: 0, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0, request_prefill_kv_computed_tokens_sum: 0, request_prefill_time_seconds_sum: 0 };
+// It has already read 30,000 prompt tokens in 10 s before the app first sees it.
+const counters = { prompt_tokens_total: 30000, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0, request_prefill_kv_computed_tokens_sum: 30000, request_prefill_time_seconds_sum: 10 };
 const outside = await serve((req, body) => {
   if (req.url === '/v1/models') return [200, { data: [{ id: 'outside-model' }] }];
   if (req.url === '/metrics') return [200, Object.entries(counters).map(([k, v]) => `vllm:${k}{model_name="outside-model"} ${v}`).join('\n'), 'text/plain'];
@@ -148,7 +149,8 @@ try {
   const found = await until('the outside engine to be found', async () => (await state()).runs.find((r) => r.external && r.id === port), 45000);
   check('finds a model started outside the app', found.served === 'outside-model');
   check('does not take a proxy of several models for a model running here', !(await state()).runs.some((r) => r.id === proxy.address().port));
-  await until('a first read of its counters', async () => (await state()).runs.find((r) => r.id === port)?.stats, 15000);
+  const seen = await until('a first read of its counters', async () => (await state()).runs.find((r) => r.id === port)?.stats, 15000);
+  check('shows the engine\'s lifetime prefill speed before it sees a prefill, not 0', seen.pps === 3000, `pps ${seen.pps}`);
   await chat(port, false);
   const counted = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2050 && r; }, 15000);
   check('counts its tokens from /metrics', counted.stats.used === 2050, `used ${counted.stats.used}`);
