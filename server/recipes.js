@@ -11,7 +11,7 @@ const localFile = at('recipes.json');
 
 let catalog = readJson(catalogFile, { cards: {}, recipes: {}, models: {}, builds: {} });
 const local = readJson(localFile, {});
-export const feed = { at: null, error: null };
+const feed = { at: null, error: null };
 
 export async function refresh() {
   try {
@@ -67,11 +67,11 @@ function view(id) {
   const aa = score(recipe.model);
   const text = `${(recipe.launch.args || []).join(' ')} ${recipe.launch.config?.text || ''}`;
   return {
-    id, local: !!local[id], name: recipe.name || model?.name || recipe.model, about: model?.good_for || '', card: recipe.card,
+    id, local: !!local[id], name: recipe.name || model?.name || recipe.model, card: recipe.card,
     cards: recipe.launch.cards || 1, engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: recipe.launch.ctx || 0,
-    vision: !!recipe.launch.vision, tps: measured?.c1 ?? proof?.tps ?? null, smart: aa?.index ?? null, aaAt: aa?.at ?? null, aaEstimated: !!aa?.estimated, seqs: recipe.launch.seqs || 1,
+    vision: !!recipe.launch.vision, tps: measured?.c1 ?? proof?.tps ?? null, smart: aa?.index ?? null, seqs: recipe.launch.seqs || 1,
     speed: { c1: measured?.c1 ?? proof?.tps ?? null, c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: catalog.builds[recipe.weights]?.size_gb ?? null,
-    proof: proof?.gates && !proof.legacy ? 'tested' : 'reported', released: model?.released || null, loadS: loadSeconds(id),
+    released: model?.released || null, loadS: loadSeconds(id),
     think: !!model?.reasoning, tools: /tool-call-parser|enable-auto-tool-choice|--jinja/.test(text), kv: /--kv-cache-dtype[= ](\S+)/.exec(text)?.[1] || null,
   };
 }
@@ -110,7 +110,7 @@ function tiers(list) {
 
 const norm = (s) => s.toLowerCase().replace(/\((r|tm)\)/g, '').replace(/geforce|nvidia|amd|radeon|intel|graphics|[^a-z0-9]/g, '');
 
-export function cardOf(gpuName, vramGb) {
+function cardOf(gpuName, vramGb) {
   const n = norm(gpuName);
   const score = ([id, card]) => Math.max(0, ...[norm(card.name), norm(id), ...(card.match?.names || [])].filter((x) => x && n.includes(x)).map((x) => x.length));
   const off = (entry) => Math.abs(entry[1].vram_gb - vramGb);
@@ -167,8 +167,8 @@ export function reset(id) {
   return { id };
 }
 
-export const recipeCount = () => Object.keys(catalog.recipes).length;
-export const registryId = () => (catalog.sha256 || '').slice(0, 7);
+// The registry as the app shows it: when it was last fetched, any error, how many recipes, and which version.
+export const registry = () => ({ ...feed, count: Object.keys(catalog.recipes).length, id: (catalog.sha256 || '').slice(0, 7) });
 
 // The model's page on Hugging Face: the repo the registry names, else the best match for its name.
 const cards = new Map();

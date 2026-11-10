@@ -28,7 +28,7 @@ async function publish() {
   for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(r.id);
   const state = {
     name: hostname(), docker: engine.status.docker, gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
-    usage: usage.view(), catalog: { ...recipes.feed, count: recipes.recipeCount(), id: recipes.registryId() }, last: config.last || null, devices: machines.views(),
+    usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
     agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder,
     home: config.home || null, background: config.background || 'gray', picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
   };
@@ -85,7 +85,7 @@ const ROUTES = compile({
   'GET /api/recipe': ({ q }) => recipes.raw(q.get('id')),
   'POST /api/recipes': ({ b }) => { const saved = recipes.save(b); speed.forget(saved.id); return saved; },
   'DELETE /api/recipes': ({ q }) => recipes.reset(q.get('id')),
-  'POST /api/refresh': async () => { await recipes.refresh(); return { ...recipes.feed }; },
+  'POST /api/refresh': async () => { await recipes.refresh(); return recipes.registry(); },
   'GET /api/card': ({ q }) => recipes.card(q.get('id')),
   'GET /api/usage': () => usage.detail(engine.all()),
   'GET /api/endpoints': endpoints,
