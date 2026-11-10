@@ -201,7 +201,7 @@ export async function logs(rawId, tail) {
 async function probe(r) {
   try {
     const res = await fetch(`${r.url}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) { update(r, { served: (await res.json()).data?.[0]?.id ?? r.served, misses: 0 }); return true; }
+    if (res.ok) { const model = (await res.json()).data?.[0]; update(r, { served: model?.id ?? r.served, window: +model?.max_model_len || r.window || 0, misses: 0 }); return true; }
   } catch { /* still loading, or busy */ }
   r.misses++;
   return false;
@@ -615,6 +615,6 @@ export const all = () => [...runs.values()];
 // What the app is told about a run. Anything not named here stays inside the server.
 const SHOWN = ['id', 'host', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external', 'reachable'];
 export const listRuns = () => all().sort((a, b) => a.id - b.id).map((r) => ({
-  ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch?.ctx || 0, vision: !!find(r.recipe)?.launch?.vision,
+  ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch?.ctx || r.window || 0, vision: !!find(r.recipe)?.launch?.vision,
 }));
 
