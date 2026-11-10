@@ -21,20 +21,28 @@ function parseMetrics(text) {
   return out;
 }
 
-// How fast the engine reads prompts, in tokens a second, or null when it read none since the last scrape (the last
-// speed then stays shown). Prompt tokens served from the prefix cache are not prefill, and a prompt is read in one burst,
-// so prompt tokens over the scrape window would mostly show 0, and a cache hit as a huge number. Instead:
-// vLLM: the tokens it computed while prefilling over the seconds it spent prefilling, from its own histograms.
-// llama.cpp: its prompt speed gauge. SGLang and the rest: prompt tokens that missed the cache over the window.
-function prefillSpeed(r, m, seconds) {
+// How fast the engine reads prompts, in tokens a second, or null before it has read one worth timing. Prompt tokens
+// served from the prefix cache are not prefill, and a prompt is read in one burst, so prompt tokens over the scrape
+// window would mostly show 0, and a cache hit as a huge number. Instead, per engine:
+//   vLLM: the tokens it computed while prefilling and the seconds it spent doing it, from its own histograms.
+//   llama.cpp: its own prompt speed gauge.
+//   SGLang and the rest: prompt tokens that missed the cache, over the scrape window.
+// A prefill under PREFILL_MIN tokens times the engine's overhead more than its speed, so it is left out, and the
+// speed shown is the tokens over the seconds of the prefills in the last PREFILL_WINDOW (the last ones, when idle).
+const PREFILL_MIN = 1000, PREFILL_WINDOW = 300e3;
+function prefillSpeed(r, m, seconds, now) {
   const prev = r.counters;
   r.counters = m;
-  if (!prev) return null;
-  const d = (k) => (m[k] ?? 0) - (prev[k] ?? 0);
-  if (m.request_prefill_time_seconds_sum !== undefined) return d('request_prefill_time_seconds_sum') > 0 ? d('request_prefill_kv_computed_tokens_sum') / d('request_prefill_time_seconds_sum') : null;
-  if (m.prompt_tokens_seconds !== undefined) return m.prompt_tokens_seconds > 0 ? m.prompt_tokens_seconds : null;
-  const fresh = d('prompt_tokens_total') - d('cached_tokens_total');
-  return seconds && fresh > 0 ? fresh / seconds : null;
+  if (m.prompt_tokens_seconds !== undefined && m.request_prefill_time_seconds_sum === undefined) return m.prompt_tokens_seconds > 0 ? m.prompt_tokens_seconds : null;
+  const d = (k) => (prev ? (m[k] ?? 0) - (prev[k] ?? 0) : 0);
+  const [tokens, secs] = m.request_prefill_time_seconds_sum !== undefined
+    ? [d('request_prefill_kv_computed_tokens_sum'), d('request_prefill_time_seconds_sum')]
+    : [d('prompt_tokens_total') - d('cached_tokens_total'), seconds];
+  if (tokens >= PREFILL_MIN && secs > 0) r.prefills = [...(r.prefills || []).filter(([at]) => now - at < PREFILL_WINDOW), [now, tokens, secs]];
+  // Before any prefill worth timing since the app started watching: the engine's average over its whole life, so
+  // the number is never 0 for an engine that has read prompts.
+  if (!r.prefills?.length) return m.request_prefill_time_seconds_sum > 0 ? m.request_prefill_kv_computed_tokens_sum / m.request_prefill_time_seconds_sum : null;
+  return r.prefills.reduce((n, p) => n + p[1], 0) / r.prefills.reduce((n, p) => n + p[2], 0);
 }
 
 // Reads one engine's counters, adds what changed to the totals, and leaves its live numbers on the run.
@@ -64,7 +72,7 @@ export async function scrape(r, now) {
   r.series ||= [];
   if (!r.series.length || now - r.series.at(-1)[0] >= 60000) { r.series.push([now, r.used.in + r.used.out]); if (r.series.length > 240) r.series.shift(); }
   const seconds = r.scraped ? (now - r.scraped) / 1000 : 0;
-  r.pps = prefillSpeed(r, m, seconds) ?? r.pps ?? 0;
+  r.pps = prefillSpeed(r, m, seconds, now) ?? 0;
   r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: Math.round(r.pps), used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
   r.scraped = now;
 }

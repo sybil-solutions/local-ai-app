@@ -38,7 +38,7 @@ class Handler(BaseHTTPRequestHandler):
         if not body.get("messages"):
             return self.send(400, {"error": "messages required"})
         n = max(1, min(int(body.get("max_tokens") or 16), 64))
-        usage = {"prompt_tokens": 40, "completion_tokens": n, "total_tokens": 40 + n}
+        usage = {"prompt_tokens": 2000, "completion_tokens": n, "total_tokens": 2000 + n}
         if not body.get("stream"):
             return self.send(200, {"id": "x", "object": "chat.completion", "model": MODEL, "usage": usage,
                                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok " * n}, "finish_reason": "stop"}]})
