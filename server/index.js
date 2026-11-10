@@ -27,10 +27,11 @@ async function publish() {
   const groups = recipes.groups(engine.status.gpus), list = await agents.list();
   for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(recipes.find(r.id).launch);
   const state = {
-    name: hostname(), docker: engine.status.docker, gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
+    // Apple silicon runs its recipes as host programs, so Docker is only asked for where a container recipe needs it.
+    name: hostname(), docker: engine.status.docker, needsDocker: !engine.status.gpus.length || !engine.status.gpus.every((g) => g.unified), gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
     usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
     agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder,
-    home: config.home || null, background: config.background || 'gray', picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
+    home: config.home || null, background: config.background || 'fresco', tone: config.tone || null, picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
   };
   const text = JSON.stringify(state);
   if (text === signature) return;
@@ -64,7 +65,9 @@ async function endpoints() {
 }
 
 function saveSettings({ b }) {
-  for (const k of ['folder', 'agent', 'background']) if (typeof b[k] === 'string') config[k] = b[k];
+  for (const k of ['folder', 'agent']) if (typeof b[k] === 'string') config[k] = b[k];
+  if (['fresco', 'own', 'none'].includes(b.background)) config.background = b.background;
+  if (['gray', 'color'].includes(b.tone)) config.tone = b.tone;
   if (Array.isArray(b.home?.order) && Array.isArray(b.home?.on)) config.home = { order: b.home.order.map(String), on: b.home.on.map(String) };
   if (typeof b.autoUpdate === 'boolean') config.autoUpdate = b.autoUpdate;
   if ('hfToken' in b) weights.saveToken(b.hfToken);
@@ -79,7 +82,7 @@ function saveSettings({ b }) {
 
 // A handler gets { q: query, b: JSON body, p: path parameters, req, res }. What it returns is sent as JSON; returning nothing means it answered itself.
 const ROUTES = compile({
-  'GET /api/state': async ({ q, res }) => { if (+q.get('v') === version) await changed(20000); res.writeHead(200, JSON_TYPE); res.end(snapshot); },
+  'GET /api/state': async ({ q, res }) => { if (+q.get('v') === version || !version) await changed(20000); res.writeHead(200, JSON_TYPE); res.end(snapshot); },
   'POST /api/runs': ({ b }) => (typeof b.recipe === 'string' ? engine.start(b.recipe, b.gpus) : fail(400, 'Choose a recipe')),
   'DELETE /api/runs/:id': ({ p }) => engine.remove(p.id),
   'GET /api/runs/:id/logs': ({ p, q }) => engine.logs(p.id, q.get('tail')),

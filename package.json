@@ -1,24 +1,42 @@
 {
   "name": "local-ai",
   "productName": "Local AI",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Start local models from registry recipes, watch them, and open your coding agents.",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
     "server": "node server/index.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "lint": "eslint .",
+    "smoke": "node scripts/smoke.mjs",
+    "check": "eslint . && node scripts/smoke.mjs"
   },
   "build": {
     "appId": "ai.sybilsolutions.local",
-    "files": ["electron/**", "server/**", "web/**"],
-    "mac": { "target": "dmg", "category": "public.app-category.developer-tools" },
-    "win": { "target": "nsis" },
-    "linux": { "target": "AppImage", "category": "Development" }
+    "files": [
+      "electron/**",
+      "server/**",
+      "web/**"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Development"
+    }
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "electron": "45.2.3",
-    "electron-builder": "26.0.12"
+    "electron-builder": "26.18.0",
+    "eslint": "10.13.0",
+    "globals": "17.13.0"
   }
 }

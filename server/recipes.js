@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { loadSeconds, speedOf } from './speed.js';
 import { at, event, fail, readJson, writeJson } from './util.js';
 
@@ -5,7 +7,7 @@ const FEED = process.env.LOCAL_AI_REGISTRY || 'https://raw.githubusercontent.com
 const ALLOWED_FLAGS = new Set(['--ipc', '--network', '--net', '--gpus', '--shm-size', '--ulimit', '--workdir', '-w']);
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const REVISION = /^[0-9a-f]{40}$/;
-const ENGINES = { vllm: 'vLLM', sglang: 'SGLang', tabbyapi: 'TabbyAPI', 'llama.cpp': 'llama.cpp' };
+const ENGINES = { vllm: 'vLLM', sglang: 'SGLang', tabbyapi: 'TabbyAPI', 'llama.cpp': 'llama.cpp', mlx: 'MLX' };
 const catalogFile = at('catalog.json');
 const localFile = at('recipes.json');
 
@@ -36,13 +38,41 @@ export const flagsOf = (launch) => (launch.flags || []).flatMap((flag) => {
   return eq ? [eq[1], eq[2]] : text.split(/\s+(.*)/s).filter(Boolean);
 });
 
-// Your own recipes are trusted; public ones must be pinned and need nothing beyond one docker run.
+// A host recipe this machine can run itself: Metal on Apple silicon, a Python command, every package pinned to one
+// version, its script matching the hash the registry gives, and weights pinned to a commit inside the run's folder.
+const PIP_PIN = /^[A-Za-z0-9][\w.-]*==[\w.+-]+$/;
+const INSIDE = (p) => typeof p === 'string' && /^[\w][\w./-]*$/.test(p) && !p.split('/').includes('..');
+function hostProblem(launch) {
+  if (launch.backend !== 'metal' || process.platform !== 'darwin' || process.arch !== 'arm64') return 'Runs outside Docker';
+  if (!Array.isArray(launch.command) || !/^python3?$/.test(launch.command[0] || '')) return 'Runs outside Docker';
+  if (!launch.command.includes('--port')) return 'Does not say its port';
+  if ([].concat(launch.pip || []).some((p) => !PIP_PIN.test(p))) return 'Engine packages are not pinned';
+  if (launch.config && (!INSIDE(launch.config.at) || launch.config.at.includes('/') || typeof launch.config.text !== 'string'
+    || createHash('sha256').update(launch.config.text).digest('hex') !== launch.config.sha256)) return 'Its script does not match its hash';
+  if ([].concat(launch.weights || []).some((w) => w.path || w.layout === 'hub' || !REPO.test(w.repo || '') || !REVISION.test(w.revision || '') || !INSIDE(w.at))) return 'Weights are not pinned';
+  if (launch.build || launch.setup || launch.prepare || launch.resources || (launch.machines || 1) > 1) return 'Needs manual setup';
+  for (const [key, want] of Object.entries(launch.sysctl || {})) {
+    if (!/^[\w.]+$/.test(key) || !(sysctlNow(key) >= +want)) return `Needs sudo sysctl ${key}=${want}`;
+  }
+  return null;
+}
+const sysctls = new Map();
+function sysctlNow(key) {
+  const hit = sysctls.get(key);
+  if (hit && Date.now() - hit.at < 60000) return hit.value;
+  let value = NaN;
+  try { value = +execFileSync('sysctl', ['-n', key], { timeout: 2000, encoding: 'utf8' }).trim(); } catch { /* unknown key */ }
+  sysctls.set(key, { at: Date.now(), value });
+  return value;
+}
+
+// Your own recipes are trusted; public ones must be pinned and need nothing beyond one docker run, or one pinned host run.
 export function blocked(id) {
   const recipe = find(id);
   const launch = recipe.launch;
+  if (launch.kind === 'host') return hostProblem(launch) || (recipe.proof?.[0]?.failed ? 'Failed its last test' : null);
   if (!launch.image) return 'Has no container image';
   if (local[id]) return null;
-  if (launch.kind === 'host') return 'Runs outside Docker';
   if (launch.build) return 'Image must be built from source';
   if (launch.setup || launch.prepare || launch.resources) return 'Needs manual setup';
   if ((launch.machines || 1) > 1) return 'Needs several machines';
@@ -68,7 +98,7 @@ function view(id) {
   const aa = score(recipe.model);
   const text = `${(recipe.launch.args || []).join(' ')} ${recipe.launch.config?.text || ''}`;
   return {
-    id, local: !!local[id], name: recipe.name || model?.name || recipe.model, card: recipe.card,
+    id, local: !!local[id], host: recipe.launch.kind === 'host', name: recipe.name || model?.name || recipe.model, card: recipe.card,
     cards: recipe.launch.cards || 1, engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: recipe.launch.ctx || 0,
     vision: !!recipe.launch.vision, tps: measured?.c1 ?? proof?.tps ?? null, smart: aa?.index ?? null, seqs: recipe.launch.seqs || 1,
     speed: { c1: measured?.c1 ?? proof?.tps ?? null, c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: catalog.builds[recipe.weights]?.size_gb ?? null,
@@ -125,7 +155,14 @@ function nearest(vramGb) {
   return Object.entries(catalog.cards).filter(([, c]) => c.backend === 'nvidia' && c.vram_gb && c.vram_gb <= vramGb + 1 && size(c))
     .sort(([, a], [, b]) => b.vram_gb - a.vram_gb || size(b) - size(a))[0]?.[0] ?? null;
 }
-export const cardFor = (gpu) => cardOf(gpu.name, gpu.total / 1024) ?? nearest(gpu.total / 1024);
+// An Apple chip runs only recipes made for it: a Metal card whose name is exactly the chip's (an M4 Pro is not an M4),
+// with no fallback to an NVIDIA card of similar memory.
+function appleCard(gpuName, vramGb) {
+  const n = norm(gpuName);
+  return Object.entries(catalog.cards).find(([, c]) => c.backend === 'metal' && Math.abs(c.vram_gb - vramGb) <= 1
+    && [norm(c.name), ...(c.match?.names || [])].includes(n))?.[0] ?? null;
+}
+export const cardFor = (gpu) => (gpu.unified ? appleCard(gpu.name, gpu.total / 1024) : cardOf(gpu.name, gpu.total / 1024) ?? nearest(gpu.total / 1024));
 
 // A recipe this machine may start, as the app shows it. One that can't be read is reported and left out.
 const unreadable = new Set();
@@ -146,7 +183,7 @@ function usable(id, card, count) {
 export function groups(gpus) {
   const byCard = new Map();
   for (const gpu of gpus) {
-    const tested = cardOf(gpu.name, gpu.total / 1024), key = `${cardFor(gpu)}:${!!tested}`;
+    const tested = gpu.unified ? cardFor(gpu) : cardOf(gpu.name, gpu.total / 1024), key = `${cardFor(gpu)}:${!!tested}`;
     if (!byCard.has(key)) byCard.set(key, { card: cardFor(gpu), tested, members: [] });
     byCard.get(key).members.push(gpu);
   }
@@ -164,6 +201,7 @@ export const raw = (id) => (find(id) ? { id, ...find(id) } : fail(404, 'No such 
 export function save({ id, ...recipe }) {
   if (typeof id !== 'string' || !id.trim()) fail(400, 'Recipe needs an id');
   if (!recipe.launch || typeof recipe.launch !== 'object') fail(400, 'Recipe needs a launch object');
+  if (recipe.launch.kind === 'host') fail(400, 'Recipes that run outside Docker can’t be edited here yet');
   if (typeof recipe.launch.image !== 'string' || !recipe.launch.image) fail(400, 'launch.image must be a container image');
   if (!Number.isInteger(recipe.launch.port)) fail(400, 'launch.port must be the port the engine listens on');
   if (typeof recipe.card !== 'string') fail(400, 'Recipe needs a card id');

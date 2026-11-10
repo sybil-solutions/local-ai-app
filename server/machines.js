@@ -45,17 +45,26 @@ export async function isMine(req) {
 
 export const views = () => config.devices.map((d, i) => ({ i, name: d.name, url: d.url, ...(remote.get(d.url) || { online: false, error: 'Connecting', state: null }) }));
 
+// A slow link (Tailscale relayed through DERP can take seconds a round trip) is not an offline machine: each machine
+// gets 15 s to answer, is asked again only once it has, and counts as offline after three misses in a row.
+const polling = new Set(), misses = new Map();
 export const poll = () => Promise.all(config.devices.map(async (device) => {
+  if (polling.has(device.url)) return;
+  polling.add(device.url);
   try {
-    const res = await fetch(`${device.url}/api/state`, { headers: { authorization: `Bearer ${device.key}` }, signal: AbortSignal.timeout(4000) });
-    if (!res.ok) throw new Error(res.status === 401 ? 'Wrong key' : `Answered ${res.status}`);
+    const res = await fetch(`${device.url}/api/state`, { headers: { authorization: `Bearer ${device.key}` }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw Object.assign(new Error(res.status === 401 ? 'Wrong key' : `Answered ${res.status}`), { final: res.status === 401 });
     // Its own connected machines are left out, or two machines connected to each other would nest each other's snapshots without end.
     remote.set(device.url, { online: true, error: null, state: { ...(await res.json()), devices: [] } });
+    misses.delete(device.url);
   } catch (e) {
-    const was = remote.get(device.url);
-    remote.set(device.url, { online: false, error: e.name === 'TimeoutError' ? 'Not responding' : e.cause?.code || e.message, state: was?.state || null });
+    const was = remote.get(device.url), n = (misses.get(device.url) || 0) + 1;
+    misses.set(device.url, n);
+    if (was?.online && n < 3 && !e.final) return; // keep the last answer through a miss or two
+    // An offline machine's last snapshot is kept for its name and models, but nothing on it is shown as running.
+    remote.set(device.url, { online: false, error: e.name === 'TimeoutError' ? 'Not responding' : e.cause?.code || e.message, state: was?.state ? { ...was.state, runs: [] } : null });
     if (was?.online !== false) event('warn', 'device.offline', { url: device.url, error: remote.get(device.url).error });
-  }
+  } finally { polling.delete(device.url); }
 }));
 
 // One of your own Tailscale machines hands over its key when asked; anything else needs it typed.

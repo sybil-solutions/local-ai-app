@@ -1,6 +1,6 @@
 // Local AI. One page, two layouts drawn from the same screens: a narrow window is the panel, a wide one is the desktop app.
 // This file draws the current screen, loads what a screen needs when it opens, and does what buttons ask.
-import { applyBg, fitArt, loadOwn, onChange, pickBg } from './art.js';
+import { applyBg, fitArt, loadOwn, onChange, pickBg, setTone } from './art.js';
 import { homeHtml, NAV, navBar, pageHtml } from './desktop.js';
 import { CTX, lit, look, markdown, SCREENS, STATE } from './screens.js';
 import { all, api, cardKey, chosen, D, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shown, store } from './state.js';
@@ -8,7 +8,7 @@ import { ctxOf, fmt, notice } from './ui.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-const root = document.documentElement, frame = $('.frame'), panel = $('.frame .screen'), desk = $('#fs'), painting = $('#art');
+const root = document.documentElement, frame = $('.frame'), panel = $('.frame .screen'), desk = $('#fs');
 
 // Drawing. A screen is redrawn only when its HTML changed, and never under someone who is typing.
 const NEEDS_RUN = new Set(['chooser', 'runthis', 'logs']);
@@ -31,10 +31,8 @@ function paint(force) {
   const state = resolve(), id = s.nav || state, wide = isFull(), glow = lit(look(state));
   root.classList.toggle('wide', wide);
   if (wide) {
-    const page = s.nav || (state === 'key' ? 'key' : null), working = look(state).pose === 'work';
+    const page = s.nav || (state === 'key' ? 'key' : null);
     desk.classList.toggle('paged', !!page);
-    painting.classList.toggle('work', working && !page);
-    painting.style.setProperty('--beat', `${Math.round(1 / (0.0006 + ((s.snap && D() && run()?.stats?.tps) || 0) / 200000))}ms`);
     swap($('#ui'), `${navBar(page)}${page ? '' : homeHtml(state)}${notice()}`, id, force, '.apop');
     swap($('#page'), page ? pageHtml(page) : '', id, force, '.mlist,.mright');
     fitArt(glow);
@@ -165,6 +163,7 @@ const ACTS = {
   key: () => { s.key = (s.form.key || '').trim(); store('key', s.key); s.needKey = false; },
   refresh: () => send(scoped('refresh')),
   bg: (d) => pickBg(d.bg),
+  tone: () => setTone(root.dataset.tone === 'gray' ? 'color' : 'gray'),
   toggle: (d) => { const h = homeCfg(); return saveHome({ order: h.order, on: h.on.includes(d.k) ? h.on.filter((k) => k !== d.k) : [...h.on, d.k] }); },
   span: (d) => { s.span = d.v; },
   period: (d) => { s.period = d.v; },
@@ -273,6 +272,7 @@ async function follow() {
     let lost = false;
     try {
       const next = await api(`state?v=${s.version}`);
+      if (!next.v) { await sleep(500); continue; } // the server has not drawn its first snapshot yet
       if (s.snap && next.app.started !== s.snap.app.started) location.reload(); // the server restarted, so this page's code may be old
       Object.assign(s, { version: next.v, snap: next, online: true, needKey: false });
       if (s.dev !== -1 && !next.devices[s.dev]) s.dev = -1;

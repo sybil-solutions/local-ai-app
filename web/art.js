@@ -8,10 +8,16 @@ let own = null, redraw = () => {};
 export const onChange = (fn) => { redraw = fn; };
 const picture = () => (root.dataset.bg === 'own' ? own : FRESCO);
 
+// The picture (fresco, own or none) and its tone (gray or color) are two settings. Older versions saved one value,
+// 'gray' or 'color', meaning the fresco in that tone; an own picture was always in colour.
+const LEGACY = { gray: ['fresco', 'gray'], color: ['fresco', 'color'] };
 export function applyBg() {
-  const choice = s.snap?.background || store('la-bg') || 'gray';
-  root.dataset.bg = choice === 'own' && !own ? 'gray' : choice;
+  const saved = s.snap?.background || store('la-bg') || 'fresco';
+  const [choice, tone] = LEGACY[saved] || [saved, saved === 'own' ? 'color' : 'gray'];
+  root.dataset.bg = choice === 'own' && !own ? 'fresco' : choice;
+  root.dataset.tone = s.snap?.tone || store('la-tone') || tone;
   store('la-bg', choice);
+  store('la-tone', root.dataset.tone);
   const pic = picture(), k = pic === FRESCO ? 0.56 : Math.max(260 / pic.w, PANEL.top / pic.h);
   for (const img of frame.querySelectorAll('img')) if (img.getAttribute('src') !== pic.url) img.src = pic.url;
   root.style.setProperty('--pimg', `url("${pic.url}")`);
@@ -35,6 +41,11 @@ export function pickBg(k) {
   s.snap.background = k;
   applyBg();
   return send('settings', 'POST', { background: k });
+}
+export function setTone(tone) {
+  s.snap.tone = tone;
+  applyBg();
+  return send('settings', 'POST', { tone });
 }
 picker.onchange = () => {
   const file = picker.files[0], img = new Image();
@@ -72,9 +83,6 @@ function drawHands(c, t) {
   if (adam.complete) g.drawImage(adam, CW / 2 - w - apart * 46, y, w, h);
   if (god.complete) g.drawImage(god, CW / 2 + apart * 46, y, w, h);
   g.filter = 'none';
-  g.strokeStyle = '#f2efe9';
-  if (pose === 'work') for (let ring = 0; ring < 2; ring++) { const ph = (t * 0.0009 + ring / 2) % 1; g.globalAlpha = (1 - ph) * 0.7; g.beginPath(); g.arc(CW / 2, CH / 2, 8 + ph * 70, 0, 6.2832); g.stroke(); }
-  g.globalAlpha = 1;
 }
 (function loop(t) {
   if (root.dataset.bg === 'none') document.querySelectorAll('canvas.art').forEach((c) => drawHands(c, t));
