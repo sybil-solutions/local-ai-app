@@ -15,7 +15,7 @@ const NEEDS_RUN = new Set(['chooser', 'runthis', 'logs']);
 const drawn = new Map();
 let drawnId = null;
 function swap(el, html, id, force, scrollers) {
-  const typing = el.contains(document.activeElement) && document.activeElement.matches('input, textarea');
+  const typing = el.contains(document.activeElement) && document.activeElement.matches('input, textarea, select');
   if (html === drawn.get(el) || (typing && !force && id === drawnId)) return;
   const keep = id === drawnId ? [el.scrollTop, ...[...el.querySelectorAll(scrollers)].map((e) => e.scrollTop)] : [];
   el.innerHTML = html;
@@ -124,7 +124,7 @@ const ACTS = {
     const out = await send('open', 'POST', { agent, device: s.dev === -1 ? 'self' : s.dev, port: r.id, folder: s.snap.folder });
     s.opened = r.id;
     go('home');
-    if (!out.opened) { s.command = out.command; go('runthis'); }
+    if (!out.opened) { s.command = out.command; go('runthis'); } else if (out.pick) s.note = `In T3 Code, choose ${out.pick}`;
   },
   default: (d) => send('settings', 'POST', { agent: d.agent }),
   agent: (d) => send('agents', 'POST', { id: d.agent }),
@@ -221,6 +221,7 @@ document.addEventListener('input', (e) => {
   if (f === 'ctx') { s.draft.ctx = CTX[+e.target.value]; s.draft.touched.add('ctx'); $('[data-ctxlabel]', e.target.parentElement).textContent = `Context ${ctxOf(s.draft.ctx)}`; } else if (f === 'args') s.draft.args = e.target.value; else if (f) s.form[f] = e.target.value;
 });
 document.addEventListener('change', (e) => {
+  if (e.target.dataset.save === 'terminal') send('settings', 'POST', { terminal: e.target.value }).catch((err) => { s.note = err.message; render(true); });
   if (e.target.dataset.save === 'folder') send('settings', 'POST', { folder: e.target.value.trim() }).then(() => { delete s.form.folder; }, (err) => { s.note = err.message; render(true); });
 });
 document.addEventListener('pointerover', (e) => { const day = e.target.closest('[data-cell]'); if (day && e.pointerType === 'mouse') day.click(); });

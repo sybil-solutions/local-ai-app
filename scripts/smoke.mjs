@@ -50,7 +50,7 @@ function serve(handler) {
 // It has already read 30,000 prompt tokens in 10 s before the app first sees it.
 const counters = { prompt_tokens_total: 30000, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0, request_prefill_kv_computed_tokens_sum: 30000, request_prefill_time_seconds_sum: 10 };
 const outside = await serve((req, body) => {
-  if (req.url === '/v1/models') return [200, { data: [{ id: 'outside-model' }] }];
+  if (req.url === '/v1/models') return [200, { data: [{ id: 'outside-model', max_model_len: 65536 }] }];
   if (req.url === '/metrics') return [200, Object.entries(counters).map(([k, v]) => `vllm:${k}{model_name="outside-model"} ${v}`).join('\n'), 'text/plain'];
   if (req.method === 'POST' && req.url === '/v1/chat/completions') {
     if (!body.includes('messages')) return [400, { error: 'messages required' }]; // the app's probe for which APIs it has
@@ -148,6 +148,15 @@ try {
   const port = outside.address().port;
   const found = await until('the outside engine to be found', async () => (await state()).runs.find((r) => r.external && r.id === port), 45000);
   check('finds a model started outside the app', found.served === 'outside-model');
+  const sized = await until('its context length', async () => (await state()).runs.find((r) => r.id === port && r.ctx), 20000);
+  check('reads a found model\'s context length from the engine', sized.ctx === 65536, `ctx ${sized.ctx}`);
+  // Agents: Pi and Oh My Pi get the model through an extension, so they keep their own config folder and logins.
+  const listed = await until('the model list for Pi', async () => { try { return Object.values(JSON.parse(readFileSync(join(HOME, 'agents', 'models.json'), 'utf8')).providers).map((p) => p.models[0]).find((m) => m.id === 'outside-model' && m.contextWindow === 65536); } catch { return null; } }, 20000);
+  check('gives Pi the model with its whole context and no smaller output limit', listed.id === 'outside-model' && listed.contextWindow === 65536 && listed.maxTokens === 65536 && listed.omitMaxOutputTokens === true, JSON.stringify(listed));
+  check('writes the extension that registers it', readFileSync(join(HOME, 'agents', 'local-ai.js'), 'utf8').includes('registerProvider'));
+  const snap = await state();
+  check('lists the terminals found here and T3 Code among the agents', Array.isArray(snap.terminals) && snap.agents.some((a) => a.id === 't3' && a.app));
+  check('settings refuse a terminal that is not installed', (await api('/api/settings', { method: 'POST', body: { terminal: 'no-such-terminal' } })).status === 400);
   check('does not take a proxy of several models for a model running here', !(await state()).runs.some((r) => r.id === proxy.address().port));
   const seen = await until('a first read of its counters', async () => (await state()).runs.find((r) => r.id === port)?.stats, 15000);
   check('shows the engine\'s lifetime prefill speed before it sees a prefill, not 0', seen.pps === 3000, `pps ${seen.pps}`);

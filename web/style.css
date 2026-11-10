@@ -75,8 +75,8 @@ a.btn { line-height: 40px; text-decoration: none; box-sizing: border-box; }
 .box { font: 400 12px/1.6 var(--ui); border: 1px solid var(--line); border-radius: 4px; padding: 10px; color: var(--muted); overflow-wrap: anywhere; }
 .box.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #d6d3cd; }
 .field { height: 44px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 4px; padding: 0 12px; display: flex; align-items: center; color: var(--muted); font: 400 13px var(--ui); }
-input.field, textarea.box { width: 100%; box-sizing: border-box; background: none; color: var(--text); outline: none; resize: none; flex: none; }
-input.field:focus, textarea.box:focus { border-color: var(--accent); }
+input.field, select.field, textarea.box { width: 100%; box-sizing: border-box; background: none; color: var(--text); outline: none; resize: none; flex: none; }
+input.field:focus, select.field:focus, textarea.box:focus { border-color: var(--accent); }
 input.field::placeholder { color: var(--muted); }
 textarea.box { min-height: 110px; font: 400 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
@@ -323,7 +323,7 @@ html.wide #view { visibility: hidden; }
 .pg .cal.months button { height: 76px; }
 .pg .tabs { width: 300px; }
 .pfield { margin-top: 20px; display: flex; flex-direction: column; gap: 6px; }
-.pg input.field, .pg textarea.box { max-width: 520px; }
+.pg input.field, .pg select.field, .pg textarea.box { max-width: 520px; }
 .msplit { box-sizing: border-box; max-width: 1200px; height: 100%; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 48px; }
 .mleft { display: flex; flex-direction: column; min-height: 0; padding-top: 32px; }
 .mlist { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; margin-top: 2px; padding-bottom: 24px; }
@@ -352,4 +352,4 @@ html.wide #view { visibility: hidden; }
 
 /* For people who asked for less motion. */
 @media (prefers-reduced-motion: reduce) { .frame .screen { transition: none; } }
-.pfield input.field { max-width: none; }
+.pfield input.field, .pfield select.field { max-width: none; }
