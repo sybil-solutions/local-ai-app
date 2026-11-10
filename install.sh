@@ -1,6 +1,6 @@
 #!/bin/bash
 # Installs Local AI for this user: the files, a service that keeps the server running, and an app-menu entry on Omarchy.
-#   LOCAL_AI_HOST=<this machine's Tailscale address> ./install.sh    shares models and the app with your other machines
+# With Tailscale running, the app also answers on this machine's tailnet address, so your other machines can connect to it.
 set -e
 SRC="$(cd "$(dirname "$0")" && pwd)"
 DEST="${LOCAL_AI_DIR:-$HOME/.local/share/local-ai}"
@@ -18,7 +18,7 @@ After=network-online.target
 
 [Service]
 ExecStart=$NODE $DEST/server/index.js
-Environment=LOCAL_AI_HOST=${LOCAL_AI_HOST:-127.0.0.1}
+${LOCAL_AI_HOST:+Environment=LOCAL_AI_HOST=$LOCAL_AI_HOST}
 Environment=SHELL=${SHELL:-/bin/bash}
 Environment=PATH=$PATH
 Restart=always

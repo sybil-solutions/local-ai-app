@@ -1,7 +1,7 @@
 {
   "name": "local-ai",
   "productName": "Local AI",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Start local models from registry recipes, watch them, and open your coding agents.",
   "type": "module",
   "main": "electron/main.js",

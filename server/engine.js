@@ -26,6 +26,8 @@ export const status = { gpus: [], docker: { ok: false, error: 'Checking Docker' 
 
 let notify = () => {};
 export const onChange = (fn) => { notify = fn; };
+let shared = null;
+export const shareOn = (ip) => { shared = ip; };
 const update = (r, fields) => { Object.assign(r, fields); notify(); };
 const FAILURES = [
   [/out of memory|OutOfMemory|CUBLAS|failed to allocate|Not enough GPU memory/i, 'Ran out of room', 'Too big for the free GPU memory'],
@@ -190,7 +192,7 @@ function dockerArgs(r, recipe, name) {
   const env = Object.entries(launch.env || {}).filter(([k]) => !['NVIDIA_VISIBLE_DEVICES', 'CUDA_VISIBLE_DEVICES'].includes(k));
   return ['run', '-d', '--name', name, '--label', 'local-ai=1', '--label', `local-ai.port=${r.id}`, '--label', `local-ai.recipe=${r.recipe}`,
     '--label', `local-ai.gpus=${r.gpus.join('+')}`, '--label', `local-ai.since=${r.since}`, '--gpus', `"device=${r.gpus.join(',')}"`,
-    '-p', `${HOST}:${r.id}:${launch.port}`, ...(isLocal(r.recipe) ? [] : ['--security-opt', 'no-new-privileges']), ...(launch.shm ? ['--shm-size', launch.shm] : []), ...keep,
+    '-p', `${HOST}:${r.id}:${launch.port}`, ...(shared ? ['-p', `${shared}:${r.id}:${launch.port}`] : []), ...(isLocal(r.recipe) ? [] : ['--security-opt', 'no-new-privileges']), ...(launch.shm ? ['--shm-size', launch.shm] : []), ...keep,
     ...env.flatMap(([k, v]) => ['-e', `${k}=${v}`]), ...(hub ? ['-e', 'HF_HUB_OFFLINE=1'] : []),
     ...weightsOf(launch).flatMap((w) => ['-v', weightMount(w)]), ...(configFile ? ['-v', `${configFile}:${launch.config.at}:ro`] : []),
     ...(entry[0] ? ['--entrypoint', entry[0]] : []), launch.image, ...entry.slice(1), ...(launch.args || []), ...(metrics ? [metrics] : [])];
