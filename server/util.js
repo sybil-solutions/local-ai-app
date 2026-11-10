@@ -52,6 +52,6 @@ export const run = (cmd, args, { timeout = 30000, signal } = {}) => new Promise(
 });
 
 const configFile = at('config.json');
-export const config = { key: randomBytes(24).toString('hex'), devices: [], folder: homedir(), harness: 'pi', ...readJson(configFile, {}) };
+export const config = { key: randomBytes(24).toString('hex'), devices: [], folder: homedir(), agent: 'pi', ...readJson(configFile, {}) };
 export const saveConfig = () => writeJson(configFile, config);
 saveConfig();

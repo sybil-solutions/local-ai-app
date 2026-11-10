@@ -43,8 +43,8 @@ function chosen() {
   return list.find((x) => x.id === id) || null;
 }
 const shown3 = () => { const three = picks(), c = chosen(); return c && !three.some((r) => r.id === c.id) ? [...three, c] : three; };
-const agentName = () => snap.harnesses.find((h) => h.id === snap.harness && h.installed)?.name;
-const outdated = () => snap.harnesses.filter((h) => h.installed && h.version && h.latest && newer(h.latest, h.version) && h.job?.phase !== 'running');
+const agentName = () => snap.agents.find((h) => h.id === snap.agent && h.installed)?.name;
+const outdated = () => snap.agents.filter((h) => h.installed && h.version && h.latest && newer(h.latest, h.version) && h.job?.phase !== 'running');
 const homeCfg = () => snap.home || { order: ['hands', 'models', 'stats', 'usage', 'gpus'], on: ['hands', 'models', 'stats'] };
 const HOME = () => homeCfg().order.filter((k) => homeCfg().on.includes(k));
 const gpuLine = (d) => (d?.gpus.length ? `${d.gpus.length}× ${(d.groups[0]?.name || 'GPU').replace(/^(NVIDIA|GeForce) /g, '')}` : 'No GPU');
@@ -113,13 +113,13 @@ function agentRow(h, mode) {
   const working = h.job?.phase === 'running', failed = h.job?.phase === 'failed';
   if (working) return `<div class="item vrow busy"><span><b>${h.name}</b><small>${h.job.kind === 'update' ? 'Updating…' : 'Installing…'}</small></span><i class="instbar"></i></div>`;
   if (!h.installed) return h.canInstall ? `<button class="item vrow" data-act="agent" data-agent="${h.id}" title="${esc(h.job?.error || '')}"><span><b>${h.name}</b><small>${failed ? 'Couldn’t install' : `Not installed${h.latest ? ` · ${h.latest}` : ''}`}</small></span><span class="inst">${failed ? 'Try again' : 'Install'}</span></button>` : `<div class="item vrow busy"><span><b>${h.name}</b><small>Not installed</small></span></div>`;
-  const isDefault = h.id === snap.harness;
+  const isDefault = h.id === snap.agent;
   if (mode === 'open') { const r = run(), off = r?.apis && !r.apis.includes(h.needs); return `<button class="item" data-act="open" data-agent="${h.id}" ${off ? 'disabled' : ''}>${h.name}<small>${off ? 'Won’t work with this model' : isDefault ? 'Default' : ''}</small></button>`; }
   const update = h.version && h.latest && newer(h.latest, h.version);
   const right = failed ? `<button class="inst vact" data-act="agent" data-agent="${h.id}" title="${esc(h.job.error)}">Try again</button>` : update ? `<button class="inst vact" data-act="agent" data-agent="${h.id}">Update to ${h.latest}</button>` : h.latest ? '<small>Up to date</small>' : `<button class="inst vact" data-act="agent" data-agent="${h.id}">Update</button>`;
   return `<div class="item vrow"><button class="vpick" data-act="default" data-agent="${h.id}"><span><b>${h.name}</b><small>${h.version || 'Installed'}${isDefault ? ' · Default' : ''}${failed ? ' · Couldn’t update' : ''}</small></span></button>${right}</div>`;
 }
-const agentList = (mode) => snap.harnesses.map((h) => agentRow(h, mode)).join('');
+const agentList = (mode) => snap.agents.map((h) => agentRow(h, mode)).join('');
 const agentsFoot = () => `${outdated().length ? a(`Update all (${outdated().length})`, 'updateall') : ''}<div class="label">Folder</div><input class="field" data-f="folder" data-save="folder" spellcheck="false" aria-label="Folder" value="${esc(form.folder ?? snap.folder)}">`;
 
 // Usage: one period at a time, how it grew, which models served it, and the calendar.
@@ -515,14 +515,14 @@ const ACTS = {
   tryfast: async () => { const fast = picks()[0]; await stopRun(); sel = fast.id; await startRun(fast.id); },
   switch: async (d) => { await stopRun(); sel = d.id; await startRun(d.id); go('home'); },
   open: async (d) => {
-    const r = run(), id = d.agent || snap.harness;
-    if (id !== snap.harness) await send('settings', 'POST', { harness: id });
-    const out = await send('open', 'POST', { harness: id, device: dev === -1 ? 'self' : dev, port: r.id, folder: snap.folder });
+    const r = run(), id = d.agent || snap.agent;
+    if (id !== snap.agent) await send('settings', 'POST', { agent: id });
+    const out = await send('open', 'POST', { agent: id, device: dev === -1 ? 'self' : dev, port: r.id, folder: snap.folder });
     opened = r.id; agentsOpen = false;
     go('home');
     if (!out.opened) { command = out.command; go('runthis'); }
   },
-  default: (d) => send('settings', 'POST', { harness: d.agent }),
+  default: (d) => send('settings', 'POST', { agent: d.agent }),
   agent: (d) => send('agents', 'POST', { id: d.agent }),
   updateall: () => Promise.all(outdated().map((h) => send('agents', 'POST', { id: h.id }))),
   copy: async (d, el) => {

@@ -1,27 +1,19 @@
-import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, statfsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { basename, dirname } from 'node:path';
 import { blocked, cardFor, find, flagsOf, isLocal, label } from './recipes.js';
 import { loadSeconds, measure, saveLoad, speedOf } from './speed.js';
-import { at, config, ENGINE_HOST, event, fail, HOST, PORT, readJson, run, saveConfig, sleep, writeJson } from './util.js';
+import * as usage from './usage.js';
+import { at, config, ENGINE_HOST, event, fail, HOST, PORT, run, saveConfig } from './util.js';
+import * as weights from './weights.js';
 
-const MODELS = process.env.LOCAL_AI_MODELS || at('models');
-const HF_HOME = process.env.HF_HOME || join(homedir(), '.cache/huggingface');
-const HF = process.env.HF_ENDPOINT || 'https://huggingface.co';
 const OWNED_FLAGS = new Set(['--network', '--net', '--gpus', '--name', '--rm', '-d', '--detach', '-p', '--publish', '--label', '--entrypoint', '--restart']);
 const START_DEADLINE = 2 * 3600e3;
 const METRICS_FLAGS = [[/sglang/, '--enable-metrics'], [/llama-server/, '--metrics']];
 const docker = (args, opts) => run('docker', args, opts);
-const usageFile = at('usage.json');
 
 const runs = new Map();
 const removed = new Map();
-const usage = { days: {}, hours: {}, last: {}, ...readJson(usageFile, {}) };
-let usageDirty = false;
 export const status = { gpus: [], docker: { ok: false, error: 'Checking Docker' } };
 
 let notify = () => {};
@@ -74,110 +66,9 @@ const portFree = (port) => new Promise((done) => {
   s.listen(port, HOST, () => s.close(() => done(true)));
 });
 
-const tokenFile = join(HF_HOME, 'token');
-const hfToken = () => process.env.HF_TOKEN || (existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8').trim() : '');
-const hfHeaders = () => (hfToken() ? { authorization: `Bearer ${hfToken()}` } : {});
-export const tokenHint = () => (hfToken() ? hfToken().slice(-4) : null);
-export function saveToken(token) {
-  mkdirSync(HF_HOME, { recursive: true });
-  writeFileSync(tokenFile, String(token || '').trim(), { mode: 0o600 });
-}
-
-async function hfFiles(repo, revision, signal) {
-  const files = [];
-  let url = `${HF}/api/models/${repo}/tree/${revision}?recursive=true`;
-  while (url) {
-    const res = await fetch(url, { headers: hfHeaders(), signal });
-    if (res.status === 401 || res.status === 403) throw new Error(`${repo} is gated: add a token to ${join(HF_HOME, 'token')}`);
-    if (!res.ok) throw new Error(`Hugging Face answered ${res.status} for ${repo}`);
-    files.push(...(await res.json()).filter((f) => f.type === 'file'));
-    url = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') || '')?.[1];
-  }
-  return files;
-}
-
-const sha256 = async (file, signal) => {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
-  return hash.digest('hex');
-};
-
-async function fetchFile(repo, revision, file, dest, onBytes, signal) {
-  const target = join(dest, file.path);
-  const wanted = file.lfs?.oid;
-  const good = async (p) => statSync(p).size === file.size && (!wanted || (await sha256(p, signal)) === wanted);
-  if (existsSync(target) && (await good(target))) return onBytes(file.size);
-  mkdirSync(dirname(target), { recursive: true });
-  const part = `${target}.part`;
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const have = existsSync(part) ? statSync(part).size : 0;
-      onBytes(0);
-      if (have < file.size) {
-        const res = await fetch(`${HF}/${repo}/resolve/${revision}/${file.path}`, { headers: { ...hfHeaders(), range: `bytes=${have}-` }, signal });
-        if (![200, 206].includes(res.status)) throw new Error(`download answered ${res.status}`);
-        const resume = res.status === 206;
-        if (resume) onBytes(have);
-        const count = new Transform({ transform(chunk, _, next) { onBytes(chunk.length); next(null, chunk); } });
-        await pipeline(Readable.fromWeb(res.body), count, createWriteStream(part, { flags: resume ? 'a' : 'w' }), { signal });
-      } else {
-        onBytes(have);
-        if (!existsSync(part)) writeFileSync(part, '');
-      }
-      if (!(await good(part))) { writeFileSync(part, ''); throw new Error(`${file.path} failed its checksum`); }
-      return renameSync(part, target);
-    } catch (e) {
-      if (signal.aborted || attempt >= 4) throw e;
-      event('warn', 'download.retry', { file: file.path, attempt, error: e.message });
-      await sleep(2000 * attempt);
-    }
-  }
-}
-
-const size = (n, scale) => (scale >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
-const weightsOf = (launch) => [].concat(launch.weights || []).filter(Boolean);
-const weightDir = (w) => (w.layout === 'hub' ? join(HF_HOME, 'hub', `models--${w.repo.replace('/', '--')}`, 'snapshots', w.revision) : join(MODELS, `${w.repo.split('/').pop()}-${w.revision.slice(0, 8)}`));
-const weightMount = (w) => (w.path ? `${w.path}:${w.at}:ro` : w.layout === 'hub' ? `${join(HF_HOME, 'hub')}:${w.at}/hub:ro` : `${weightDir(w)}:${w.at}:ro`);
-
-const markerOf = (w) => join(weightDir(w), `.complete-${createHash('sha256').update(String(w.files || '')).digest('hex').slice(0, 12)}`);
-export const onDisk = (id) => weightsOf(find(id).launch).every((w) => existsSync(w.path || markerOf(w)));
-
-async function fetchWeights(r, launch, signal) {
-  for (const w of weightsOf(launch)) {
-    if (w.path) { if (!existsSync(w.path)) throw new Error(`Weights folder ${w.path} does not exist`); continue; }
-    const dest = weightDir(w);
-    const marker = markerOf(w);
-    if (existsSync(marker)) continue;
-    update(r, { phase: 'weights', detail: `Listing ${w.repo}`, progress: 0 });
-    const only = String(w.files || '').split(',').filter(Boolean);
-    const files = (await hfFiles(w.repo, w.revision, signal)).filter((f) => !only.length || only.includes(f.path));
-    if (only.length && files.length < only.length) throw new Error(`${w.repo} is missing some recipe files`);
-    const total = files.reduce((n, f) => n + f.size, 0);
-    mkdirSync(dest, { recursive: true });
-    const space = statfsSync(dest);
-    const needed = files.filter((f) => !existsSync(join(dest, f.path))).reduce((n, f) => n + f.size, 0);
-    if (space.bavail * space.bsize < needed) throw new Error(`Needs ${Math.ceil(needed / 1e9)} GB free in ${dest}`);
-    const seen = new Map();
-    const pending = [...files];
-    await Promise.all(Array.from({ length: 4 }, async () => {
-      for (let f = pending.shift(); f; f = pending.shift()) {
-        seen.set(f.path, 0);
-        const onBytes = (n) => {
-          seen.set(f.path, n === 0 ? 0 : seen.get(f.path) + n);
-          const done = [...seen.values()].reduce((a, b) => a + b, 0);
-          update(r, { detail: `${size(done, total)} of ${size(total, total)}`, progress: total ? Math.min(1, done / total) : 1 });
-        };
-        await fetchFile(w.repo, w.revision, f, dest, onBytes, signal);
-      }
-    }));
-    writeFileSync(marker, new Date().toISOString());
-  }
-}
-
 function dockerArgs(r, recipe, name) {
   const launch = recipe.launch;
   const entry = [].concat(launch.entrypoint || []);
-  const hub = weightsOf(launch).some((w) => w.layout === 'hub');
   const flags = flagsOf(launch);
   const keep = [];
   for (let i = 0; i < flags.length; i++) {
@@ -193,15 +84,14 @@ function dockerArgs(r, recipe, name) {
   return ['run', '-d', '--name', name, '--label', 'local-ai=1', '--label', `local-ai.port=${r.id}`, '--label', `local-ai.recipe=${r.recipe}`,
     '--label', `local-ai.gpus=${r.gpus.join('+')}`, '--label', `local-ai.since=${r.since}`, '--gpus', `"device=${r.gpus.join(',')}"`,
     '-p', `${HOST}:${r.id}:${launch.port}`, ...(shared ? ['-p', `${shared}:${r.id}:${launch.port}`] : []), ...(isLocal(r.recipe) ? [] : ['--security-opt', 'no-new-privileges']), ...(launch.shm ? ['--shm-size', launch.shm] : []), ...keep,
-    ...env.flatMap(([k, v]) => ['-e', `${k}=${v}`]), ...(hub ? ['-e', 'HF_HUB_OFFLINE=1'] : []),
-    ...weightsOf(launch).flatMap((w) => ['-v', weightMount(w)]), ...(configFile ? ['-v', `${configFile}:${launch.config.at}:ro`] : []),
+    ...env.flatMap(([k, v]) => ['-e', `${k}=${v}`]), ...weights.mounts(launch), ...(configFile ? ['-v', `${configFile}:${launch.config.at}:ro`] : []),
     ...(entry[0] ? ['--entrypoint', entry[0]] : []), launch.image, ...entry.slice(1), ...(launch.args || []), ...(metrics ? [metrics] : [])];
 }
 
 async function launch(r, recipe) {
   const { signal } = r.abort;
   try {
-    await fetchWeights(r, recipe.launch, signal);
+    await weights.download(recipe.launch, signal, (fields) => update(r, fields));
     update(r, { phase: 'image', detail: 'Checking engine image', progress: null });
     if ((await docker(['image', 'inspect', recipe.launch.image], { signal })).code) {
       update(r, { detail: 'Pulling engine image' });
@@ -237,7 +127,7 @@ export async function start(id, picked) {
   const free = freeGpus().filter((g) => cardFor(g) === recipe.card).map((g) => g.index);
   const gpus = picked?.length ? picked : free.slice(0, need);
   if (gpus.length !== need || gpus.some((g) => !free.includes(g))) fail(409, `Needs ${need} free GPU${need > 1 ? 's' : ''}; ${free.length} free`);
-  const r = { id: port, recipe: id, gpus, phase: 'queued', detail: 'Queued', progress: null, error: null, since: Date.now(), busy: true, abort: new AbortController(), apis: null, stats: null, misses: 0 };
+  const r = { id: port, recipe: id, name: label(id), url: `http://${ENGINE_HOST}:${port}`, gpus, phase: 'queued', detail: 'Queued', progress: null, error: null, since: Date.now(), busy: true, abort: new AbortController(), apis: null, stats: null, misses: 0 };
   runs.set(port, r);
   config.last = id;
   saveConfig();
@@ -264,8 +154,7 @@ export async function remove(rawId) {
   }
   if (r.container) removed.set(r.container, Date.now());
   runs.delete(r.id);
-  delete usage.last[r.container];
-  usageDirty = true;
+  usage.forget(r);
   event('info', 'run.removed', { id: r.id, recipe: r.recipe });
   return { id: r.id };
 }
@@ -277,10 +166,9 @@ export async function logs(rawId, tail) {
   return { text: `${out.stdout}${out.stderr}` };
 }
 
-export const urlOf = (r) => `http://${r.external ? '127.0.0.1' : ENGINE_HOST}:${r.id}`;
 async function probe(r) {
   try {
-    const res = await fetch(`${urlOf(r)}/v1/models`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${r.url}/v1/models`, { signal: AbortSignal.timeout(2000) });
     if (res.ok) { update(r, { served: (await res.json()).data?.[0]?.id ?? r.served, misses: 0 }); return true; }
   } catch { /* still loading, or busy */ }
   r.misses++;
@@ -289,7 +177,7 @@ async function probe(r) {
 
 async function testReply(r) {
   try {
-    const res = await fetch(`${urlOf(r)}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer local' }, signal: AbortSignal.timeout(90000),
+    const res = await fetch(`${r.url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer local' }, signal: AbortSignal.timeout(90000),
       body: JSON.stringify({ model: r.served, max_tokens: 4, messages: [{ role: 'user', content: 'Say OK.' }] }) });
     return res.ok && !!(await res.json()).choices?.length;
   } catch { return false; }
@@ -298,7 +186,7 @@ async function testReply(r) {
 export function startMeasure(r) {
   const recipe = find(r.recipe);
   update(r, { tried: true, measureAbort: new AbortController(), measuring: 1 });
-  measure({ id: r.recipe, url: urlOf(r), model: r.served, seqs: recipe?.launch.seqs || 1, signal: r.measureAbort.signal, onLevel: (c) => { r.measuring = c; } })
+  measure({ id: r.recipe, url: r.url, model: r.served, seqs: recipe?.launch.seqs || 1, signal: r.measureAbort.signal, onLevel: (c) => { r.measuring = c; } })
     .catch((e) => { if (!r.measureAbort?.signal.aborted) event('warn', 'speed.failed', { id: r.recipe, error: e.message }); })
     .finally(() => update(r, { measuring: 0, measureAbort: null }));
 }
@@ -316,7 +204,7 @@ async function probeApis(r) {
   const paths = { chat: '/v1/chat/completions', responses: '/v1/responses', messages: '/v1/messages' };
   const found = await Promise.all(Object.entries(paths).map(async ([api, path]) => {
     try {
-      const res = await fetch(`${urlOf(r)}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(4000) });
+      const res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(4000) });
       return ![404, 405].includes(res.status) && api;
     } catch { return null; }
   }));
@@ -325,48 +213,6 @@ async function probeApis(r) {
   event('info', 'run.apis', { id: r.id, apis: r.apis });
 }
 
-function parseMetrics(text) {
-  const out = {};
-  for (const line of text.split('\n')) {
-    const m = /^(?:vllm|sglang|llamacpp)[:_]([a-z_0-9]+)(?:\{.*\})? ([-0-9.e+]+)$/.exec(line);
-    if (m) out[m[1]] = (out[m[1]] || 0) + +m[2];
-  }
-  return out;
-}
-
-async function scrape(r, now) {
-  let m;
-  try {
-    const res = await fetch(`${urlOf(r)}/metrics`, { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) return;
-    m = parseMetrics(await res.text());
-  } catch { return; }
-  const cur = { in: m.prompt_tokens_total || 0, out: m.generation_tokens_total || m.tokens_predicted_total || 0, req: m.request_success_total || 0 };
-  const key = r.container || `port-${r.id}`;
-  const last = usage.last[key] || cur;
-  const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : cur[k]]));
-  usage.last[key] = cur;
-  r.used ||= { in: 0, out: 0, req: 0 };
-  if (!r.measuring && (delta.in || delta.out || delta.req)) {
-    const stamp = new Date(now).toISOString();
-    const row = ((usage.days[stamp.slice(0, 10)] ||= {})[nameOf(r)] ||= { in: 0, out: 0, req: 0 });
-    const hour = ((usage.hours[stamp.slice(0, 13)] ||= {})[nameOf(r)] ||= { in: 0, out: 0, req: 0 });
-    for (const k of Object.keys(delta)) { row[k] += delta[k]; hour[k] += delta[k]; r.used[k] += delta[k]; }
-    usageDirty = true;
-  }
-  r.series ||= [];
-  if (!r.series.length || now - r.series.at(-1)[0] >= 60000) { r.series.push([now, r.used.in + r.used.out]); if (r.series.length > 240) r.series.shift(); }
-  const seconds = r.scraped ? (now - r.scraped) / 1000 : 0;
-  const ttftN = m.time_to_first_token_seconds_count;
-  r.stats = {
-    tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: seconds ? Math.round(delta.in / seconds) : 0, used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0,
-    queued: m.num_requests_waiting ?? m.num_queue_reqs ?? 0, ttft: ttftN ? Math.round((m.time_to_first_token_seconds_sum / ttftN) * 100) / 100 : null,
-    in: cur.in, out: cur.out, req: cur.req,
-  };
-  r.scraped = now;
-}
-
-const nameOf = (r) => (r.external ? r.served : label(r.recipe));
 const parseLabels = (text) => Object.fromEntries(text.split(',').map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; }));
 
 async function inspectAll() {
@@ -387,7 +233,7 @@ async function reconcile(c, listedAt) {
   const id = +c.labels['local-ai.port'];
   let r = runs.get(id);
   if (!r) {
-    r = { id, recipe: c.labels['local-ai.recipe'], gpus: (c.labels['local-ai.gpus'] || '').split('+').filter(Boolean).map(Number), phase: 'starting', detail: 'Loading model', progress: null, error: null, since: +c.labels['local-ai.since'] || Date.now(), busy: false, container: c.name, apis: null, stats: null, misses: 0, seen: true };
+    r = { id, recipe: c.labels['local-ai.recipe'], name: label(c.labels['local-ai.recipe']), url: `http://${ENGINE_HOST}:${id}`, gpus: (c.labels['local-ai.gpus'] || '').split('+').filter(Boolean).map(Number), phase: 'starting', detail: 'Loading model', progress: null, error: null, since: +c.labels['local-ai.since'] || Date.now(), busy: false, container: c.name, apis: null, stats: null, misses: 0, seen: true };
     runs.set(id, r);
     event('info', 'run.adopted', { id, recipe: r.recipe });
   }
@@ -416,7 +262,7 @@ async function reconcile(c, listedAt) {
     if (!r.apis && up) await probeApis(r);
     if (!up && r.misses >= 15) { update(r, { phase: 'unresponsive', detail: null, heard: now - r.misses * 2000 }); event('warn', 'run.unresponsive', { id: r.id }); }
     else {
-      await scrape(r, now);
+      await usage.scrape(r, now);
       if (up && !r.measuring && !r.tried && !speedOf(r.recipe) && !r.stats?.active && now - r.readyAt > 3000) startMeasure(r);
     }
   } else if (!r.seen && r.phase !== 'failed' && now - r.since > START_DEADLINE) {
@@ -431,7 +277,7 @@ async function discover(now) {
     if (!r.external) continue;
     if (!(await probe(r)) && r.misses >= 3) { runs.delete(r.id); event('info', 'run.gone', { id: r.id }); continue; }
     if (!r.apis) await probeApis(r);
-    await scrape(r, now);
+    await usage.scrape(r, now);
   }
   if (now - scanned < 30000) return;
   scanned = now;
@@ -444,10 +290,16 @@ async function discover(now) {
   for (const [port, model] of found) {
     if (!model || known.has(model)) continue; // the same model behind a proxy is still one model
     known.add(model);
-    runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port), served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
+    runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port), name: model, url: `http://127.0.0.1:${port}`, served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
     event('info', 'run.found', { id: port, model });
     notify();
   }
+}
+
+export async function startDocker() {
+  const tries = process.platform === 'darwin' ? [['open', ['-a', 'Docker']]] : [['systemctl', ['start', 'docker']], ['systemctl', ['--user', 'start', 'docker']]];
+  for (const [cmd, args] of tries) if (!(await run(cmd, args, { timeout: 20000 })).code) { await tick(); return { ok: true }; }
+  return fail(500, 'Could not start Docker. Start it yourself, then come back');
 }
 
 let ticking = false;
@@ -475,14 +327,6 @@ export async function tick() {
   } finally { ticking = false; }
 }
 
-export function flushUsage() {
-  if (!usageDirty) return;
-  const old = new Date(Date.now() - 48 * 3600e3).toISOString().slice(0, 13);
-  for (const h of Object.keys(usage.hours)) if (h < old) delete usage.hours[h];
-  writeJson(usageFile, usage);
-  usageDirty = false;
-}
-
 function describe(r) {
   const expected = loadSeconds(r.recipe);
   const elapsed = (Date.now() - r.since) / 1000;
@@ -502,62 +346,8 @@ function describe(r) {
   }[r.phase] || { word: 'Waking', line: '', p: 0.1 };
 }
 
+export const all = () => [...runs.values()];
 export const listRuns = () => [...runs.values()].sort((a, b) => a.id - b.id).map(({ abort, measureAbort, busy, misses, scraped, seen, touched, replying, tried, heard, series, used, ...r }) => ({
-  ...r, view: describe(runs.get(r.id)), expected: loadSeconds(r.recipe), name: nameOf(r), ctx: find(r.recipe)?.launch.ctx || 0, vision: !!find(r.recipe)?.launch.vision, card: find(r.recipe)?.card || null,
+  ...r, view: describe(runs.get(r.id)), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch.ctx || 0, vision: !!find(r.recipe)?.launch.vision, card: find(r.recipe)?.card || null,
 }));
 
-export function usageView() {
-  const days = Object.keys(usage.days).sort();
-  const total = (d) => Object.values(usage.days[d]).reduce((n, row) => n + row.in + row.out, 0);
-  const sum = (list) => list.reduce((n, d) => n + total(d), 0);
-  const models = {};
-  for (const d of days) for (const [name, row] of Object.entries(usage.days[d])) {
-    const m = (models[name] ||= { name, in: 0, out: 0, req: 0 });
-    for (const k of ['in', 'out', 'req']) m[k] += row[k];
-  }
-  const today = new Date().toISOString().slice(0, 10);
-  const week = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
-  return { today: days.includes(today) ? total(today) : 0, week: sum(days.filter((d) => d >= week)), all: sum(days), days: days.slice(-84).map((d) => ({ d, v: total(d) })), models: Object.values(models).sort((a, b) => b.out - a.out) };
-}
-
-// Everything the Usage screen draws: every day split by model, the last two days by hour, and each running model's own count.
-export function usageDetail() {
-  const days = Object.keys(usage.days).sort().map((d) => {
-    const rows = Object.entries(usage.days[d]);
-    return { d, out: rows.reduce((n, [, r]) => n + r.out, 0), req: rows.reduce((n, [, r]) => n + r.req, 0), models: Object.fromEntries(rows.map(([name, r]) => [name, r.in + r.out])) };
-  });
-  const live = [...runs.values()].filter((r) => r.phase === 'ready' && r.used).map((r) => ({ id: r.id, name: nameOf(r), since: r.readyAt, tokens: r.used.in + r.used.out, out: r.used.out, req: r.used.req, series: r.series || [] }));
-  return { days, hours: usage.hours, runs: live };
-}
-
-// Who has been calling the engines today, read from their own access logs. Requests are counted, never kept.
-const names = new Map();
-async function whoIs(ip) {
-  if (/^(127\.|172\.(1[6-9]|2\d|3[01])\.|::1)/.test(ip)) return { device: 'This computer', known: true };
-  if (!names.has(ip)) {
-    const r = await run('tailscale', ['whois', '--json', ip], { timeout: 4000 });
-    let name = null;
-    try { name = JSON.parse(r.stdout).Node?.ComputedName || null; } catch { /* not on the tailnet */ }
-    names.set(ip, name);
-  }
-  return { device: names.get(ip) || ip, known: !!names.get(ip) };
-}
-export async function sources() {
-  const since = new Date(); since.setHours(0, 0, 0, 0);
-  const seen = new Map();
-  for (const r of runs.values()) {
-    if (!r.container) continue;
-    const out = await docker(['logs', '-t', '--since', since.toISOString(), r.container], { timeout: 20000 });
-    for (const line of `${out.stdout}${out.stderr}`.split('\n')) {
-      const m = /^(\S+) .*?(\d{1,3}(?:\.\d{1,3}){3}):\d+ - "POST \/v1\//.exec(line) || /^(\S+) .*request: POST \/v1\/\S+ (\d{1,3}(?:\.\d{1,3}){3}) /.exec(line);
-      if (!m) continue;
-      const row = seen.get(m[2]) || { ip: m[2], requests: 0, last: m[1] };
-      row.requests++; if (m[1] > row.last) row.last = m[1];
-      seen.set(m[2], row);
-    }
-  }
-  const rows = await Promise.all([...seen.values()].map(async (row) => ({ ...row, ...(await whoIs(row.ip)) })));
-  const merged = new Map();
-  for (const row of rows) { const had = merged.get(row.device); if (had) { had.requests += row.requests; if (row.last > had.last) had.last = row.last; } else merged.set(row.device, row); }
-  return [...merged.values()].sort((a, b) => b.requests - a.requests);
-}

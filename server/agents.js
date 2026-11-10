@@ -120,7 +120,7 @@ const launched = (cmd, args) => new Promise((done) => {
 
 // Always returns the command, so a machine without a terminal or display still gets something to paste.
 export async function open(agent, target, folder) {
-  const harness = HARNESSES[agent] || fail(400, 'Unknown harness');
+  const harness = HARNESSES[agent] || fail(400, 'Unknown agent');
   if (!(await installed()).has(agent)) fail(409, `${harness.name} is not installed`);
   if (target.apis && !target.apis.includes(harness.needs)) fail(409, `This engine has no ${harness.needs} API, which ${harness.name} needs`);
   if (!existsSync(folder)) fail(400, `Folder ${folder} does not exist`);
