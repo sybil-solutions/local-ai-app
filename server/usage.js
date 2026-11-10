@@ -21,28 +21,35 @@ function parseMetrics(text) {
   return out;
 }
 
-// How fast the engine reads prompts, in tokens a second, or null before it has read one worth timing. Prompt tokens
-// served from the prefix cache are not prefill, and a prompt is read in one burst, so prompt tokens over the scrape
-// window would mostly show 0, and a cache hit as a huge number. Instead, per engine:
-//   vLLM: the tokens it computed while prefilling and the seconds it spent doing it, from its own histograms.
-//   llama.cpp: its own prompt speed gauge.
-//   SGLang and the rest: prompt tokens that missed the cache, over the scrape window.
-// A prefill under PREFILL_MIN tokens times the engine's overhead more than its speed, so it is left out, and the
-// speed shown is the tokens over the seconds of the prefills in the last PREFILL_WINDOW (the last ones, when idle).
+// How fast the engine reads prompts, as { pps, est }, or null before there is anything to go on. Prompt tokens served
+// from the prefix cache are not prefill, and a prompt is read in one burst, so prompt tokens over the scrape window
+// would mostly show 0, and a cache hit as a huge number. Instead, from the best source the engine has:
+//   engine: the tokens it computed while prefilling over the seconds it says that took. vLLM's histograms, the
+//     timings a host engine reports in its answers (meter.js), or llama.cpp's prompt speed gauge.
+//   ttft (est): for a host engine that reports no timings, uncached prompt tokens over the wait for the first
+//     token, which also holds queueing and the first decode step.
+//   window (est): for the rest, prompt tokens that missed the cache over the scrape window.
+// A prefill under PREFILL_MIN tokens times overhead more than speed, so it is left out. The speed is tokens over
+// seconds across the prefills of the last PREFILL_WINDOW (the last ones, when idle), and before the app has seen one,
+// the engine's average over its whole life. Sources are never mixed: when a better one appears, the others are dropped.
 const PREFILL_MIN = 1000, PREFILL_WINDOW = 300e3;
+const PREFILL_SOURCES = [
+  ['engine', 'request_prefill_kv_computed_tokens_sum', 'request_prefill_time_seconds_sum'],
+  ['engine', 'engine_prefill_tokens_sum', 'engine_prefill_seconds_sum'],
+  ['ttft', 'ttft_prompt_tokens_sum', 'ttft_seconds_sum'],
+];
 function prefillSpeed(r, m, seconds, now) {
   const prev = r.counters;
   r.counters = m;
-  if (m.prompt_tokens_seconds !== undefined && m.request_prefill_time_seconds_sum === undefined) return m.prompt_tokens_seconds > 0 ? m.prompt_tokens_seconds : null;
+  if (m.prompt_tokens_seconds > 0 && m.request_prefill_time_seconds_sum === undefined) return { pps: m.prompt_tokens_seconds, est: false };
   const d = (k) => (prev ? (m[k] ?? 0) - (prev[k] ?? 0) : 0);
-  const [tokens, secs] = m.request_prefill_time_seconds_sum !== undefined
-    ? [d('request_prefill_kv_computed_tokens_sum'), d('request_prefill_time_seconds_sum')]
-    : [d('prompt_tokens_total') - d('cached_tokens_total'), seconds];
-  if (tokens >= PREFILL_MIN && secs > 0) r.prefills = [...(r.prefills || []).filter(([at]) => now - at < PREFILL_WINDOW), [now, tokens, secs]];
-  // Before any prefill worth timing since the app started watching: the engine's average over its whole life, so
-  // the number is never 0 for an engine that has read prompts.
-  if (!r.prefills?.length) return m.request_prefill_time_seconds_sum > 0 ? m.request_prefill_kv_computed_tokens_sum / m.request_prefill_time_seconds_sum : null;
-  return r.prefills.reduce((n, p) => n + p[1], 0) / r.prefills.reduce((n, p) => n + p[2], 0);
+  const [kind, tok, sec] = PREFILL_SOURCES.find(([, , s]) => m[s] > 0) || PREFILL_SOURCES.find(([, , s]) => m[s] !== undefined) || ['window'];
+  if (kind !== r.prefillKind) { r.prefillKind = kind; r.prefills = []; }
+  const [tokens, secs] = kind === 'window' ? [d('prompt_tokens_total') - d('cached_tokens_total'), seconds] : [d(tok), d(sec)];
+  if (tokens >= PREFILL_MIN && secs > 0) r.prefills = [...r.prefills.filter(([at]) => now - at < PREFILL_WINDOW), [now, tokens, secs]];
+  const est = kind !== 'engine';
+  if (r.prefills.length) return { pps: r.prefills.reduce((n, p) => n + p[1], 0) / r.prefills.reduce((n, p) => n + p[2], 0), est };
+  return m[sec] > 0 ? { pps: m[tok] / m[sec], est } : null;
 }
 
 // Reads one engine's counters, adds what changed to the totals, and leaves its live numbers on the run.
@@ -72,8 +79,8 @@ export async function scrape(r, now) {
   r.series ||= [];
   if (!r.series.length || now - r.series.at(-1)[0] >= 60000) { r.series.push([now, r.used.in + r.used.out]); if (r.series.length > 240) r.series.shift(); }
   const seconds = r.scraped ? (now - r.scraped) / 1000 : 0;
-  r.pps = prefillSpeed(r, m, seconds, now) ?? 0;
-  r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: Math.round(r.pps), used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
+  const prefill = prefillSpeed(r, m, seconds, now);
+  r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: Math.round(prefill?.pps ?? 0), ppsEst: !!prefill?.est, used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
   r.scraped = now;
 }
 

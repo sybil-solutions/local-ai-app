@@ -6,9 +6,14 @@ const COUNTED = /^\/(v1\/)?(chat\/completions|completions|responses|messages)$/;
 const MAX_BODY = 16e6; // a non-streamed answer longer than this passes through uncounted
 
 export function meter(inner) {
-  // Named as vLLM names them, so usage.js reads both the same way. Prefill is timed from the request to the first token
-// of a streamed answer; a prompt the engine found in its cache counts too, as it does in the engine's own reply.
-  const counts = { prompt_tokens_total: 0, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0, request_prefill_kv_computed_tokens_sum: 0, request_prefill_time_seconds_sum: 0 };
+  // Token and request counters are named as vLLM names them, so usage.js reads both the same way. Prefill is kept in
+  // two pairs that are never mixed:
+  //   engine_prefill_*: what the engine itself reports it computed and how long that took (the `timings` block
+  //     llama.cpp-style servers put in an answer). This is prefill speed.
+  //   ttft_*: uncached prompt tokens and the time from the request reaching this port to the first streamed token.
+  //     That wait also holds queueing and the first decode step, so it is only an estimate, and is shown as one.
+  const counts = { prompt_tokens_total: 0, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0,
+    engine_prefill_tokens_sum: 0, engine_prefill_seconds_sum: 0, ttft_prompt_tokens_sum: 0, ttft_seconds_sum: 0 };
   const callers = new Map();
   let day = '';
   const caller = (ip) => {
@@ -21,7 +26,7 @@ export function meter(inner) {
 
   // Reads usage from an answer as it streams past: the final usage block when the engine sends one, else one token a chunk.
   function tap(streamed, began) {
-    let tail = '', body = '', size = 0, usage = null, chunks = 0, first = 0;
+    let tail = '', body = '', size = 0, usage = null, timings = null, chunks = 0, first = 0;
     return {
       add(buf) {
         if (!streamed) { size += buf.length; if (size <= MAX_BODY) body += buf; return; }
@@ -32,18 +37,20 @@ export function meter(inner) {
           let data;
           try { data = JSON.parse(line.slice(5)); } catch { continue; }
           if (data.usage) usage = data.usage;
+          if (data.timings) timings = data.timings;
           const delta = data.choices?.[0]?.delta;
           if ((delta && (delta.content || delta.reasoning_content || delta.reasoning || delta.tool_calls)) || data.type === 'content_block_delta') { chunks++; first ||= performance.now(); }
         }
       },
       end(ok) {
-        if (!streamed && size <= MAX_BODY) { try { usage = JSON.parse(body).usage || null; } catch { /* not JSON */ } }
+        if (!streamed && size <= MAX_BODY) { try { const data = JSON.parse(body); usage = data.usage || null; timings = data.timings || null; } catch { /* not JSON */ } }
         const inTok = usage?.prompt_tokens ?? usage?.input_tokens ?? 0, outTok = usage?.completion_tokens ?? usage?.output_tokens ?? (usage ? 0 : chunks);
         counts.prompt_tokens_total += inTok;
         counts.generation_tokens_total += outTok;
         if (ok) counts.request_success_total++;
         const cached = usage?.prompt_tokens_details?.cached_tokens ?? 0;
-        if (ok && first && inTok - cached > 0) { counts.request_prefill_kv_computed_tokens_sum += inTok - cached; counts.request_prefill_time_seconds_sum += (first - began) / 1000; }
+        if (ok && timings?.prompt_n > 0 && timings.prompt_ms > 0) { counts.engine_prefill_tokens_sum += timings.prompt_n; counts.engine_prefill_seconds_sum += timings.prompt_ms / 1000; }
+        else if (ok && first && inTok - cached > 0) { counts.ttft_prompt_tokens_sum += inTok - cached; counts.ttft_seconds_sum += (first - began) / 1000; }
       },
     };
   }

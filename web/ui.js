@@ -59,7 +59,7 @@ export const menu = () => (s.snap
 export const close = (go = 'back') => `<div class="top"><span class="mark">Local AI</span><button class="x" data-go="${go}" aria-label="Close">${icon('close')}</button></div>`;
 export const notice = () => (s.note ? `<button class="notice" data-act="dismiss" title="Dismiss">${esc(s.note)}</button>` : '');
 
-export const running = (r) => `<div class="stats">${stat('Decode tok/s', r.stats?.tps || 0, true)}${stat('Prefill tok/s', r.stats?.pps || 0)}${stat('Session tokens', r.stats?.used || 0)}<button class="linkstat" data-go="usage">${stat('Lifetime tokens', D().usage.all)}</button></div>`;
+export const running = (r) => `<div class="stats">${stat('Decode tok/s', r.stats?.tps || 0, true)}${stat(r.stats?.ppsEst ? 'Prefill tok/s (est.)' : 'Prefill tok/s', r.stats?.pps || 0)}${stat('Session tokens', r.stats?.used || 0)}<button class="linkstat" data-go="usage">${stat('Lifetime tokens', D().usage.all)}</button></div>`;
 export const meta = (r) => [r.released && new Date(`${r.released}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', year: 'numeric' }), r.engine, ctxOf(r.ctx)].filter(Boolean).join(' · ');
 // A model's numbers. The desktop page has room for two more rows; the panel names the engine instead.
 export const facts = (r, wide) => [
