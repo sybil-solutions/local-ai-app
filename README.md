@@ -5,7 +5,7 @@ Start a local model with one click, watch it run, and open your coding agent on 
 Local AI is three small pieces:
 
 - **A registry of recipes** ([local-ai-registry](https://github.com/sybil-solutions/local-ai-registry)): for each GPU, which models run on it and the exact `docker run` that starts each one.
-- **A server** (`server/`): reads the registry, starts engines in Docker, and reports what the machine is doing.
+- **A server** (`server/`): reads the registry, starts engines (in Docker, or as a pinned program on Apple silicon), and reports what the machine is doing.
 - **An app** (`web/`): one page the server serves. A narrow window shows the panel, a wide one the desktop layout. Electron (`electron/`) and the Omarchy web app are just windows onto that page.
 
 There is no gateway. Each engine serves its own OpenAI-compatible API on its own port, and agents talk to it directly.
@@ -18,7 +18,7 @@ node server/index.js        # or just the server: open http://127.0.0.1:18700
 npm install && npm start    # or the same page in an Electron window
 ```
 
-The server needs Node 20 or newer. Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see. The server itself has no dependencies.
+The server needs Node 20 or newer. Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the Electron app.
 
 A machine that already runs Local AI can install another one on your tailnet: Machines shows the one-line command for it.
 
@@ -47,7 +47,8 @@ flowchart LR
 
 - **One snapshot.** Every two seconds the server looks at the GPUs (`nvidia-smi`), its containers (`docker ps`), and each engine (`/v1/models`, `/metrics`). The result is one JSON snapshot. The app long-polls it and redraws; nothing else is pushed, and the app keeps no state of its own about the machine.
 - **Docker is the record.** A run is a container labelled `local-ai=1` with its recipe, port and GPUs in labels. Restart the server and it adopts whatever is still running.
-- **Models it didn't start.** Every 30 seconds it asks each listening port above 1024, over loopback, for `/v1/models`. Whatever answers is shown as running too, with its stats and its address, and is never stopped. The same model id on several ports (an engine and a proxy in front of it) is shown once.
+- **Apple silicon.** The chip is one GPU whose memory is the unified RAM, and it only runs recipes made for exactly that chip (`backend: metal`). Such a recipe is `kind: host`: a Python `command`, `pip` packages each pinned with `==`, its script in `config` with a `sha256` that must match, and weights pinned to a commit. Each recipe's packages get their own venv in `envs/`, shared by recipes that pin the same ones and deleted after 30 unused days. The engine runs in `runs/<port>/` on an inner port (the app's port + 100 and up); the server listens on the run's own port in front of it and counts the tokens each answer reports (`meter.js`), since such engines have no `/metrics`. The engine outlives the app like a container does: `hosts.json` remembers it, and a restarted app adopts it again only if the process still runs in that folder and started when it did. Quitting the app closes the front port until the app is back.
+- **Models it didn't start.** Every 30 seconds it asks each listening port above 1024, over loopback, for `/v1/models`. Whatever answers with one model, or with several and engine counters on `/metrics` (vLLM, SGLang, llama.cpp), is shown as running too, with its stats and its address, and is never stopped. A proxy that lists several models and has no engine counters (a gateway to cloud APIs) is not. The same model id on several ports (an engine and a proxy in front of it) is shown once.
 - **Which screen.** The app shows the first screen its rules match for the snapshot (`resolve()` in `web/state.js`): can't connect, needs a key, Docker off, no GPU, downloading, starting, running, failed, and so on. Settings, Models and the rest are ordinary screens opened on top.
 - **Your machines.** Machines signed in to your Tailscale account trust each other: one click connects them, and the page opens on any of them without typing the key. Anything else needs the key.
 
@@ -58,6 +59,7 @@ server/
   index.js      HTTP: the web app's files, the route table, the snapshot, start()
   engine.js     runs: start, stop, adopt, watch, find models started elsewhere
   weights.js    Hugging Face downloads and the mounts that put them in a container
+  meter.js      the front port of a host run: passes requests to the engine and counts their tokens
   usage.js      tokens served, from each engine's own counters; who is calling
   recipes.js    the registry catalog, your own recipes, the three picks per GPU, model cards
   speed.js      measured tokens per second and load times
@@ -118,8 +120,8 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 
 ```
 { v, name,
-  docker: { ok, error },
-  gpus: [{ index, name, total, used, util, power, temp }],     // memory in MiB
+  docker: { ok, error }, needsDocker,                          // needsDocker is false when every GPU is Apple silicon
+  gpus: [{ index, name, total, used, util, power, temp, unified }],  // memory in MiB; unified for Apple silicon
   free: [index],
   groups: [{ card, name, untested, gpus: [index],              // one per kind of GPU; untested names the card it borrows recipes from
              tiers: { fastest, balanced, smartest }, recipes: [Recipe] }],
@@ -129,18 +131,19 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
   last,                                                        // the recipe started most recently
   devices: [{ i, name, url, online, error, state }],           // state is that machine's own snapshot
   agents: [{ id, name, needs, installed, version, latest, canInstall, job }], agent, folder,
-  home: { order, on } | null, background, picture,
+  home: { order, on } | null, background, tone, picture,       // background: fresco · own · none; tone: gray · color, or null for the default
   app: { version, started, latest, notes, phase, error, can, auto },
   hfToken }                                                    // the saved token's last four characters, or null
 
-Recipe = { id, name, local, card, cards, engine, ctx, seqs, vision, think, tools, kv, tps, smart, sizeGb, released, loadS, ready,
+Recipe = { id, name, local, host, card, cards, engine, ctx, seqs, vision, think, tools, kv, tps, smart, sizeGb, released, loadS, ready,
            speed: { c1, c4, c8, measured, exact, ttft, at } }
 Run    = { id,            // the port it serves on
+           host,          // true when it runs as a program on this machine, not in a container
            recipe, name, url, gpus, since, readyAt, expected,
            phase,         // queued · weights · image · starting · testing · ready · unresponsive · stopping · failed
            detail, progress, error, failure: { word, line }, view: { line, p, word? },   // word only when it failed
            ctx, vision,
-           served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active },
+           served, apis: ['chat' | 'responses' | 'messages'], stats: { tps, pps, used, active },   // pps: prefill speed, see below
            external,                                           // true for a model Local AI found but did not start
            reachable }                                         // whether another machine can call it
 ```
@@ -155,22 +158,24 @@ Run    = { id,            // the port it serves on
 | `usage.json` | Tokens per day and per hour, by model. |
 | `speeds.json`, `loads.json` | Measured speed and load time per recipe. |
 | `events.jsonl` | Everything that happened, one JSON line each. |
-| `models/`, `runs/`, `agents/`, `background` | Weights, per-run config files, agent launch scripts and Pi's model list, your picture. |
+| `models/`, `runs/`, `agents/`, `background` | Weights, per-run config files (for a host run also its script, weight links and `engine.log`, rotated at 20 MB), agent launch scripts and Pi's model list, your picture. |
+| `hosts.json`, `envs/` | Host runs that are running (pid, inner port, start time), and their Python venvs. |
 
 ### Outside the app
 
 | It talks to | For |
 |---|---|
 | `docker` | `run`, `stop`, `rm`, `ps`, `logs`, `pull`, `image inspect`. Containers carry `local-ai=1` and `local-ai.port`, `.recipe`, `.gpus`, `.since`. |
-| `nvidia-smi` | GPUs and their memory. |
-| An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). |
+| `nvidia-smi` | GPUs and their memory. On Apple silicon `sysctl` and `vm_stat` instead. |
+| `python3`, `pip` | On Apple silicon: a venv per host recipe and its pinned packages. `ps` and `lsof` check a remembered engine before it is adopted. |
+| An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time it spent doing it (vLLM's histograms; llama.cpp's own gauge; for others, prompt tokens that missed the cache over the window), and the last value stays shown between prompts. Prompt tokens served from the prefix cache are not prefill. |
 | `ss` or `lsof` | Listening ports, to find models started elsewhere. |
 | `tailscale` | `status --json` (this machine and yours), `whois --json` (who is asking). |
 | Hugging Face | Weights, and model cards. The token is read from `HF_TOKEN` or the HF cache's `token` file. |
 | npm registry | The newest version of each agent. |
 | `git` | The app's own updates, when it was installed from a clone. |
 
-A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` with `image`, `port`, `args`, `env`, `weights`, `ctx`, `cards`, `seqs`. A registry recipe only runs when its image and weights are pinned and it needs nothing beyond one `docker run`; your own recipes are trusted as written.
+A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` with `image`, `port`, `args`, `env`, `weights`, `ctx`, `cards`, `seqs` (a host recipe has `kind: host`, `backend`, `command`, `pip` and `config` instead of `image` and `args`). A registry recipe only runs when its image and weights are pinned and it needs nothing beyond one `docker run`, or for a host recipe, when everything above is pinned; your own recipes are trusted as written. Host recipes can't be edited in the app yet.
 
 ## Who can reach what
 
@@ -179,6 +184,13 @@ A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` wit
 - Model cards are other people's Markdown: their tags are stripped, the text is escaped, and only the app's own tags are written, in one pass.
 
 ## Working on it
+
+```
+npm ci --ignore-scripts && npm run lint    # mistakes that break at runtime: undefined names, leftovers
+npm run smoke                              # the real server end to end; on Apple silicon also a host run
+```
+
+CI (`.github/workflows/`) runs both on every push and pull request: lint and the Linux smoke test always, the macOS smoke test when `server/` or `scripts/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit. There are no unit tests on purpose: `scripts/smoke.mjs` starts the server against a fixture registry and engines that answer like real ones, and checks what a user would notice.
 
 There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that returns HTML; a button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/app.js`). To add a route, add a line to `ROUTES`.
 

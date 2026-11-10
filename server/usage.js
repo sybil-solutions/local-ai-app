@@ -21,14 +21,33 @@ function parseMetrics(text) {
   return out;
 }
 
+// How fast the engine reads prompts, in tokens a second, or null when it read none since the last scrape (the last
+// speed then stays shown). Prompt tokens served from the prefix cache are not prefill, and a prompt is read in one burst,
+// so prompt tokens over the scrape window would mostly show 0, and a cache hit as a huge number. Instead:
+// vLLM: the tokens it computed while prefilling over the seconds it spent prefilling, from its own histograms.
+// llama.cpp: its prompt speed gauge. SGLang and the rest: prompt tokens that missed the cache over the window.
+function prefillSpeed(r, m, seconds) {
+  const prev = r.counters;
+  r.counters = m;
+  if (!prev) return null;
+  const d = (k) => (m[k] ?? 0) - (prev[k] ?? 0);
+  if (m.request_prefill_time_seconds_sum !== undefined) return d('request_prefill_time_seconds_sum') > 0 ? d('request_prefill_kv_computed_tokens_sum') / d('request_prefill_time_seconds_sum') : null;
+  if (m.prompt_tokens_seconds !== undefined) return m.prompt_tokens_seconds > 0 ? m.prompt_tokens_seconds : null;
+  const fresh = d('prompt_tokens_total') - d('cached_tokens_total');
+  return seconds && fresh > 0 ? fresh / seconds : null;
+}
+
 // Reads one engine's counters, adds what changed to the totals, and leaves its live numbers on the run.
 export async function scrape(r, now) {
   let m;
-  try {
-    const res = await fetch(`${r.url}/metrics`, { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) return;
-    m = parseMetrics(await res.text());
-  } catch { return; }
+  if (r.meter) m = { ...r.meter.counts }; // a host run has no /metrics; the app counts what passes through its port instead
+  else {
+    try {
+      const res = await fetch(`${r.url}/metrics`, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) return;
+      m = parseMetrics(await res.text());
+    } catch { return; }
+  }
   const cur = { in: m.prompt_tokens_total || 0, out: m.generation_tokens_total || m.tokens_predicted_total || 0, req: m.request_success_total || 0 };
   const last = usage.last[keyOf(r)] || cur;
   const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : cur[k]]));
@@ -45,7 +64,8 @@ export async function scrape(r, now) {
   r.series ||= [];
   if (!r.series.length || now - r.series.at(-1)[0] >= 60000) { r.series.push([now, r.used.in + r.used.out]); if (r.series.length > 240) r.series.shift(); }
   const seconds = r.scraped ? (now - r.scraped) / 1000 : 0;
-  r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: seconds ? Math.round(delta.in / seconds) : 0, used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
+  r.pps = prefillSpeed(r, m, seconds) ?? r.pps ?? 0;
+  r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: Math.round(r.pps), used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
   r.scraped = now;
 }
 
@@ -89,6 +109,12 @@ export async function sources(runs) {
   const since = new Date(); since.setHours(0, 0, 0, 0);
   const seen = new Map();
   for (const r of runs) {
+    for (const row of r.meter?.callers.values() || []) {
+      if (row.last < since.toISOString()) continue;
+      const had = seen.get(row.ip) || { ip: row.ip, requests: 0, last: row.last };
+      had.requests += row.requests; if (row.last > had.last) had.last = row.last;
+      seen.set(row.ip, had);
+    }
     if (!r.container) continue;
     const out = await run('docker', ['logs', '-t', '--since', since.toISOString(), r.container], { timeout: 20000 });
     for (const line of `${out.stdout}${out.stderr}`.split('\n')) {

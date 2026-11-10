@@ -14,7 +14,7 @@ const SETTINGS = [['home-edit', 'Home screen'], ['background', 'Background'], ['
 
 export function navBar(page) {
   if (!s.snap) return '<header class="nav"><span class="mark chip"><i></i><span>Local AI</span></span></header>';
-  const now = page ? SECTION[page] : 'home', r = D() && run();
+  const now = page ? SECTION[page] : 'home', r = D() && (s.dev === -1 || s.snap.devices[s.dev]?.online) && run(); // an offline machine's last snapshot is not live
   const links = NAV.map(([k, label, to], i) => `<button data-nav="${to}" title="${label} (${i + 1})"${now === k ? ' aria-current="page"' : ''}>${label}</button>`).join('');
   const live = r?.phase === 'ready' ? `<button class="nlive" data-nav="home" aria-label="${esc(r.name)} is running. Go to Home"><i></i><span class="nm">${esc(r.name)}</span><em>${fmt(r.stats?.tps || 0)} tok/s</em></button>` : '';
   return `<header class="nav"><button class="mark chip" data-nav="machines" aria-label="Machine: ${esc(here())}"><i></i><span class="who">${esc(here())}</span></button><nav class="nlinks" aria-label="Sections">${links}</nav><div class="nr">${live}${fsBtn()}</div></header>`;
@@ -27,7 +27,7 @@ export function homeHtml(id) {
   if (id === 'off') {
     const c = chosen();
     const pick = (r) => `<button class="cpick${r.id === c.id ? ' on' : ''}" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${[r.tier, r.speed.c1 && `${Math.round(r.speed.c1)}/s`].filter(Boolean).join(' · ')}</small></button>`;
-    inner = strip(esc(c.name), offLine(c), `<div class="cpicks">${HOME().includes('models') ? shown().map(pick).join('') : ''}</div>`, `<button class="quiet" data-nav="adv-models">More models</button>${startBtn()}`);
+    inner = strip(esc(c.name), offLine(c), `<div class="cpicks">${HOME().includes('models') && shown().length > 1 ? shown().map(pick).join('') : ''}</div>`, `<button class="quiet" data-nav="adv-models">More models</button>${startBtn()}`);
   } else if (id === 'awake' || id === 'opened') {
     const r = run(), sub = [esc(runLine(r, id === 'opened')), all().find((x) => x.id === r.recipe)?.engine, r.ctx && ctxOf(r.ctx)].filter(Boolean).join(' · ');
     inner = strip(esc(r.name), sub, `<div>${HOME().includes('stats') ? running(r) : ''}</div>`, `${s.agentsOpen ? `<div class="apop">${agentList('open')}</div>` : ''}${openBtns()}${stopBtn()}`);
@@ -44,10 +44,10 @@ function modelsPage(page) {
   const r = all().find((x) => x.id === s.modelOpen) || chosen();
   if (!r) return `<div class="pwrap pg"><div class="ptitle">Models</div><div class="psub">None run on ${esc(here())}</div>${elsewhere()}</div>`;
   const row = (x) => `<button class="mitem${x.id === r.id ? ' sel' : ''}${x.id === chosen()?.id ? ' cur' : ''}" data-act="model" data-id="${esc(x.id)}" data-go="adv-models">`
-    + `<span class="at"><b data-tag="${run() ? 'Running' : 'Selected'}">${esc(x.name)}</b><small>${meta(x)}</small></span><span class="ics">${caps(x)}</span></button>`;
+    + `<span class="at"><b data-tag="${run()?.recipe === x.id ? 'Running' : 'Selected'}">${esc(x.name)}</b><small>${meta(x)}</small></span><span class="ics">${caps(x)}</span></button>`;
   const right = page === 'edit' ? `<div class="pg"><div class="screen">${editBody()}</div></div><button class="pback" data-go="adv-models">Cancel</button>`
     : `<div><div class="ptitle">${esc(r.name)}</div><div class="psub" style="margin-bottom:0">${meta(r)}</div></div><div class="mcaps">${capNames(r)}</div><div class="kv">${kv(facts(r, true))}</div>`
-      + `<div class="macts">${useBtn(r)}<button class="btn" data-act="model" data-id="${esc(r.id)}" data-go="edit">Edit</button></div>${cardHtml(r)}`;
+      + `<div class="macts">${useBtn(r)}${r.host ? '' : `<button class="btn" data-act="model" data-id="${esc(r.id)}" data-go="edit">Edit</button>`}</div>${cardHtml(r)}`;
   return `<div class="msplit"><div class="mleft"><div class="ptitle">Models</div><div class="psub">${all().length} run on this machine, newest first</div><div class="mlist">${all().map(row).join('')}</div></div><div class="mright">${right}</div></div>`;
 }
 
