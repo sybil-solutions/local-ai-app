@@ -23,7 +23,7 @@ const send = (path, method = 'POST', body) => api(path, { method, body: body ===
 // What the server last said, and the little the page remembers on its own.
 let snap = null, online = true, needKey = false, version = 0, dev = -1;
 let nav = null, sel = null, expanded = null, modelOpen = null, opened = null, command = '', note = '', busy = false, agentsOpen = false;
-let period = 'days', uspan = 'all', usage = null, ends = null, peers = null, logText = '', draft = null, link = null, full = store('la-full') !== '0';
+let period = 'days', uspan = 'all', usage = null, ends = null, peers = null, logText = '', draft = null, link = null, installCmd = null, full = store('la-full') !== '0';
 const trail = [], form = {}, cards = {};
 const scoped = (path) => (dev === -1 ? path : `devices/${dev}/${path}`);
 const D = () => (dev === -1 ? snap : snap.devices[dev]?.state);
@@ -250,7 +250,7 @@ const STATE = {
   'm-connect': () => ({ pose: 'reach', p: 0.5, word: 'Connecting', line: link.name, btns: b('Cancel', 'machines', 'neg') }),
   'm-linked': () => ({ pose: 'touch', p: 1, word: 'Connected', line: link.name, btns: `${a('Use this machine', 'uselinked', 'go')}${b('Back', 'machines')}` }),
   'm-fail': () => ({ pose: 'broken', word: 'Can’t reach it', line: link.error, btns: `${b('Try again', 'addmachine', 'go')}${b('Back', 'machines')}` }),
-  'm-install': () => ({ pose: 'apart', word: 'Not set up', line: `${link.name} doesn’t have Local AI`, btns: b('Back', 'machines') }),
+  'm-install': () => ({ pose: 'apart', word: 'Not set up', line: `Run this on ${link.name}, then come back`, extra: `<div class="box mono" style="margin-top:8px">${esc(installCmd || 'Install Local AI there first')}</div>`, btns: `${installCmd ? a('Copy', 'copy', 'go', `data-copy="${esc(installCmd)}"`) : ''}${b('Back', 'machines')}` }),
 };
 const plain = (id) => { const s = STATE[id](); return `${menu()}${status(s.pose, s.word, s.line, s.p)}${s.bar ? bar(s.p * 100) : ''}${s.extra || ''}<div class="sp"></div>${s.btns || ''}`; };
 
@@ -470,7 +470,7 @@ async function loadCard(id) {
 const LOAD = {
   usage: async () => { usage = await api(scoped('usage')); render(); },
   endpoints: async () => { ends = null; ends = await api(scoped('endpoints')); render(); },
-  machines: async () => { peers = await api('tailscale').catch(() => []); render(); },
+  machines: async () => { ({ peers, install: installCmd } = await api('tailscale').catch(() => ({ peers: [], install: null }))); render(); },
   logs: async () => { logText = 'Loading'; logText = (await api(scoped(`runs/${run().id}/logs?tail=60`))).text.trim() || 'Nothing was printed'; render(); },
   'adv-models': () => isFull() && loadCard(modelOpen || chosen()?.id),
   'model-page': () => loadCard(modelOpen),
@@ -491,7 +491,7 @@ function go(id) {
   nav = id;
   Promise.resolve(LOAD[id]?.()).catch((e) => { note = e.message; render(true); });
 }
-setInterval(() => { if (nav === 'usage') LOAD.usage().catch(() => {}); }, 15000);
+setInterval(() => { if (nav === 'usage' || nav === 'machines' || nav === 'm-install') LOAD[nav === 'usage' ? 'usage' : 'machines']().catch(() => {}); }, 12000);
 
 // What buttons do.
 const stopRun = () => { const r = run(); opened = null; return r ? send(scoped(`runs/${r.id}`), 'DELETE') : null; };
@@ -530,12 +530,12 @@ const ACTS = {
   },
   use: (d) => { dev = +d.dev; sel = null; opened = null; go('home'); },
   uselinked: () => { const i = snap.devices.findIndex((x) => x.url === link.url); if (i >= 0) dev = i; sel = null; go('home'); },
-  peer: (d) => { link = { name: d.name }; if (d.app) { form.host = `http://${d.ip}:18700`; go('addmachine'); } else go('m-install'); },
-  connect: async () => {
+  peer: (d) => { link = { name: d.name }; if (!d.app) return go('m-install'); form.host = `http://${d.ip}:${location.port || 18700}`; form.mkey = ''; return ACTS.connect({ peer: d.name }); },
+  connect: async (d) => {
     const typed = (form.host || '').trim().replace(/\/$/, ''), url = /^https?:\/\//.test(typed) ? typed : `http://${typed}${/:\d+$/.test(typed) ? '' : ':18700'}`;
-    link = { name: url.replace(/^https?:\/\//, ''), url };
+    link = { name: d.peer || url.replace(/^https?:\/\//, ''), url };
     nav = 'm-connect'; render(true);
-    try { await send('devices', 'POST', { url, key: (form.mkey || '').trim() }); form.host = form.mkey = ''; if (nav === 'm-connect') nav = 'm-linked'; } catch (e) { link.error = e.message; if (nav === 'm-connect') nav = 'm-fail'; }
+    try { await send('devices', 'POST', { url, key: (form.mkey || '').trim() }); form.host = form.mkey = ''; if (nav === 'm-connect') nav = 'm-linked'; } catch (e) { link.error = e.message; if (nav === 'm-connect') nav = e.status === 401 ? 'addmachine' : 'm-fail'; if (e.status === 401) throw e; }
   },
   docker: () => send(scoped('docker/start')),
   key: () => { key = (form.key || '').trim(); store('key', key); needKey = false; },

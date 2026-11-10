@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { hostname, platform } from 'node:os';
@@ -32,24 +33,47 @@ function localState() {
     usage: engine.usageView(), catalog: { ...recipes.feed, count: recipes.recipeCount(), id: recipes.registryId() } };
 }
 
-// This machine's tailnet name and the other machines on it, with whether each already answers as Local AI.
-let tail = { at: 0, self: null, peers: [] };
-async function tailscale() {
-  if (Date.now() - tail.at < 15000) return tail;
-  let j = null;
-  try { j = JSON.parse((await run('tailscale', ['status', '--json'], { timeout: 5000 })).stdout); } catch { /* no Tailscale here */ }
+// Tailscale: this machine's own address, and the other machines on the tailnet with whether each already answers as Local AI.
+let tail = { at: 0, status: null }, seenPeers = { at: 0, list: [] };
+async function tailStatus() {
+  if (Date.now() - tail.at > 15000) {
+    let status = null;
+    try { status = JSON.parse((await run('tailscale', ['status', '--json'], { timeout: 5000 })).stdout); } catch { /* no Tailscale here */ }
+    tail = { at: Date.now(), status };
+  }
+  return tail.status;
+}
+const tailSelf = async () => { const me = (await tailStatus())?.Self; return me?.TailscaleIPs?.[0] ? { name: (me.DNSName || '').replace(/\.$/, ''), ip: me.TailscaleIPs[0], user: me.UserID } : null; };
+async function tailPeers() {
+  if (Date.now() - seenPeers.at < 10000) return seenPeers.list;
   const linked = new Set(config.devices.map((d) => new URL(d.url).hostname));
-  const peers = await Promise.all(Object.values(j?.Peer || {}).filter((p) => !/ios|android|tvos/i.test(p.OS || '')).map(async (p) => {
+  const list = await Promise.all(Object.values((await tailStatus())?.Peer || {}).filter((p) => !/ios|android|tvos/i.test(p.OS || '')).map(async (p) => {
     const ip = p.TailscaleIPs?.[0];
     const app = p.Online && await fetch(`http://${ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false);
     return { name: p.HostName, ip, os: p.OS, online: !!p.Online, seen: p.LastSeen, app: !!app, linked: linked.has(ip) };
   }));
-  tail = { at: Date.now(), self: j?.Self ? { name: (j.Self.DNSName || '').replace(/\.$/, ''), ip: j.Self.TailscaleIPs?.[0] } : null, peers: peers.sort((a, b) => b.online - a.online || a.name.localeCompare(b.name)) };
-  return tail;
+  seenPeers = { at: Date.now(), list: list.sort((a, b) => b.online - a.online || a.name.localeCompare(b.name)) };
+  return seenPeers.list;
+}
+// Tailscale already proves which machines are yours. Those may connect, and fetch the installer, without typing a key.
+async function isMine(req) {
+  const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, ''), me = await tailSelf();
+  // The Host must be this machine's own tailnet name or address, so a rebound DNS name can't borrow the trust.
+  if (!me || ![me.ip, me.name, me.name.split('.')[0]].includes((req.headers.host || '').replace(/:\d+$/, ''))) return false;
+  try { return JSON.parse((await run('tailscale', ['whois', '--json', ip], { timeout: 4000 })).stdout).Node.User === me.user; } catch { return false; }
+}
+// With Tailscale up, the app and its engines also answer on this machine's tailnet address, so your other machines can use them.
+let shared = null;
+async function share() {
+  const me = !process.env.LOCAL_AI_HOST && process.env.LOCAL_AI_SHARE !== '0' && await tailSelf();
+  if (!me || shared === me.ip) return;
+  shared = me.ip;
+  createServer(handle).once('error', (e) => { shared = null; event('warn', 'server.tailnet', { error: e.message }); })
+    .listen(PORT, me.ip, () => { engine.shareOn(me.ip); event('info', 'server.shared', { ip: me.ip }); });
 }
 
 async function endpoints() {
-  const self = /^127\./.test(HOST) ? null : (await tailscale()).self;
+  const self = shared || !/^127\./.test(HOST) ? await tailSelf() : null;
   const ready = engine.listRuns().filter((r) => r.phase === 'ready');
   return { runs: ready.map((r) => ({ id: r.id, name: r.name, local: `http://${ENGINE_HOST}:${r.id}/v1`, tailnet: self ? `http://${self.name}:${r.id}/v1` : null, apis: r.apis })),
     app: self ? `http://${self.name}:${PORT}` : null, key: config.key, sources: await engine.sources() };
@@ -116,8 +140,10 @@ function targets() {
 
 async function addDevice({ url, key, name }) {
   if (!/^https?:\/\/[^\s/]+\/?$/.test(url || '')) fail(400, 'Enter a URL such as http://100.90.62.80:18700');
-  if (!key) fail(400, 'Enter the key shown on that device');
   const clean = url.replace(/\/$/, '');
+  // One of your own Tailscale machines hands over its key when asked; anything else needs it typed.
+  key ||= (await fetch(`${clean}/api/pair`, { method: 'POST', signal: AbortSignal.timeout(8000) }).then((r) => (r.ok ? r.json() : null), () => null))?.key;
+  if (!key) fail(401, 'That machine needs its key. It’s under API endpoints there');
   if (config.devices.some((d) => d.url === clean)) fail(409, 'That device is already added');
   const res = await fetch(`${clean}/api/state`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) }).catch((e) => fail(502, `Could not reach it: ${e.cause?.code || e.message}`));
   if (!res.ok) fail(res.status === 401 ? 401 : 502, res.status === 401 ? 'That key is wrong' : `It answered ${res.status}`);
@@ -172,7 +198,7 @@ async function api(req, res, url) {
     case 'GET /api/usage': return engine.usageDetail();
     case 'GET /api/card': return recipes.card(url.searchParams.get('id'));
     case 'GET /api/endpoints': return endpoints();
-    case 'GET /api/tailscale': return (await tailscale()).peers;
+    case 'GET /api/tailscale': { const me = await tailSelf(); return { peers: await tailPeers(), install: me ? `curl -fsSL http://${me.ip}:${PORT}/install | bash` : null }; }
     case 'POST /api/docker/start': return startDocker();
     case 'POST /api/app/check': return update.check();
     case 'POST /api/app/update': return update.update();
@@ -187,14 +213,15 @@ async function api(req, res, url) {
   }
 }
 
-function sendStatic(req, res, path) {
+async function sendStatic(req, res, path) {
   const file = path === '/' ? 'index.html' : path.slice(1);
   const type = TYPES[file.split('.').pop()];
   if (!type || !/^[\w-]+(\/[\w-]+)?\.\w+$/.test(file) || !existsSync(join(WEB, file))) fail(404, 'Not found');
   let data = readFileSync(join(WEB, file));
   if (file === 'index.html') {
-    // Only same-machine pages get the key inlined; the Host check stops DNS rebinding from reading it.
-    const trusted = /^(127\.|::1|::ffff:127\.)/.test(req.socket.remoteAddress) && LOOPBACK.test(req.headers.host || '');
+    // A page opened on this machine, or on another of your Tailscale machines, gets the key inlined. The Host check stops DNS rebinding from reading it.
+    const local = /^(127\.|::1|::ffff:127\.)/.test(req.socket.remoteAddress) && LOOPBACK.test(req.headers.host || '');
+    const trusted = local || (shared && req.socket.localAddress?.replace(/^::ffff:/, '') === shared && await isMine(req));
     data = String(data).replace('__KEY__', trusted ? config.key : '');
   }
   res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
@@ -205,8 +232,16 @@ async function handle(req, res) {
   try {
     const url = new URL(req.url, 'http://local');
     if (url.pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true,"app":"local-ai"}'); }
+    if (url.pathname === '/api/pair' || url.pathname.startsWith('/install')) {
+      if (!(await isMine(req))) fail(403, 'Only your own Tailscale machines can do this without a key');
+      if (url.pathname === '/api/pair') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ key: config.key, name: hostname() })); }
+      if (url.pathname === '/install.tgz') { res.writeHead(200, { 'content-type': 'application/gzip' }); return spawn('tar', ['-czf', '-', '-C', join(WEB, '..'), 'server', 'web', 'package.json', 'install.sh', 'README.md']).stdout.pipe(res); }
+      const from = /^[\w.-]+(:\d+)?$/.test(req.headers.host || '') ? req.headers.host : fail(400, 'Bad address');
+      res.writeHead(200, { 'content-type': 'text/x-shellscript' });
+      return res.end(`#!/bin/bash\n# Copies Local AI from the machine that served this, then installs it for this user.\nset -e\nT="$(mktemp -d)"\ncurl -fsSL http://${from}/install.tgz | tar -xz -C "$T"\n"$T/install.sh"\n`);
+    }
     if (!url.pathname.startsWith('/api/')) {
-      return sendStatic(req, res, url.pathname);
+      return await sendStatic(req, res, url.pathname);
     }
     if (req.headers.authorization !== `Bearer ${config.key}`) fail(401, 'Enter this device\'s key');
     const result = await api(req, res, url);
@@ -229,10 +264,12 @@ export async function start() {
   const soon = () => { if (!queued) { queued = true; setTimeout(() => { queued = false; publish(); }, 150); } };
   engine.onChange(soon); harness.onChange(soon); update.onChange(soon);
   update.check();
+  await share();
   await engine.tick();
   await publish();
   every(2000, async () => { await engine.tick(); await publish(); });
   every(3000, async () => { await Promise.all(config.devices.map(pollDevice)); harness.syncPi(targets()); });
+  every(30000, share);
   every(3600e3, recipes.refresh);
   every(6 * 3600e3, update.check);
   every(30000, async () => engine.flushUsage());
