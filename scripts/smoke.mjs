@@ -45,16 +45,18 @@ function serve(handler) {
   return new Promise((done) => s.listen(0, '127.0.0.1', () => done(s)));
 }
 
-// An engine started outside the app, with vLLM's counters. Each request reads 1000 prompt tokens in 0.5 s.
+// An engine started outside the app, with vLLM's counters. Each request reads 2000 prompt tokens in 1 s, then a short
+// follow-up reads 200 in 0.5 s, too few to time: the speed shown stays 2000.
 const counters = { prompt_tokens_total: 0, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0, request_prefill_kv_computed_tokens_sum: 0, request_prefill_time_seconds_sum: 0 };
 const outside = await serve((req, body) => {
   if (req.url === '/v1/models') return [200, { data: [{ id: 'outside-model' }] }];
   if (req.url === '/metrics') return [200, Object.entries(counters).map(([k, v]) => `vllm:${k}{model_name="outside-model"} ${v}`).join('\n'), 'text/plain'];
   if (req.method === 'POST' && req.url === '/v1/chat/completions') {
     if (!body.includes('messages')) return [400, { error: 'messages required' }]; // the app's probe for which APIs it has
-    Object.assign(counters, { prompt_tokens_total: counters.prompt_tokens_total + 1000, generation_tokens_total: counters.generation_tokens_total + 50, request_success_total: counters.request_success_total + 1,
-      request_prefill_kv_computed_tokens_sum: counters.request_prefill_kv_computed_tokens_sum + 1000, request_prefill_time_seconds_sum: counters.request_prefill_time_seconds_sum + 0.5 });
-    return [200, { choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 1000, completion_tokens: 50 } }];
+    const n = body.includes('short') ? 200 : 2000;
+    Object.assign(counters, { prompt_tokens_total: counters.prompt_tokens_total + n, generation_tokens_total: counters.generation_tokens_total + 50, request_success_total: counters.request_success_total + 1,
+      request_prefill_kv_computed_tokens_sum: counters.request_prefill_kv_computed_tokens_sum + n, request_prefill_time_seconds_sum: counters.request_prefill_time_seconds_sum + (n === 200 ? 0.5 : 1) });
+    return [200, { choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: n, completion_tokens: 50 } }];
   }
   return [404, { error: 'not found' }];
 });
@@ -105,8 +107,8 @@ const raw = (path, host) => new Promise((done, failed) => {
   req.on('error', failed);
   req.end();
 });
-const chat = (port, stream) => fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(30000),
-  body: JSON.stringify({ model: 'x', max_tokens: 16, stream, ...(stream ? { stream_options: { include_usage: true } } : {}), messages: [{ role: 'user', content: 'hi' }] }) }).then((r) => r.text());
+const chat = (port, stream, content = 'hi') => fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(30000),
+  body: JSON.stringify({ model: 'x', max_tokens: 16, stream, ...(stream ? { stream_options: { include_usage: true } } : {}), messages: [{ role: 'user', content }] }) }).then((r) => r.text());
 
 let hostPid = null;
 const watchdog = setTimeout(() => { console.log('FAIL the smoke test took longer than 10 minutes'); cleanup().then(() => process.exit(1)); }, 600e3);
@@ -148,9 +150,12 @@ try {
   check('does not take a proxy of several models for a model running here', !(await state()).runs.some((r) => r.id === proxy.address().port));
   await until('a first read of its counters', async () => (await state()).runs.find((r) => r.id === port)?.stats, 15000);
   await chat(port, false);
-  const counted = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 1050 && r; }, 15000);
-  check('counts its tokens from /metrics', counted.stats.used === 1050, `used ${counted.stats.used}`);
+  const counted = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2050 && r; }, 15000);
+  check('counts its tokens from /metrics', counted.stats.used === 2050, `used ${counted.stats.used}`);
   check('reports its prefill speed, not its prompt tokens a second', counted.stats.pps === 2000, `pps ${counted.stats.pps}`);
+  await chat(port, false, 'short');
+  const after = await until('the short request to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2300 && r; }, 15000);
+  check('a short prefill does not drag the prefill speed down', after.stats.pps === 2000, `pps ${after.stats.pps}`);
   check('stopping a model the app did not start is refused', (await api(`/api/runs/${port}`, { method: 'DELETE' })).status === 409);
 
   if (APPLE) {
@@ -174,8 +179,8 @@ try {
     await sleep(4500); // the scrape just after a measurement is skipped, so the requests below land after it
     await chat(id, false);
     await chat(id, true);
-    const used = await until('host tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === id); return r?.stats?.used >= 112 && r; }, 20000);
-    check('counts host tokens at its own port, without the measurement', used.stats.used === 112, `used ${used.stats.used}`);
+    const used = await until('host tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === id); return r?.stats?.used >= 4032 && r; }, 20000);
+    check('counts host tokens at its own port, without the measurement', used.stats.used === 4032, `used ${used.stats.used}`);
     check('reports host prefill speed', used.stats.pps > 0, `pps ${used.stats.pps}`);
     const logs = await api(`/api/runs/${id}/logs?tail=50`);
     check('shows the engine log', /POST \/v1\/chat\/completions/.test(logs.json?.text || ''));
