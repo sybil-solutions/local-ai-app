@@ -249,6 +249,7 @@ export async function start(id, picked) {
 export async function remove(rawId) {
   const r = runs.get(+rawId) || fail(404, 'No such run');
   if (r.phase === 'stopping') return { id: r.id };
+  if (r.external) fail(409, 'Local AI didn’t start this model, so it can’t stop it');
   const previous = r.phase;
   r.abort?.abort();
   r.measureAbort?.abort();
@@ -276,9 +277,10 @@ export async function logs(rawId, tail) {
   return { text: `${out.stdout}${out.stderr}` };
 }
 
+export const urlOf = (r) => `http://${r.external ? '127.0.0.1' : ENGINE_HOST}:${r.id}`;
 async function probe(r) {
   try {
-    const res = await fetch(`http://${ENGINE_HOST}:${r.id}/v1/models`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${urlOf(r)}/v1/models`, { signal: AbortSignal.timeout(2000) });
     if (res.ok) { update(r, { served: (await res.json()).data?.[0]?.id ?? r.served, misses: 0 }); return true; }
   } catch { /* still loading, or busy */ }
   r.misses++;
@@ -287,7 +289,7 @@ async function probe(r) {
 
 async function testReply(r) {
   try {
-    const res = await fetch(`http://${ENGINE_HOST}:${r.id}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer local' }, signal: AbortSignal.timeout(90000),
+    const res = await fetch(`${urlOf(r)}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer local' }, signal: AbortSignal.timeout(90000),
       body: JSON.stringify({ model: r.served, max_tokens: 4, messages: [{ role: 'user', content: 'Say OK.' }] }) });
     return res.ok && !!(await res.json()).choices?.length;
   } catch { return false; }
@@ -296,14 +298,14 @@ async function testReply(r) {
 export function startMeasure(r) {
   const recipe = find(r.recipe);
   update(r, { tried: true, measureAbort: new AbortController(), measuring: 1 });
-  measure({ id: r.recipe, url: `http://${ENGINE_HOST}:${r.id}`, model: r.served, seqs: recipe?.launch.seqs || 1, signal: r.measureAbort.signal, onLevel: (c) => { r.measuring = c; } })
+  measure({ id: r.recipe, url: urlOf(r), model: r.served, seqs: recipe?.launch.seqs || 1, signal: r.measureAbort.signal, onLevel: (c) => { r.measuring = c; } })
     .catch((e) => { if (!r.measureAbort?.signal.aborted) event('warn', 'speed.failed', { id: r.recipe, error: e.message }); })
     .finally(() => update(r, { measuring: 0, measureAbort: null }));
 }
 export const cancelMeasure = (rawId) => runs.get(+rawId)?.measureAbort?.abort();
 export function measureNow(rawId) {
   const r = runs.get(+rawId) || fail(404, 'No such run');
-  if (r.phase !== 'ready') fail(409, 'The model is not ready');
+  if (r.phase !== 'ready' || r.external) fail(409, 'The model is not ready');
   if (r.measuring) fail(409, 'Already measuring');
   if (r.stats?.active) fail(409, 'It is busy answering');
   startMeasure(r);
@@ -314,7 +316,7 @@ async function probeApis(r) {
   const paths = { chat: '/v1/chat/completions', responses: '/v1/responses', messages: '/v1/messages' };
   const found = await Promise.all(Object.entries(paths).map(async ([api, path]) => {
     try {
-      const res = await fetch(`http://${ENGINE_HOST}:${r.id}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(4000) });
+      const res = await fetch(`${urlOf(r)}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(4000) });
       return ![404, 405].includes(res.status) && api;
     } catch { return null; }
   }));
@@ -335,12 +337,12 @@ function parseMetrics(text) {
 async function scrape(r, now) {
   let m;
   try {
-    const res = await fetch(`http://${ENGINE_HOST}:${r.id}/metrics`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${urlOf(r)}/metrics`, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) return;
     m = parseMetrics(await res.text());
   } catch { return; }
   const cur = { in: m.prompt_tokens_total || 0, out: m.generation_tokens_total || m.tokens_predicted_total || 0, req: m.request_success_total || 0 };
-  const key = r.container;
+  const key = r.container || `port-${r.id}`;
   const last = usage.last[key] || cur;
   const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : cur[k]]));
   usage.last[key] = cur;
@@ -364,7 +366,7 @@ async function scrape(r, now) {
   r.scraped = now;
 }
 
-const nameOf = (r) => label(r.recipe);
+const nameOf = (r) => (r.external ? r.served : label(r.recipe));
 const parseLabels = (text) => Object.fromEntries(text.split(',').map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; }));
 
 async function inspectAll() {
@@ -422,6 +424,32 @@ async function reconcile(c, listedAt) {
   }
 }
 
+// Models someone else started: anything on this machine that answers like an OpenAI server. They are shown, never stopped.
+let scanned = 0;
+async function discover(now) {
+  for (const r of runs.values()) {
+    if (!r.external) continue;
+    if (!(await probe(r)) && r.misses >= 3) { runs.delete(r.id); event('info', 'run.gone', { id: r.id }); continue; }
+    if (!r.apis) await probeApis(r);
+    await scrape(r, now);
+  }
+  if (now - scanned < 30000) return;
+  scanned = now;
+  const text = (process.platform === 'darwin' ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnH'])).stdout;
+  const open = new Map([...text.matchAll(/(\S+):(\d+)\s/g)].map((m) => [+m[2], !/^(127\.|\[::1\])/.test(m[1])]));
+  const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && (p < PORT || p > PORT + 99) && !runs.has(p)).sort((a, b) => a - b).map(async (port) => {
+    try { const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await res.json()).data?.[0]?.id]; } catch { return [port, null]; }
+  }));
+  const known = new Set([...runs.values()].map((r) => r.served));
+  for (const [port, model] of found) {
+    if (!model || known.has(model)) continue; // the same model behind a proxy is still one model
+    known.add(model);
+    runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port), served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
+    event('info', 'run.found', { id: port, model });
+    notify();
+  }
+}
+
 let ticking = false;
 export async function tick() {
   if (ticking) return;
@@ -441,6 +469,7 @@ export async function tick() {
       await Promise.all(containers.map((c) => reconcile(c, listedAt)));
       for (const [name, at_] of removed) if (at_ < listedAt) removed.delete(name);
     }
+    await discover(listedAt);
   } catch (e) {
     event('error', 'tick.failed', { error: e.message });
   } finally { ticking = false; }

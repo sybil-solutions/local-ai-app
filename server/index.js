@@ -47,7 +47,9 @@ const tailSelf = async () => { const me = (await tailStatus())?.Self; return me?
 async function tailPeers() {
   if (Date.now() - seenPeers.at < 10000) return seenPeers.list;
   const linked = new Set(config.devices.map((d) => new URL(d.url).hostname));
-  const list = await Promise.all(Object.values((await tailStatus())?.Peer || {}).filter((p) => !/ios|android|tvos/i.test(p.OS || '')).map(async (p) => {
+  const status = await tailStatus();
+  // Only your own computers: not phones, and not the VPN exit nodes or shared machines Tailscale also lists.
+  const list = await Promise.all(Object.values(status?.Peer || {}).filter((p) => p.UserID === status.Self.UserID && !/ios|android|tvos/i.test(p.OS || '')).map(async (p) => {
     const ip = p.TailscaleIPs?.[0];
     const app = p.Online && await fetch(`http://${ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false);
     return { name: p.HostName, ip, os: p.OS, online: !!p.Online, seen: p.LastSeen, app: !!app, linked: linked.has(ip) };
@@ -75,7 +77,7 @@ async function share() {
 async function endpoints() {
   const self = shared || !/^127\./.test(HOST) ? await tailSelf() : null;
   const ready = engine.listRuns().filter((r) => r.phase === 'ready');
-  return { runs: ready.map((r) => ({ id: r.id, name: r.name, local: `http://${ENGINE_HOST}:${r.id}/v1`, tailnet: self ? `http://${self.name}:${r.id}/v1` : null, apis: r.apis })),
+  return { runs: ready.map((r) => ({ id: r.id, name: r.name, local: `${engine.urlOf(r)}/v1`, tailnet: self && r.reachable !== false ? `http://${self.name}:${r.id}/v1` : null, apis: r.apis })),
     app: self ? `http://${self.name}:${PORT}` : null, key: config.key, sources: await engine.sources() };
 }
 
@@ -131,9 +133,9 @@ const deviceViews = () => config.devices.map((d, i) => ({ i, name: d.name, url: 
 
 // Everything a harness can be pointed at, here or on another device.
 function targets() {
-  const toTarget = (device, host, key) => (r) => ({ key: `la-${key}-${r.id}`, device, url: `http://${host}:${r.id}`, model: r.served || r.name, name: r.name, ctx: r.ctx, vision: r.vision, apis: r.apis, id: r.id, deviceIndex: key });
+  const toTarget = (device, host, key) => (r) => ({ key: `la-${key}-${r.id}`, device, url: host ? `http://${host}:${r.id}` : engine.urlOf(r), model: r.served || r.name, name: r.name, ctx: r.ctx, vision: r.vision, apis: r.apis, id: r.id, deviceIndex: key });
   const ready = (runs) => runs.filter((r) => r.phase === 'ready');
-  const own = ready(engine.listRuns()).map(toTarget(hostname(), ENGINE_HOST, 'self'));
+  const own = ready(engine.listRuns()).map(toTarget(hostname(), null, 'self'));
   const others = deviceViews().flatMap((d) => (d.state ? ready(d.state.runs).map(toTarget(d.name, new URL(d.url).hostname, d.i)) : []));
   return [...own, ...others];
 }

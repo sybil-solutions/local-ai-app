@@ -51,7 +51,7 @@ canvas.art { display: block; width: 260px; height: 128px; margin: 0 -14px; flex:
 .wbtn { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; }
 .minical { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-template-columns: repeat(12, 1fr); gap: 2px; }
 .minical i { display: block; aspect-ratio: 1; border-radius: 2px; }
-.gpu { display: grid; grid-template-columns: 38px 1fr 62px; gap: 8px; align-items: center; font: 400 12px var(--ui); color: var(--muted); font-variant-numeric: tabular-nums; }
+.gpu { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font: 400 12px var(--ui); color: var(--muted); font-variant-numeric: tabular-nums; }
 .gpu i { display: block; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .gpu i u { display: block; height: 100%; background: var(--text); text-decoration: none; }
 .gpu span:last-child { text-align: right; }
@@ -244,7 +244,7 @@ html.wide #view { visibility: hidden; }
 .nlinks button:hover, #fs:not(.paged) .nlinks button:hover { color: var(--text); }
 .nlinks button[aria-current="page"], #fs:not(.paged) .nlinks button[aria-current="page"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .nr { display: flex; align-items: center; gap: 8px; flex: none; }
-.nr > button[data-fs] { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
+.nr > button[data-act=fs] { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
 .nlive { height: 32px; padding: 0 12px; border-radius: 8px; background: rgba(16,16,16,.72); box-shadow: inset 0 0 0 1px var(--line); font: 500 13px var(--ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .nlive i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; }
 .nlive em { font-style: normal; color: var(--muted); font-weight: 400; margin-left: 6px; }
@@ -334,7 +334,7 @@ html[data-bg=color] .frame .screen:has(canvas.art)::after, html[data-bg=own] .fr
 .top .topr.chip button { width: 30px; height: 30px; border-radius: 15px; color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 .chip button:hover, .nav .mark.chip:hover { background-color: rgba(255,255,255,.08); }
 .nr { gap: 8px; }
-.nr > button[data-fs] { width: 30px; height: 30px; border-radius: 15px; color: var(--accent); background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+.nr > button[data-act=fs] { width: 30px; height: 30px; border-radius: 15px; color: var(--accent); background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
 .nlive { height: 30px; border-radius: 15px; background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
 /* Agents: version on the left, the one action on the right. */
 .vrow { gap: 10px; }
@@ -453,3 +453,7 @@ a.btn { line-height: 40px; text-decoration: none; box-sizing: border-box; }
 .pg input.field, .pg textarea.box { max-width: 520px; }
 @media (prefers-reduced-motion: reduce) { .frame .screen { transition: none; } }
 .mpick { height: auto; min-height: 42px; padding: 6px 10px; flex-wrap: wrap; row-gap: 0; }
+.two .btn:last-child { display: inline-flex; align-items: center; justify-content: center; }
+.busyrows { margin-top: 10px; }
+.cin .busyrows { width: 260px; }
+.gpu span { white-space: nowrap; }

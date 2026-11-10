@@ -35,7 +35,8 @@ function picks() {
   const g = group(), seen = new Set();
   return TIERS.map(([k, name]) => g?.tiers[k] && { ...g.tiers[k], tier: name }).filter((r) => r && !seen.has(r.id) && seen.add(r.id));
 }
-const run = () => D().runs.find((r) => r.phase !== 'failed') || D().runs[0] || null;
+// The one model Home is about: one you started, else one found running on the machine, else one that failed.
+const run = () => { const runs = D().runs; return runs.find((r) => !r.external && r.phase !== 'failed') || runs.find((r) => r.external) || runs[0] || null; };
 function chosen() {
   const list = all(), three = picks(), r = run();
   const id = r?.recipe ?? [sel, D().last].find((x) => list.some((y) => y.id === x)) ?? (three.find((x) => x.tier === 'Balanced') || three[0] || list[0])?.id;
@@ -96,14 +97,16 @@ function miniUsage() {
 }
 const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => `<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0)}%"></u></i><span>${Math.round((g.used || 0) / 1024)} of ${Math.round(g.total / 1024)} GB</span></div>`).join('')}</div>`;
 const WBODY = {
-  hands: (ph) => (ph === 'off' ? `${art_('apart')}<div class="line">${offLine(chosen())}</div>` : status('work', run().name, ph === 'opened' ? `Running · ${agentName() || 'Agent'} is open` : 'Running', 1)),
+  hands: (ph) => (ph === 'off' ? `${art_('apart')}<div class="line">${offLine(chosen())}</div>` : status('work', run().name, ph === 'opened' ? `Running · ${runLine(run(), true)}` : runLine(run()), 1)),
   models: (ph) => (ph === 'off' ? `<div>${shown3().map(modelRow).join('')}<button class="quiet" style="margin-top:4px" data-go="adv-models">More models</button></div>` : ''),
   stats: (ph) => (ph === 'off' ? '' : running(run())),
   usage: miniUsage,
   gpus: gpuRows,
 };
 const home = (ph) => `<div class="scroll home">${HOME().map((k) => WBODY[k](ph)).join('')}</div>`;
-const openBtns = () => `<div class="two">${agentName() ? a(`Open ${esc(agentName())}`, 'open', 'go') : b('Choose an agent', 'chooser', 'go')}${b('⌄', 'chooser', '', 'aria-label="Choose an agent"')}</div>`;
+const openBtns = () => `<div class="two">${agentName() ? a(`Open ${esc(agentName())}`, 'open', 'go') : b('Choose an agent', 'chooser', 'go')}${b(svg('<path d="M6 9l6 6 6-6"/>'), 'chooser', '', 'aria-label="Choose an agent"')}</div>`;
+const stopBtn = () => (run().external ? '' : a('Stop', 'stop', 'neg'));
+const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.external ? 'Running · started outside Local AI' : 'Running');
 
 // Agents, in the chooser (tap to open) and on their own page (versions and updates).
 function agentRow(h, mode) {
@@ -211,7 +214,7 @@ function markdown(text) {
   return out.join('');
 }
 const cardHtml = (r) => { const c = cards[r.id]; return `<div class="label group">Model card</div>${!c ? left('Loading') : c.error ? left(esc(c.error)) : `<div class="cardsrc"><a href="https://huggingface.co/${esc(c.repo)}" target="_blank" rel="noopener">${esc(c.repo)}</a>${c.license ? ` · ${esc(c.license)}` : ''}${c.downloads != null ? ` · ${fmt(c.downloads)} downloads` : ''}</div><div class="mdcard">${c.html}</div>`}`; };
-const useBtn = (r) => { const live = run(); return live ? (live.recipe === r.id ? '' : a('Switch to this model', 'switch', 'go', `data-id="${esc(r.id)}"`)) : r.id === chosen()?.id ? a(`${r.ready ? 'Start' : 'Download'} ${esc(r.name)}`, 'start', 'go', 'data-go="home"') : a('Use', 'pick', 'go', `data-id="${esc(r.id)}" data-go="home"`); };
+const useBtn = (r) => { const live = run(); return live ? (live.recipe === r.id ? '' : a(live.external ? `Start ${esc(r.name)}` : 'Switch to this model', 'switch', 'go', `data-id="${esc(r.id)}"`)) : r.id === chosen()?.id ? a(`${r.ready ? 'Start' : 'Download'} ${esc(r.name)}`, 'start', 'go', 'data-go="home"') : a('Use', 'pick', 'go', `data-id="${esc(r.id)}" data-go="home"`); };
 const CTX = [8192, 16384, 32768, 65536, 131072, 204800, 262144, 524288, 1048576];
 const FLAGS = { ctx: ['--max-model-len', '--context-length', '--ctx-size', '-c'], seqs: ['--max-num-seqs', '--max-running-requests', '--parallel', '-np'], cards: ['--tensor-parallel-size', '--tp-size', '--tp'] };
 const seg = (k, list) => `<div class="seg">${list.map((v) => `<button class="${v === draft[k] ? 'on' : ''}" data-act="draft" data-k="${k}" data-v="${v}">${v}</button>`).join('')}</div>`;
@@ -246,7 +249,7 @@ const STATE = {
   nogpu: () => ({ pose: 'apart', word: 'No GPU here', line: 'This computer can’t run models', btns: elsewhere() }),
   nothing: () => ({ pose: 'apart', word: 'Nothing fits', line: `No tested models for ${esc(D().groups[0]?.name || 'this GPU')}`, btns: elsewhere() }),
   nocatalog: () => ({ pose: 'apart', word: 'No models yet', line: D().catalog.error ? 'Can’t reach the model list' : 'Getting the model list', btns: a('Try again', 'refresh', 'go') }),
-  busy: () => ({ pose: 'apart', word: 'GPU in use', line: 'Another program has it', btns: '<button class="btn" disabled>Start</button>' }),
+  busy: () => ({ pose: 'apart', word: 'GPUs in use', line: 'Another program is using them', extra: `<div class="busyrows">${gpuRows()}</div>`, btns: b('More models', 'adv-models') }),
   'm-connect': () => ({ pose: 'reach', p: 0.5, word: 'Connecting', line: link.name, btns: b('Cancel', 'machines', 'neg') }),
   'm-linked': () => ({ pose: 'touch', p: 1, word: 'Connected', line: link.name, btns: `${a('Use this machine', 'uselinked', 'go')}${b('Back', 'machines')}` }),
   'm-fail': () => ({ pose: 'broken', word: 'Can’t reach it', line: link.error, btns: `${b('Try again', 'addmachine', 'go')}${b('Back', 'machines')}` }),
@@ -256,8 +259,8 @@ const plain = (id) => { const s = STATE[id](); return `${menu()}${status(s.pose,
 
 const SCREENS = {
   off: () => `${menu()}${home('off')}${a(`${chosen().ready ? 'Start' : 'Download'} ${esc(chosen().name)}`, 'start', 'go')}`,
-  awake: () => `${menu()}${home('run')}${openBtns()}${a('Stop', 'stop', 'neg')}`,
-  opened: () => `${menu()}${home('opened')}${openBtns()}${a('Stop', 'stop', 'neg')}`,
+  awake: () => `${menu()}${home('run')}${openBtns()}${stopBtn()}`,
+  opened: () => `${menu()}${home('opened')}${openBtns()}${stopBtn()}`,
   chooser: () => `${close()}<div class="head">Open with</div><div class="scroll">${agentList('open')}</div>`,
   runthis: () => `${close()}<div class="head">Run this</div><div class="box mono">${esc(command)}</div><div class="sp"></div>${a('Copy', 'copy', 'go')}`,
   key: () => `<div class="top"><span class="mark">Local AI</span></div><div class="head" style="margin-top:24px">Enter the key</div>${left('It’s under Settings › Advanced › API endpoints on the machine running Local AI')}<input class="field" data-f="key" autocomplete="off" spellcheck="false" aria-label="Key" placeholder="Key" value="${esc(form.key || '')}"><div class="sp"></div>${a('Connect', 'key', 'go')}`,
@@ -330,7 +333,7 @@ function homeHtml(id) {
     inner = `<div class="ctitle"><div class="nname">${esc(c.name)}</div><div class="nsub">${offLine(c)}</div></div><div class="cpicks">${HOME().includes('models') ? shown3().map(pick).join('') : ''}</div><div class="cright"><button class="quiet" data-nav="adv-models">More models</button>${a(`${c.ready ? 'Start' : 'Download'} ${esc(c.name)}`, 'start', 'go')}</div>`;
   } else if (id === 'awake' || id === 'opened') {
     const r = run(), c = all().find((x) => x.id === r.recipe);
-    inner = `<div class="ctitle"><div class="nname">${esc(r.name)}</div><div class="nsub">${[id === 'opened' ? `${esc(agentName() || 'Agent')} is open` : 'Running', c?.engine, ctxOf(r.ctx)].filter(Boolean).join(' · ')}</div></div><div>${HOME().includes('stats') ? running(r) : ''}</div><div class="cright">${agentsOpen ? `<div class="apop">${agentList('open')}</div>` : ''}${openBtns()}${a('Stop', 'stop', 'neg')}</div>`;
+    inner = `<div class="ctitle"><div class="nname">${esc(r.name)}</div><div class="nsub">${[esc(runLine(r, id === 'opened')), c?.engine, r.ctx && ctxOf(r.ctx)].filter(Boolean).join(' · ')}</div></div><div>${HOME().includes('stats') ? running(r) : ''}</div><div class="cright">${agentsOpen ? `<div class="apop">${agentList('open')}</div>` : ''}${openBtns()}${stopBtn()}</div>`;
   } else {
     const s = STATE[id]();
     inner = `<div class="ctitle"><div class="nname">${esc(s.word)}</div><div class="nsub">${esc(s.line)}</div></div><div class="cprog">${s.bar ? bar(s.p * 100) : ''}${s.extra || ''}</div><div class="cright">${s.btns || ''}</div>`;
@@ -494,7 +497,7 @@ function go(id) {
 setInterval(() => { if (nav === 'usage' || nav === 'machines' || nav === 'm-install') LOAD[nav === 'usage' ? 'usage' : 'machines']().catch(() => {}); }, 12000);
 
 // What buttons do.
-const stopRun = () => { const r = run(); opened = null; return r ? send(scoped(`runs/${r.id}`), 'DELETE') : null; };
+const stopRun = () => { const r = run(); opened = null; return r && !r.external ? send(scoped(`runs/${r.id}`), 'DELETE') : null; };
 // A GPU can take a few seconds to show as free after a stop.
 async function startRun(recipe) {
   for (let tries = 0; ; tries++) {
