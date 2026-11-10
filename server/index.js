@@ -25,7 +25,7 @@ let shared = null; // this machine's tailnet address, once the app is also liste
 let snapshot = '{}', signature = '', version = 0, waiters = [];
 async function publish() {
   const groups = recipes.groups(engine.status.gpus), list = await agents.list();
-  for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(r.id);
+  for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(recipes.find(r.id).launch);
   const state = {
     name: hostname(), docker: engine.status.docker, gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
     usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
@@ -139,7 +139,7 @@ const body = (req) => new Promise((done, reject) => {
   req.on('end', () => {
     let parsed = null;
     try { parsed = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {}; } catch { /* rejected below */ }
-    if (parsed && typeof parsed === 'object') done(parsed); else reject(Object.assign(new Error('Body must be a JSON object'), { status: 400 }));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) done(parsed); else reject(Object.assign(new Error('Body must be a JSON object'), { status: 400 }));
   });
 });
 
@@ -193,7 +193,7 @@ export async function start() {
   if (!/^(127\.|0\.0\.0\.0$)/.test(HOST)) createServer(handle).once('error', (e) => event('warn', 'server.loopback', { error: e.message })).listen(PORT, '127.0.0.1');
   const every = (ms, fn) => setInterval(() => fn().catch?.((e) => event('error', 'loop.failed', { error: e.message })), ms);
   let queued = false;
-  const soon = () => { if (!queued) { queued = true; setTimeout(() => { queued = false; publish(); }, 150); } };
+  const soon = () => { if (!queued) { queued = true; setTimeout(() => { queued = false; publish().catch((e) => event('error', 'publish.failed', { error: e.message })); }, 150); } };
   for (const part of [engine, agents, update]) part.onChange(soon);
   recipes.refresh();
   update.check();

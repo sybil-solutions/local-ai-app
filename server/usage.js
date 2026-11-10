@@ -6,7 +6,10 @@ const usage = { days: {}, hours: {}, last: {}, ...readJson(file, {}) };
 let dirty = false;
 const keyOf = (r) => r.container || `port-${r.id}`;
 // A counter row by name. Names come from engines, so one like "__proto__" must still be an ordinary key.
-const rowOf = (rows, name) => (Object.hasOwn(rows, name) ? rows[name] : Object.defineProperty(rows, name, { value: { in: 0, out: 0, req: 0 }, enumerable: true, writable: true, configurable: true })[name]);
+function rowOf(rows, name) {
+  if (!Object.hasOwn(rows, name)) Object.defineProperty(rows, name, { value: { in: 0, out: 0, req: 0 }, enumerable: true, writable: true, configurable: true });
+  return rows[name];
+}
 export const forget = (r) => { delete usage.last[keyOf(r)]; dirty = true; };
 
 function parseMetrics(text) {

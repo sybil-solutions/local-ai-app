@@ -46,7 +46,7 @@ export function blocked(id) {
   if (launch.build) return 'Image must be built from source';
   if (launch.setup || launch.prepare || launch.resources) return 'Needs manual setup';
   if ((launch.machines || 1) > 1) return 'Needs several machines';
-  if (!launch.image.includes('@sha256:')) return 'Image is not pinned';
+  if (!/^[a-z0-9][\w./:-]*@sha256:[0-9a-f]{64}$/i.test(launch.image)) return 'Image is not pinned';
   const flag = flagsOf(launch).find((f) => f.startsWith('-') && !ALLOWED_FLAGS.has(f));
   if (flag) return `Uses ${flag}`;
   if ([].concat(launch.weights || []).some((w) => w.path || !REPO.test(w.repo || '') || !REVISION.test(w.revision || '') || !/^\/[\w./-]+$/.test(w.at || '') || w.at.includes('..'))) return 'Weights are not pinned';
@@ -127,8 +127,18 @@ function nearest(vramGb) {
 export const cardFor = (gpu) => cardOf(gpu.name, gpu.total / 1024) ?? nearest(gpu.total / 1024);
 
 // A recipe this machine may start, as the app shows it. One that can't be read is reported and left out.
-function usable(id) {
-  try { return blocked(id) ? [] : [view(id)]; } catch (e) { event('warn', 'recipe.unreadable', { id, error: e.message }); return []; }
+const unreadable = new Set();
+function usable(id, card, count) {
+  try {
+    const recipe = find(id);
+    if (recipe.card !== card || (recipe.launch.cards || 1) > count || blocked(id)) return [];
+    if (!local[id]) familyOf(recipe.model); // a registry recipe is ranked by its model's name
+    return [view(id)];
+  } catch (e) {
+    if (!unreadable.has(id)) event('warn', 'recipe.unreadable', { id, error: e.message });
+    unreadable.add(id);
+    return [];
+  }
 }
 
 // One group per kind of card on the machine: its three picks plus everything else it can launch.
@@ -141,8 +151,7 @@ export function groups(gpus) {
   }
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
-    const own = ids.filter((id) => find(id).card === card && (find(id).launch.cards || 1) <= members.length);
-    const list = latestOfEachFamily(own.flatMap(usable)).sort((a, b) => (b.tps || 0) - (a.tps || 0));
+    const list = latestOfEachFamily(ids.flatMap((id) => usable(id, card, members.length))).sort((a, b) => (b.tps || 0) - (a.tps || 0));
     return { card, name: catalog.cards[tested]?.name || members[0].name, untested: tested ? null : catalog.cards[card]?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(list), recipes: list };
   });
 }

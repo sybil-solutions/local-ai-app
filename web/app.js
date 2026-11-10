@@ -3,7 +3,7 @@
 import { applyBg, fitArt, loadOwn, onChange, pickBg } from './art.js';
 import { homeHtml, NAV, navBar, pageHtml } from './desktop.js';
 import { CTX, lit, look, markdown, SCREENS, STATE } from './screens.js';
-import { all, api, chosen, D, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shown, store } from './state.js';
+import { all, api, cardKey, chosen, D, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shown, store } from './state.js';
 import { ctxOf, fmt, notice } from './ui.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -53,33 +53,41 @@ function layout() {
   render(true);
 }
 
-// What a screen fetches when it opens.
+// What a screen fetches when it opens. An answer is used only if you haven't moved since it was asked for.
+let moves = 0;
+async function load(path, use) {
+  const asked = moves, answer = await api(scoped(path));
+  if (asked !== moves) return;
+  use(answer);
+  render(true);
+}
+// A model card is the same for everyone looking at that recipe on that machine, so it is fetched once.
 async function loadCard(id) {
-  if (!id || s.cards[id]) return;
-  s.cards[id] = await api(scoped(`card?id=${encodeURIComponent(id)}`)).then((c) => ({ ...c, html: markdown(c.md) }), (e) => ({ error: e.message }));
+  const k = cardKey(id);
+  if (!id || s.cards[k]) return;
+  s.cards[k] = await api(scoped(`card?id=${encodeURIComponent(id)}`)).then((c) => ({ ...c, html: markdown(c.md) }), (e) => ({ error: e.message }));
   render();
 }
-// An answer only counts if you are still looking at the machine, screen and model it was asked for.
-const where = () => `${s.dev} ${s.nav} ${s.modelOpen}`;
-async function ask(path) { const asked = where(), answer = await api(scoped(path)); return asked === where() ? answer : null; }
 const LOAD = {
-  usage: async () => { s.usage = (await ask('usage')) || s.usage; render(); },
-  endpoints: async () => { s.ends = null; s.ends = await ask('endpoints'); render(); },
+  usage: () => load('usage', (u) => { s.usage = u; }),
+  endpoints: () => { s.ends = null; return load('endpoints', (e) => { s.ends = e; }); },
   machines: async () => { ({ peers: s.peers, install: s.install } = await api('tailscale').catch(() => ({ peers: [], install: null }))); render(); },
-  logs: async () => { s.logText = 'Loading'; s.logText = (await ask(`runs/${run().id}/logs?tail=60`))?.text.trim() || 'Nothing was printed'; render(); },
+  logs: () => { s.logText = 'Loading'; return load(`runs/${run().id}/logs?tail=60`, (out) => { s.logText = out.text.trim() || 'Nothing was printed'; }); },
   'adv-models': () => isFull() && loadCard(s.modelOpen || chosen()?.id),
   'model-page': () => loadCard(s.modelOpen),
   'app-update': () => send('app/check').catch(() => {}),
-  edit: async () => {
+  edit: () => {
     s.draft = null;
-    const view = all().find((r) => r.id === s.modelOpen), raw = await ask(`recipe?id=${encodeURIComponent(s.modelOpen)}`), L = raw?.launch;
-    if (!raw) return;
-    s.draft = { raw, name: view.name, engine: view.engine, local: view.local, ctx: L.ctx || 0, cards: L.cards || 1, seqs: L.seqs || 1, kv: view.kv || 'Off', args: (L.args || []).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)).join(' '), touched: new Set() };
-    render(true);
+    const view = all().find((r) => r.id === s.modelOpen);
+    return load(`recipe?id=${encodeURIComponent(s.modelOpen)}`, (raw) => {
+      const L = raw.launch, shown = (x) => (!x || /[\s"']/.test(x) ? JSON.stringify(x) : x);
+      s.draft = { raw, name: view.name, engine: view.engine, local: view.local, ctx: L.ctx || 0, cards: L.cards || 1, seqs: L.seqs || 1, kv: view.kv || 'Off', args: (L.args || []).map(shown).join(' '), touched: new Set() };
+    });
   },
 };
 // go('home') closes everything, go('back') closes one screen, anything else opens that screen.
 function go(id) {
+  moves++;
   s.agentsOpen = false;
   if (id === 'home') { s.nav = null; s.trail.length = 0; return; }
   if (id === 'back') { s.nav = s.trail.pop() ?? null; return; }
@@ -145,7 +153,7 @@ const ACTS = {
     render(true);
     try {
       await send('devices', 'POST', { url, key: (s.form.mkey || '').trim() });
-      for (let tries = 0; tries < 25 && !s.snap.devices.some((x) => x.url === url); tries++) await sleep(200);
+      for (let tries = 0; !s.snap.devices.some((x) => x.url === url); tries++) { if (tries > 40) throw new Error('It connected, but this page hasn’t heard back. Reload the page'); await sleep(200); }
       s.form.host = s.form.mkey = '';
       if (s.nav === 'm-connect') s.nav = 'm-linked';
     } catch (e) {
@@ -169,16 +177,23 @@ const ACTS = {
   draft: (d) => { s.draft[d.k] = d.k === 'kv' ? d.v : +d.v; s.draft.touched.add(d.k); },
   saveedit: async () => {
     const { raw, touched, ctx, seqs, cards, kv } = s.draft, recipe = structuredClone(raw), L = recipe.launch, args = split(s.draft.args);
-    const set = (names, v) => { const i = args.findIndex((x) => names.includes(x.split('=')[0])); if (i >= 0) { if (args[i].includes('=')) args[i] = `${args[i].split('=')[0]}=${v}`; else args[i + 1] = String(v); } };
-    if (touched.has('ctx')) { L.ctx = ctx; set(FLAGS.ctx, ctx); if (L.config?.text) L.config.text = L.config.text.replace(/(max_seq_len:\s*)\d+/, `$1${ctx}`); }
-    if (touched.has('seqs')) { L.seqs = seqs; set(FLAGS.seqs, seqs); }
-    if (touched.has('cards')) { L.cards = cards; set(FLAGS.cards, cards); }
+    // Writes v to whichever of these flags the recipe uses, as `--flag v` or `--flag=v`. False when it uses none of them.
+    const set = (names, v) => {
+      const i = args.findIndex((x) => names.includes(x.split('=')[0]));
+      if (i >= 0 && args[i].includes('=')) args[i] = `${args[i].split('=')[0]}=${v}`; else if (i >= 0) args[i + 1] = String(v);
+      return i >= 0;
+    };
+    const elsewhere = (what) => { throw new Error(`This recipe sets ${what} somewhere this screen can’t reach. Change it under Arguments`); };
+    if (touched.has('ctx')) { L.ctx = ctx; const inConfig = /max_seq_len:\s*\d+/.test(L.config?.text || ''); if (inConfig) L.config.text = L.config.text.replace(/(max_seq_len:\s*)\d+/, `$1${ctx}`); if (!set(FLAGS.ctx, ctx) && !inConfig) elsewhere('its context'); }
+    if (touched.has('seqs')) { L.seqs = seqs; if (!set(FLAGS.seqs, seqs)) elsewhere('requests at once'); }
+    if (touched.has('cards')) { L.cards = cards; set(FLAGS.cards, cards); } // the GPUs are handed over by Docker either way
     if (touched.has('kv')) { const i = args.findIndex((x) => x.split('=')[0] === '--kv-cache-dtype'); if (i >= 0) args.splice(i, args[i].includes('=') ? 1 : 2); if (kv !== 'Off') args.push('--kv-cache-dtype', kv); }
     L.args = args;
     await send(scoped('recipes'), 'POST', recipe);
+    delete s.cards[cardKey(recipe.id)];
     go('back');
   },
-  resetedit: async () => { await send(scoped(`recipes?id=${encodeURIComponent(s.draft.raw.id)}`), 'DELETE'); go('back'); },
+  resetedit: async () => { await send(scoped(`recipes?id=${encodeURIComponent(s.draft.raw.id)}`), 'DELETE'); delete s.cards[cardKey(s.draft.raw.id)]; go('back'); },
   dismiss: () => { s.note = ''; },
   fs: () => {
     s.full = !s.full;

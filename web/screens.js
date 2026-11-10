@@ -1,5 +1,5 @@
 // Every screen, as a function that returns its HTML. The panel shows one at a time; the desktop layout shows the same ones as pages.
-import { agentName, all, chosen, D, group, here, HOME, homeCfg, newer, outdated, picks, run, s, shown } from './state.js';
+import { agentName, all, cardKey, chosen, D, group, here, HOME, homeCfg, newer, outdated, picks, run, s, shown } from './state.js';
 import { a, ago, art, b, bar, caps, close, ctxOf, esc, facts, fmt, grip, icon, item, kv, left, menu, meta, mins, running, status, toggle, vfoot } from './ui.js';
 import { miniUsage, usageBody } from './usage.js';
 
@@ -71,7 +71,7 @@ export function markdown(text) {
   return out.join('');
 }
 export const cardHtml = (r) => {
-  const c = s.cards[r.id];
+  const c = s.cards[cardKey(r.id)];
   if (!c || c.error) return `<div class="label group">Model card</div>${left(c ? esc(c.error) : 'Loading')}`;
   const source = `<a href="https://huggingface.co/${esc(c.repo)}" target="_blank" rel="noopener">${esc(c.repo)}</a>${c.license ? ` · ${esc(c.license)}` : ''}${c.downloads != null ? ` · ${fmt(c.downloads)} downloads` : ''}`;
   return `<div class="label group">Model card</div><div class="cardsrc">${source}</div><div class="mdcard">${c.html}</div>`;
@@ -181,7 +181,7 @@ export const SCREENS = {
   'adv-models': () => `${close()}<div class="head">Models</div><div class="label">Runs on this machine, newest first</div><div class="scroll">`
     + `${all().map((r) => `<div class="arow"><button class="ahead" data-act="model" data-id="${esc(r.id)}" data-go="model-page"><span class="at"><b>${esc(r.name)}</b><small>${meta(r)}</small></span><span class="ics">${caps(r)}<span class="chev">${icon('right', 14)}</span></span></button></div>`).join('')}</div>`,
   'model-page': () => {
-    const r = all().find((x) => x.id === s.modelOpen) || chosen();
+    const r = all().find((x) => x.id === s.modelOpen);
     if (!r) return `${close()}${left('This model is no longer in the list')}`;
     return `${close()}<div class="scroll"><div class="head">${esc(r.name)}</div>${left(meta(r))}${detail(r)}${cardHtml(r)}</div><div class="two">${useBtn(r) || '<button class="btn" disabled>Running</button>'}${editBtn(r, 'style="width:auto;flex:1"')}</div>`;
   },
