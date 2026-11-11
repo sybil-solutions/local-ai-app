@@ -1,65 +1,70 @@
-// The desktop layout: a top bar, the painting as the room, Home along the bottom, and every other screen as a page.
+// The desktop layout: a top bar, the picture as the room, Home along the bottom, and every other screen as a page.
+import { AgentList, AgentsFoot } from './components/agents.js';
+import { Button, QuietButton } from './components/controls.js';
+import { DeskPick, offLine, OpenButtons, runLine, StartButton, Stats, StopButton, Widget } from './components/home.js';
+import { Dove, Icon } from './components/icons.js';
+import { KeyValue, LayoutButton, MachineChip, ProgressBar, VersionFoot } from './components/layout.js';
+import { CapNames, Caps, EditForm, facts, meta, ModelCard, UseButton } from './components/models.js';
+import { ctxOf, fmt } from './format.js';
+import { attrs, data, html } from './html.js';
+import { Elsewhere, SCREENS, STATE } from './screens.js';
 import { all, chosen, D, here, HOME, run, s, shown } from './state.js';
-import { agentList, agentsFoot, BLOCKS, cardHtml, editBody, elsewhere, offLine, openBtns, runLine, SCREENS, startBtn, STATE, stopBtn, useBtn } from './screens.js';
-import { bar, capNames, caps, ctxOf, esc, facts, fmt, fsBtn, icon, kv, meta, remote, running, vfoot } from './ui.js';
 
 // [section, label, the screen it opens]. Keys 1 to 6 follow this order.
 export const NAV = [['home', 'Home', 'home'], ['models', 'Models', 'adv-models'], ['agents', 'Agents', 'agent'], ['machines', 'Machines', 'machines'], ['usage', 'Usage', 'usage'], ['settings', 'Settings', 'home-edit']];
+// Which section each screen belongs to, for the top bar and for how its page is laid out.
 const SECTION = {
   'adv-models': 'models', 'model-page': 'models', edit: 'models', agent: 'agents', usage: 'usage',
-  machines: 'machines', addmachine: 'machines', 'm-connect': 'machines', 'm-linked': 'machines', 'm-fail': 'machines', 'm-install': 'machines',
+  machines: 'machines', addmachine: 'machines', 'm-connect': 'machines', 'm-linked': 'machines', 'm-fail': 'machines', 'm-install': 'machines', 'm-setup': 'machines',
   settings: 'settings', advanced: 'settings', 'home-edit': 'settings', background: 'settings', endpoints: 'settings', registry: 'settings', 'hf-token': 'settings', 'app-update': 'settings',
 };
 const SETTINGS = [['home-edit', 'Home screen'], ['background', 'Background'], ['endpoints', 'API endpoints'], ['registry', 'Registry'], ['hf-token', 'Hugging Face token']];
 
-export function navBar(page) {
-  if (!s.snap) return '<header class="nav"><span class="mark chip"><img class="dove" src="/dove.svg" alt=""><span>Local AI</span></span></header>';
+// The top bar: the machine, the sections, and the running model with the layout switch.
+export function NavBar(page) {
+  if (!s.snap) return html`<header class="nav"><span class="mark chip">${Dove}<span>Local AI</span></span></header>`;
   const now = page ? SECTION[page] : 'home', r = D() && (s.dev === -1 || s.snap.devices[s.dev]?.online) && run(); // an offline machine's last snapshot is not live
-  const links = NAV.map(([k, label, to], i) => `<button data-nav="${to}" title="${label} (${i + 1})"${now === k ? ' aria-current="page"' : ''}>${label}</button>`).join('');
-  const live = r?.phase === 'ready' ? `<button class="nlive" data-nav="home" aria-label="${esc(r.name)} is running. Go to Home"><i></i><span class="nm">${esc(r.name)}</span><em>${fmt(r.stats?.tps || 0)} tok/s</em></button>` : '';
-  return `<header class="nav"><button class="mark chip" data-nav="machines" aria-label="Machine: ${esc(here())}"><i></i>${remote()}<span class="who">${esc(here())}</span></button><nav class="nlinks" aria-label="Sections">${links}</nav><div class="nr">${live}${fsBtn()}</div></header>`;
+  const live = r?.phase === 'ready' && html`<button class="nlive" data-nav="home" aria-label="${r.name} is running. Go to Home"><i></i><span class="nm">${r.name}</span><em>${fmt(r.stats?.tps || 0)} tok/s</em></button>`;
+  return html`<header class="nav">${MachineChip({ nav: 'machines' })}<nav class="nlinks" aria-label="Sections">${NAV.map(([k, label, to], i) => html`<button${data({ nav: to })} title="${label} (${i + 1})"${attrs({ 'aria-current': now === k && 'page' })}>${label}</button>`)}</nav><div class="nr">${live}${LayoutButton()}</div></header>`;
 }
 
-// Home: a title, something in the middle, and the buttons on the right.
-export function homeHtml(id) {
-  const strip = (title, sub, middle, right) => `<div class="ctitle"><div class="nname">${title}</div><div class="nsub">${sub}</div></div>${middle}<div class="cright">${right}</div>`;
-  let inner;
+// Home: the widgets you switched on in a row, then a strip with a title, something in the middle, and the buttons.
+const Strip = (title, sub, middle, right) => html`<div class="ctitle"><div class="nname">${title}</div><div class="nsub">${sub}</div></div>${middle}<div class="cright">${right}</div>`;
+export function DeskHome(id) {
+  let strip;
   if (id === 'off') {
     const c = chosen();
-    const pick = (r) => `<button class="cpick${r.id === c.id ? ' on' : ''}" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${[r.tier, r.speed.c1 && `${Math.round(r.speed.c1)}/s`].filter(Boolean).join(' · ')}</small></button>`;
-    inner = strip(esc(c.name), offLine(c), `<div class="cpicks">${HOME().includes('models') && shown().length > 1 ? shown().map(pick).join('') : ''}</div>`, `<button class="quiet" data-nav="adv-models">More models</button>${startBtn()}`);
+    strip = Strip(c.name, offLine(c), html`<div class="cpicks">${HOME().includes('models') && shown().length > 1 && shown().map(DeskPick)}</div>`, html`${QuietButton({ label: 'More models', nav: 'adv-models' })}${StartButton()}`);
   } else if (id === 'awake' || id === 'opened') {
-    const r = run(), sub = [esc(runLine(r, id === 'opened')), all().find((x) => x.id === r.recipe)?.engine, r.ctx && ctxOf(r.ctx)].filter(Boolean).join(' · ');
-    inner = strip(esc(r.name), sub, `<div>${HOME().includes('stats') ? running(r) : ''}</div>`, `${s.agentsOpen ? `<div class="apop">${agentList('open')}</div>` : ''}${openBtns()}${stopBtn()}`);
+    const r = run(), sub = [runLine(r, id === 'opened'), all().find((x) => x.id === r.recipe)?.engine, r.ctx && ctxOf(r.ctx)].filter(Boolean).join(' · ');
+    strip = Strip(r.name, sub, html`<div>${HOME().includes('stats') && Stats(r)}</div>`, html`${s.agentsOpen && html`<div class="apop">${AgentList('open')}</div>`}${OpenButtons()}${StopButton()}`);
   } else {
     const st = STATE[id]();
-    inner = strip(esc(st.word), esc(st.line), `<div class="cprog">${st.bar ? bar(st.p * 100) : ''}${st.extra || ''}</div>`, st.btns || '');
+    strip = Strip(st.word, st.line, html`<div class="cprog">${st.bar && ProgressBar(st.p)}${st.extra}</div>`, st.btns);
   }
-  // The usage and GPU blocks sit in a row above the strip.
-  const extras = s.snap && D() && !s.agentsOpen ? HOME().filter((k) => k === 'usage' || k === 'gpus') : [];
-  return `<div class="cfade"></div><div class="cbot">${extras.length ? `<div class="cwid">${extras.map((k) => `<div class="widget">${BLOCKS[k]()}</div>`).join('')}</div>` : ''}<div class="cin">${inner}</div></div>`;
+  const widgets = s.snap && D() && !s.agentsOpen ? HOME().filter((k) => k === 'usage' || k === 'gpus') : [];
+  return html`<div class="cfade"></div><div class="cbot">${widgets.length > 0 && html`<div class="cwid">${widgets.map(Widget)}</div>`}<div class="cin">${strip}</div></div>`;
 }
 
 // Models: the whole list on the left, the chosen one open beside it.
-function modelsPage(page) {
+function ModelsPage(page) {
   const r = all().find((x) => x.id === s.modelOpen) || chosen();
-  if (!r) return `<div class="pwrap pg"><div class="ptitle">Models</div><div class="psub">None run on ${esc(here())}</div>${elsewhere()}</div>`;
-  const row = (x) => `<button class="mitem${x.id === r.id ? ' sel' : ''}${x.id === chosen()?.id ? ' cur' : ''}" data-act="model" data-id="${esc(x.id)}" data-go="adv-models">`
-    + `<span class="at"><b data-tag="${run()?.recipe === x.id ? 'Running' : 'Selected'}">${esc(x.name)}</b><small>${meta(x)}</small></span><span class="ics">${caps(x)}</span></button>`;
-  const right = page === 'edit' ? `<div class="pg"><div class="screen">${editBody()}</div></div><button class="pback" data-go="adv-models">Cancel</button>`
-    : `<div><div class="ptitle">${esc(r.name)}</div><div class="psub" style="margin-bottom:0">${meta(r)}</div></div><div class="mcaps">${capNames(r)}</div><div class="kv">${kv(facts(r, true))}</div>`
-      + `<div class="macts">${useBtn(r)}${r.host ? '' : `<button class="btn" data-act="model" data-id="${esc(r.id)}" data-go="edit">Edit</button>`}</div>${cardHtml(r)}`;
-  return `<div class="msplit"><div class="mleft"><div class="ptitle">Models</div><div class="psub">${all().length} run on this machine, newest first</div><div class="mlist">${all().map(row).join('')}</div></div><div class="mright">${right}</div></div>`;
+  if (!r) return html`<div class="pwrap pg"><div class="ptitle">Models</div><div class="psub">None run on ${here()}</div>${Elsewhere()}</div>`;
+  const row = (x) => html`<button class="mitem${x.id === r.id ? ' sel' : ''}${x.id === chosen()?.id ? ' cur' : ''}"${data({ act: 'model', id: x.id, go: 'adv-models' })}><span class="at"><b data-tag="${run()?.recipe === x.id ? 'Running' : 'Selected'}">${x.name}</b><small>${meta(x)}</small></span><span class="ics">${Caps(x)}</span></button>`;
+  const right = page === 'edit' ? html`<div class="pg"><div class="screen">${EditForm()}</div></div><button class="pback" data-go="adv-models">Cancel</button>`
+    : html`<div><div class="ptitle">${r.name}</div><div class="psub" style="margin-bottom:0">${meta(r)}</div></div><div class="mcaps">${CapNames(r)}</div>${KeyValue(facts(r, true))}<div class="macts">${UseButton(r)}${!r.host && Button({ label: 'Edit', act: 'model', go: 'edit', data: { id: r.id } })}</div>${ModelCard(r)}`;
+  return html`<div class="msplit"><div class="mleft"><div class="ptitle">Models</div><div class="psub">${all().length} run on this machine, newest first</div><div class="mlist">${all().map(row)}</div></div><div class="mright">${right}</div></div>`;
 }
 
-export function pageHtml(page) {
-  const body = (id) => `<div class="screen">${SCREENS[id]()}</div>`;
-  if (SECTION[page] === 'models') return modelsPage(page);
-  if (page === 'agent') return `<div class="pwrap pg"><div class="ptitle">Agents</div><div class="psub">Pick the one Open uses, or install another</div>${agentList('agent')}<div class="pfield">${agentsFoot()}</div></div>`;
+// A screen as a page: Models and Settings have layouts of their own, the rest are the panel's screen in a column.
+export function DeskPage(page) {
+  const body = (id) => html`<div class="screen">${SCREENS[id]()}</div>`;
+  if (SECTION[page] === 'models') return ModelsPage(page);
+  if (page === 'agent') return html`<div class="pwrap pg"><div class="ptitle">Agents</div><div class="psub">Pick the one Open uses, or install another</div>${AgentList('agent')}<div class="pfield">${AgentsFoot()}</div></div>`;
   if (SECTION[page] === 'settings') {
     const on = page === 'settings' || page === 'advanced' ? 'home-edit' : page;
-    return `<div class="ssplit"><div class="smenu">${SETTINGS.map(([id, label]) => `<button class="${id === on ? 'on' : ''}" data-nav="${id}">${label}</button>`).join('')}${vfoot()}</div><div class="pg">${body(on)}</div></div>`;
+    return html`<div class="ssplit"><div class="smenu">${SETTINGS.map(([id, label]) => html`<button class="${id === on ? 'on' : ''}"${data({ nav: id })}>${label}</button>`)}${VersionFoot()}</div><div class="pg">${body(on)}</div></div>`;
   }
   const top = NAV.some((n) => n[2] === page) || page === 'key';
-  return `<div class="pwrap pg${page === 'usage' ? ' wide' : ''}">${top ? '' : `<button class="pback" data-go="back">${icon('left', 14)}Back</button>`}${body(page)}</div>`;
+  return html`<div class="pwrap pg${page === 'usage' ? ' wide' : ''}">${!top && html`<button class="pback" data-go="back">${Icon('left', 14)}Back</button>`}${body(page)}</div>`;
 }

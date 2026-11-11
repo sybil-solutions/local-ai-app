@@ -95,6 +95,8 @@ export async function install({ ip }) {
   return fail(502, `This computer could not sign in to ${peer.name} over SSH, so it can’t install Local AI there for you`);
 }
 
+// Whether every connected machine has answered, or failed to, at least once since the app started.
+export const settled = () => config.devices.every((d) => remote.has(d.url));
 export const views = () => config.devices.map((d, i) => ({ i, name: d.name, url: d.url, ...(remote.get(d.url) || { online: false, error: 'Connecting', state: null }) }));
 
 // A slow link (Tailscale relayed through DERP can take seconds a round trip) is not an offline machine: each machine

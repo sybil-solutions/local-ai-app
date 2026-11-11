@@ -1,6 +1,9 @@
 // Usage: one period at a time, how it grew, which models served it, and a calendar of activity.
-import { D, s } from './state.js';
-import { esc, fmt, left, mins } from './ui.js';
+import { count, fmt, mins } from '../format.js';
+import { html } from '../html.js';
+import { D, s } from '../state.js';
+import { Segmented } from './controls.js';
+import { Label, Note } from './layout.js';
 
 const LEVELS = ['#232220', '#45433f', '#6f6c66', '#9c9891', '#c8c4bc', '#f2efe9'];
 const day = (iso) => new Date(`${iso}T00:00:00Z`);
@@ -16,11 +19,11 @@ function levels(values) {
   return (v) => (v ? 1 + cuts.filter((c) => v >= c).length : 0);
 }
 
-// The Home widget: the last twelve weeks, from the snapshot.
-export function miniUsage() {
+// The Home widget: the last twelve weeks, from the snapshot. Pressing it opens Usage.
+export function MiniUsage() {
   const known = new Map(D().usage.days.map((x) => [x.d, x.v])), level = levels([...known.values()]);
   const cells = Array.from({ length: 84 }, (_, i) => known.get(new Date(Date.now() - (83 - i) * 864e5).toISOString().slice(0, 10)) || 0);
-  return `<button class="wbtn" data-go="usage"><span class="wtitle">Usage<span>${fmt(D().usage.all)} served</span></span><span class="minical">${cells.map((v) => `<i style="${shade(level(v))}"></i>`).join('')}</span></button>`;
+  return html`<button class="wbtn" data-go="usage"><span class="wtitle">Usage<span>${fmt(D().usage.all)} served</span></span><span class="minical">${cells.map((v) => html`<i style="${shade(level(v))}"></i>`)}</span></button>`;
 }
 
 // The chosen period as { tokens, wrote, requests, sub, points: [{ label, v }], by: Map(model -> tokens) }.
@@ -32,7 +35,7 @@ function period() {
     const since = r.since || r.series[0]?.[0] || Date.now();
     add(r.name, r.tokens);
     const points = r.series.map(([t, v]) => ({ label: `${Math.max(0, Math.round((t - since) / 60000))} min`, v }));
-    return { tokens: r.tokens, wrote: r.out, requests: r.req, sub: `${esc(r.name)} · running for ${mins((Date.now() - since) / 1000)} min`, points, by };
+    return { tokens: r.tokens, wrote: r.out, requests: r.req, sub: `${r.name} · running for ${mins((Date.now() - since) / 1000)} min`, points, by };
   }
   if (s.span === 'today') {
     let tokens = 0, wrote = 0, requests = 0;
@@ -50,15 +53,13 @@ function period() {
   return { tokens, wrote: list.reduce((n, x) => n + x.out, 0), requests: list.reduce((n, x) => n + x.req, 0), sub, points, by };
 }
 
-function growth(points) {
-  if (points.length < 2) return left('Not enough yet to draw');
+// What the chart says about one point. app.js writes it again as the pointer moves.
+export const GrowthReadout = (label, tokens) => html`<b>${label}</b><span>${fmt(tokens)} tokens so far</span>`;
+function Growth(points) {
+  if (points.length < 2) return Note('Not enough yet to draw');
   const W = 232, H = 84, top = points.at(-1).v || 1, n = points.length - 1;
   const line = points.map((p, i) => `${((i / n) * W).toFixed(1)},${(H - 2 - (p.v / top) * (H - 6)).toFixed(1)}`).join(' ');
-  const drawing = `<line class="gbase" x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}"/><polygon class="garea" points="0,${H - 1} ${line} ${W},${H - 1}"/><polyline class="gline" points="${line}"/><line class="gcross" x1="${W}" y1="0" x2="${W}" y2="${H}"/>`;
-  return `<div class="growth" data-points="${encodeURIComponent(JSON.stringify(points.map((p) => [p.label, p.v])))}">`
-    + `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Tokens served over time, rising to ${fmt(top)}">${drawing}</svg>`
-    + `<div class="gaxis"><span>${points[0].label}</span><span>${points.at(-1).label}</span></div>`
-    + `<div class="readout" data-gread><b>${points.at(-1).label}</b><span>${fmt(top)} tokens so far</span></div></div>`;
+  return html`<div class="growth" data-points="${encodeURIComponent(JSON.stringify(points.map((p) => [p.label, p.v])))}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Tokens served over time, rising to ${fmt(top)}"><line class="gbase" x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}"/><polygon class="garea" points="0,${H - 1} ${line} ${W},${H - 1}"/><polyline class="gline" points="${line}"/><line class="gcross" x1="${W}" y1="0" x2="${W}" y2="${H}"/></svg><div class="gaxis"><span>${points[0].label}</span><span>${points.at(-1).label}</span></div><div class="readout" data-gread>${GrowthReadout(points.at(-1).label, top)}</div></div>`;
 }
 
 // Days, weeks or months as a list of { d, label, tokens, requests }. A missing day is a real zero, not a gap.
@@ -78,32 +79,24 @@ function periods() {
   return [...groups.values()].map((g) => ({ ...g, label: s.period === 'weeks' ? `Week of ${say(g.d, { month: 'short', day: 'numeric' })}` : say(g.d, { month: 'long' }) }));
 }
 
-const readout = (x) => `<b>${x.label}</b><span>${fmt(x.tokens)} tokens · ${x.requests.toLocaleString('en-US')} requests</span>`;
-function calendar() {
+// One period's line under the calendar. A cell carries its own, already as markup, for app.js to show when it is pressed.
+const Readout = (x) => html`<b>${x.label}</b><span>${fmt(x.tokens)} tokens · ${count(x.requests)} requests</span>`;
+function Calendar() {
   const list = periods(), level = levels(list.map((x) => x.tokens)), last = list.length - 1;
-  const cell = (x, i, inner = '', style = '') => `<button data-cell="${encodeURIComponent(readout(x))}" aria-label="${x.label}: ${fmt(x.tokens)} tokens" class="${i === last ? 'sel' : ''}" style="${shade(level(x.tokens))}${style}">${inner}</button>`;
+  const Cell = (x, i, inner = '', style = '') => html`<button data-cell="${encodeURIComponent(String(Readout(x)))}" aria-label="${x.label}: ${fmt(x.tokens)} tokens" class="${i === last ? 'sel' : ''}" style="${shade(level(x.tokens))}${style}">${inner}</button>`;
   let grid;
   if (s.period === 'days') {
     const lead = (list[0].d.getUTCDay() + 6) % 7, seen = new Set();
     const months = list.filter((x) => !seen.has(x.d.getUTCMonth()) && seen.add(x.d.getUTCMonth())).filter((_, i, m) => m.length < 5 || i % 2 === 0);
-    grid = `<div class="cal-months">${months.map((x) => `<span>${say(x.d, { month: 'short' })}</span>`).join('')}</div>`
-      + `<div class="cal days" style="--cols:${Math.ceil((lead + list.length) / 7)}">${'<i></i>'.repeat(lead)}${list.map((x, i) => cell(x, i)).join('')}</div>`;
-  } else if (s.period === 'weeks') grid = `<div class="cal weeks">${list.map((x, i) => cell(x, i)).join('')}</div>`;
-  else grid = `<div class="cal months">${list.map((x, i) => cell(x, i, `${say(x.d, { month: 'short' })}<b>${fmt(x.tokens)}</b>`, `;color:${level(x.tokens) >= 3 ? '#12120f' : 'inherit'}`)).join('')}</div>`;
-  return `${grid}<div class="readout" data-readout>${readout(list[last])}</div>`;
+    grid = html`<div class="cal-months">${months.map((x) => html`<span>${say(x.d, { month: 'short' })}</span>`)}</div><div class="cal days" style="--cols:${Math.ceil((lead + list.length) / 7)}">${Array.from({ length: lead }, () => html`<i></i>`)}${list.map((x, i) => Cell(x, i))}</div>`;
+  } else if (s.period === 'weeks') grid = html`<div class="cal weeks">${list.map((x, i) => Cell(x, i))}</div>`;
+  else grid = html`<div class="cal months">${list.map((x, i) => Cell(x, i, html`${say(x.d, { month: 'short' })}<b>${fmt(x.tokens)}</b>`, `;color:${level(x.tokens) >= 3 ? '#12120f' : 'inherit'}`))}</div>`;
+  return html`${grid}<div class="readout" data-readout>${Readout(list[last])}</div>`;
 }
 
-const tabs = (list, on, act) => list.map(([k, label]) => `<button class="${k === on ? 'on' : ''}" data-act="${act}" data-v="${k}">${label}</button>`).join('');
-export function usageBody() {
-  if (!s.usage) return left('Loading');
+export function UsageBody() {
+  if (!s.usage) return Note('Loading');
   const u = period(), total = [...u.by.values()].reduce((n, v) => n + v, 0) || 1;
-  const models = [...u.by].sort((x, y) => y[1] - x[1]).map(([name, v]) => `<div class="umodel"><span>${esc(name)}</span><b>${fmt(v)}</b><span>${Math.round((v / total) * 100)}%</span><i><u style="width:${((v / total) * 100).toFixed(1)}%"></u></i></div>`).join('');
-  return '<div class="ugrid"><section class="usec">'
-    + `<div class="useg">${tabs([['run', 'This run'], ['today', 'Today'], ['month', 'Month'], ['all', 'All time']], s.span, 'span')}</div>`
-    + `<div class="hero"><b>${fmt(u.tokens)}</b><span>tokens · ${u.sub}</span></div>`
-    + `<div class="umeta"><span><b>${fmt(u.wrote)}</b> generated</span><span><b>${u.requests.toLocaleString('en-US')}</b> requests</span></div>`
-    + `<div class="label">Growth</div>${growth(u.points)}<div class="label">By model</div><div class="umodels">${models || left('Nothing yet')}</div>`
-    + '</section><section class="usec"><div class="label">Activity</div>'
-    + `<div class="tabs">${tabs([['days', 'Days'], ['weeks', 'Weeks'], ['months', 'Months']], s.period, 'period')}</div>${calendar()}`
-    + `<div class="legend"><span>Less</span>${LEVELS.map((c) => `<i style="background:${c}"></i>`).join('')}<span>More</span></div></section></div>`;
+  const models = [...u.by].sort((x, y) => y[1] - x[1]).map(([name, v]) => html`<div class="umodel"><span>${name}</span><b>${fmt(v)}</b><span>${Math.round((v / total) * 100)}%</span><i><u style="width:${((v / total) * 100).toFixed(1)}%"></u></i></div>`);
+  return html`<div class="ugrid"><section class="usec">${Segmented({ choices: [['run', 'This run'], ['today', 'Today'], ['month', 'Month'], ['all', 'All time']], on: s.span, act: 'span', kind: 'useg' })}<div class="hero"><b>${fmt(u.tokens)}</b><span>tokens · ${u.sub}</span></div><div class="umeta"><span><b>${fmt(u.wrote)}</b> generated</span><span><b>${count(u.requests)}</b> requests</span></div>${Label('Growth')}${Growth(u.points)}${Label('By model')}<div class="umodels">${models.length ? models : Note('Nothing yet')}</div></section><section class="usec">${Label('Activity')}${Segmented({ choices: [['days', 'Days'], ['weeks', 'Weeks'], ['months', 'Months']], on: s.period, act: 'period', kind: 'tabs' })}${Calendar()}<div class="legend"><span>Less</span>${LEVELS.map((c) => html`<i style="background:${c}"></i>`)}<span>More</span></div></section></div>`;
 }

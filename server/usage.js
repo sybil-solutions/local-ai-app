@@ -17,6 +17,7 @@ export function parseMetrics(text) {
   for (const line of text.split('\n')) {
     const m = /^(?:vllm|sglang|llamacpp)[:_]([a-z_0-9]+)(?:\{.*\})? ([-0-9.e+]+)$/.exec(line);
     if (m) out[m[1]] = (out[m[1]] || 0) + +m[2];
+    else if (line.startsWith('process_start_time_seconds ')) out.process_start = +line.split(' ')[1]; // when the engine's process started: the same engine, however it is reached
   }
   return out;
 }
