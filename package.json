@@ -1,7 +1,7 @@
 {
   "name": "local-ai",
   "productName": "Local AI",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "Start a local model with one click, watch it run, and open your coding agent on it.",
   "type": "module",
   "main": "electron/main.js",

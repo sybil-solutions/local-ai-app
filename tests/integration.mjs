@@ -122,6 +122,11 @@ const PAIR = 'smoke/gpu/pair.docker.2x', SPREAD = 'smoke/gpu/spread.docker.2x';
 catalog.cards['smoke-gpu'].setups = [{ cards: 1, machines: 1, label: 'Smoke Test GPU' }, { cards: 2, machines: 1, label: '2 × Smoke Test GPU (one machine)' }, { cards: 1, machines: 2, label: '2 × Smoke Test GPU' }];
 catalog.recipes[PAIR] = { ...docked({ cards: 2 }), model: 'pair-1', proof: [{ tps: 20 }] };
 catalog.recipes[SPREAD] = { ...docked({ machines: 2, flags: ['--network host'] }), model: 'spread-1' };
+// A third recipe for both cards whose only speed is from the registry's older acceptance, and a much higher one
+// than the measured recipe's. The registry recommends the measured one for the two-card setup.
+const OLDFAST = 'smoke/gpu/oldfast.docker.2x';
+catalog.recipes[OLDFAST] = { ...docked({ cards: 2 }), model: 'oldfast-1', proof: [{ tps: 500, legacy: true, gates: 'load chat' }] };
+catalog.cards['smoke-gpu'].setups[1].picks = [PAIR, OLDFAST];
 const HOSTED = 'smoke/chip/fake.host', TAMPERED = 'smoke/chip/tampered.host';
 if (APPLE) {
   const sysctl = (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', timeout: 5000 }).trim();
@@ -422,6 +427,9 @@ try {
   const setups = nv.groups.find((g) => g.card === 'smoke-gpu')?.setups || [], picked = Object.values(nv.groups.find((g) => g.card === 'smoke-gpu')?.tiers || {}).filter(Boolean).map((r) => r.id);
   check('lists the setups this machine\'s cards can be part of, largest first, as the registry names them', setups.map((s) => s.label).join(' | ') === '2 × Smoke Test GPU (one machine) | 2 × Smoke Test GPU | Smoke Test GPU', JSON.stringify(setups));
   check('a recipe for both of the machine\'s cards is offered, and is one of the picks', offered.includes(PAIR) && picked.includes(PAIR) && nv.groups.flatMap((g) => g.recipes).find((r) => r.id === PAIR)?.cards === 2, picked.join(' '));
+  const pairGroup = nv.groups.find((g) => g.card === 'smoke-gpu');
+  check('a speed from the registry\'s older test does not make a model the fast pick over one that was measured', pairGroup?.tiers.fastest?.id === PAIR && pairGroup.recipes.find((r) => r.id === OLDFAST)?.speed.legacy === true && pairGroup.recipes.find((r) => r.id === PAIR)?.speed.legacy === false, pairGroup?.tiers.fastest?.id);
+  check('the model shown first is the one the registry recommends for the largest setup', pairGroup?.recommended === PAIR, pairGroup?.recommended);
   const spread = refused.find((r) => r.id === SPREAD);
   check('a recipe that is one engine across two machines is listed under its setup, says so, and is not started', spread?.machines === 2 && /Runs across 2 machines/.test(spread?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: SPREAD } })).status === 409, spread?.why);
   const hungry = refused.find((r) => r.id === HUNGRY);

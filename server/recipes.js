@@ -154,7 +154,8 @@ function view(id) {
     id, local: isLocal(id), host: recipe.launch.kind === 'host', approve: asks(id), name: String(recipe.name || model?.name || recipe.model), card: recipe.card,
     cards: whole(recipe.launch.cards, 1), machines: whole(recipe.launch.machines, 1), engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: whole(recipe.launch.ctx),
     vision: !!recipe.launch.vision, tps: measured?.c1 ?? amount(proof?.tps), smart: amount(aa?.index), seqs: whole(recipe.launch.seqs, 1),
-    speed: { c1: measured?.c1 ?? amount(proof?.tps), c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: amount(own(catalog.builds, recipe.weights)?.size_gb),
+    speed: { c1: measured?.c1 ?? amount(proof?.tps), c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null,
+      legacy: !measured && !!proof?.legacy }, // its only speed is from the registry's older acceptance, which did not measure speed the way the lab does now sizeGb: amount(own(catalog.builds, recipe.weights)?.size_gb),
     released: typeof model?.released === 'string' ? model.released : null, loadS: loadSeconds(id),
     think: !!model?.reasoning, tools: /tool-call-parser|enable-auto-tool-choice|--jinja/.test(text) || String(proof?.gates || '').split(' ').includes('tools'), // its arguments say so, or the lab saw it call one kv: /--kv-cache-dtype[= ](?!auto)(\S+)/.exec(text)?.[1] || null,
   };
@@ -181,15 +182,18 @@ function latestOfEachFamily(list) {
 const best = (list, score) => list.reduce((top, r) => (!top || score(r) > score(top) ? r : top), null);
 
 // Three answers per device; each differs from the others whenever the card has enough models.
+// A speed from the registry's older acceptance (`legacy`) is not a measurement to rank by: it counts only when no
+// model here has a speed that was measured, by the lab, by whoever reported the recipe, or on this machine.
 function tiers(list) {
-  const maxTps = Math.max(1, ...list.map((r) => r.tps || 0));
+  const measured = list.some((r) => r.tps && !r.speed.legacy), speed = (r) => (measured && r.speed.legacy ? 0 : r.tps || 0);
+  const maxTps = Math.max(1, ...list.map(speed));
   const maxSmart = Math.max(1, ...list.map((r) => r.smart || 0));
-  const fastest = best(list, (r) => (r.tps || 0) + r.ctx / 1e9);
+  const fastest = best(list, (r) => speed(r) + r.ctx / 1e9);
   const smartPool = list.filter((r) => r.name !== fastest?.name && r.smart !== null);
   const smartest = best(smartPool.length ? smartPool : list.filter((r) => r !== fastest), (r) => (r.smart || 0) + r.ctx / 1e9);
   const rest = list.filter((r) => r.name !== fastest?.name && r.name !== smartest?.name);
   const balanced = best(rest.length ? rest : list.filter((r) => r !== fastest && r !== smartest),
-    (r) => Math.sqrt(((r.tps || 0) / maxTps) * ((r.smart || 0) / maxSmart)));
+    (r) => Math.sqrt((speed(r) / maxTps) * ((r.smart || 0) / maxSmart)));
   return { fastest, balanced, smartest };
 }
 
@@ -266,6 +270,25 @@ function picksOf(list, setups) {
   return { fastest: top.fastest || rest.fastest, balanced: top.balanced || rest.balanced, smartest: top.smartest || rest.smartest };
 }
 
+// The recipe shown first when nothing was chosen or started yet: the registry's recommended one (the first pick) for
+// the largest setup in this machine that has a model it can start, or, where that exact recipe is one this app will
+// not start, another recipe here for the same model.
+function recommendedOf(card, setups, list) {
+  const known = Array.isArray(own(catalog.cards, card)?.setups) ? own(catalog.cards, card).setups : [];
+  for (const s of setups.filter((x) => x.machines === 1)) {
+    const here = list.filter((r) => r.cards === s.cards && r.machines === 1);
+    if (!here.length) continue;
+    const named = known.find((x) => whole(x?.cards, 1) === s.cards && whole(x?.machines, 1) === 1) || (s.cards === 1 ? own(catalog.cards, card) : null);
+    for (const key of [].concat(named?.picks || [], named?.more || []).filter((k) => typeof k === 'string')) {
+      const model = own(catalog.recipes, key)?.model;
+      const hit = here.find((r) => r.id === key) || (model && here.find((r) => find(r.id).model === model));
+      if (hit) return hit.id;
+    }
+    return null; // the registry names none of what this machine can start here: the picks decide
+  }
+  return null;
+}
+
 // One group per kind of card on the machine: its three picks, everything it can launch (`recipes`), what the
 // registry holds for these cards that this app will not start, each with the reason (`blocked`), and the setups
 // those belong to (`setups`). Nothing the registry has for the machine's cards is left out without a word.
@@ -279,7 +302,7 @@ export function groups(gpus) {
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
     const all = ids.flatMap((id) => listed(id, card, members.length)).sort((a, b) => (b.tps || 0) - (a.tps || 0)), list = all.filter((r) => !r.why), setups = setupsOf(card, members.length, all);
-    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: picksOf(list, setups), recipes: list, blocked: all.filter((r) => r.why), setups };
+    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: picksOf(list, setups), recommended: recommendedOf(card, setups, list), recipes: list, blocked: all.filter((r) => r.why), setups };
   });
 }
 

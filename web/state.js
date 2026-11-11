@@ -74,7 +74,8 @@ export function run() {
 }
 export function chosen() {
   const list = all(), three = picks();
-  const id = run()?.recipe ?? [s.sel, D().last].find((x) => list.some((y) => y.id === x)) ?? (three.find((x) => x.tier === 'Balanced') || three[0] || list[0])?.id;
+  // What is running, else what you chose, else what was started last, else the registry's recommended model for this machine, else Balanced.
+  const id = run()?.recipe ?? [s.sel, D().last, group()?.recommended].find((x) => list.some((y) => y.id === x)) ?? (three.find((x) => x.tier === 'Balanced') || three[0] || list[0])?.id;
   return list.find((x) => x.id === id) || null;
 }
 // The three picks, plus the chosen model when it is none of them.
