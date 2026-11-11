@@ -1,13 +1,16 @@
 // Model weights: downloaded from Hugging Face, resumable, checked against their checksums, and mounted read-only into engines.
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, statfsSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, statfsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { delimiter, dirname, join, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { at, event, sleep, together } from './util.js';
+import { Worker } from 'node:worker_threads';
+import { at, event, own, readJson, sleep, together, writeJson } from './util.js';
 
-const MODELS = process.env.LOCAL_AI_MODELS || at('models');
+// LOCAL_AI_MODELS may name several folders. Downloads go to the first; the others hold weights you already have and
+// are only ever read (see `matches`).
+const [MODELS = at('models'), ...LOOK] = (process.env.LOCAL_AI_MODELS || '').split(delimiter).filter(Boolean);
 const HF_HOME = process.env.HF_HOME || join(homedir(), '.cache/huggingface');
 const HF = process.env.HF_ENDPOINT || 'https://huggingface.co';
 const tokenFile = join(HF_HOME, 'token');
@@ -42,11 +45,23 @@ async function hfFiles(repo, revision, signal) {
   return files;
 }
 
-const sha256 = async (file, signal) => {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
-  return hash.digest('hex');
-};
+// A file's checksum, worked out on a thread of its own: weights are hundreds of gigabytes, several files are read at
+// once, and the app goes on answering meanwhile. `start` is hashed in front of the file (git's header for a blob);
+// `onBytes` hears each piece read.
+const HASHER = `const { parentPort, workerData: d } = require('node:worker_threads'), { createHash } = require('node:crypto'), { openSync, readSync, closeSync } = require('node:fs');
+const hash = createHash(d.kind).update(d.start), piece = Buffer.allocUnsafe(1 << 23), fd = openSync(d.file, 'r');
+for (let n; (n = readSync(fd, piece, 0, piece.length, null)) > 0;) { hash.update(n === piece.length ? piece : piece.subarray(0, n)); parentPort.postMessage(n); }
+closeSync(fd);
+parentPort.postMessage(hash.digest('hex'));`;
+const digest = (file, signal, { kind = 'sha256', start = '', onBytes } = {}) => new Promise((done, failed) => {
+  if (signal?.aborted) { failed(signal.reason); return; }
+  const worker = new Worker(HASHER, { eval: true, workerData: { file, kind, start } }), stop = () => { worker.terminate(); failed(signal.reason); };
+  signal?.addEventListener('abort', stop, { once: true });
+  worker.on('message', (m) => (typeof m === 'number' ? onBytes?.(m) : done(m)));
+  worker.on('error', failed);
+  worker.on('exit', () => { signal?.removeEventListener('abort', stop); failed(new Error(`Could not read ${file}`)); }); // a no-op once it has answered
+});
+const sha256 = (file, signal) => digest(file, signal);
 
 async function fetchFile(repo, revision, file, dest, onBytes, signal) {
   const target = join(dest, file.path);
@@ -84,14 +99,23 @@ async function fetchFile(repo, revision, file, dest, onBytes, signal) {
 const size = (n, scale) => (scale >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
 const weightsOf = (launch) => [].concat(launch.weights || []).filter(Boolean);
 const weightDir = (w) => (w.layout === 'hub' ? join(HF_HOME, 'hub', `models--${w.repo.replace('/', '--')}`, 'snapshots', w.revision) : join(MODELS, `${w.repo.split('/').pop()}-${w.revision.slice(0, 8)}`));
-const weightMount = (w) => (w.path ? `${w.path}:${w.at}:ro` : w.layout === 'hub' ? `${join(HF_HOME, 'hub')}:${w.at}/hub:ro` : `${weightDir(w)}:${w.at}:ro`);
+const weightMount = (w) => (w.path ? `${w.path}:${w.at}:ro` : w.layout === 'hub' ? `${join(HF_HOME, 'hub')}:${w.at}/hub:ro` : `${dirOf(w)}:${w.at}:ro`);
 
-// Where a weight lives on this machine: its own folder, or the one it was downloaded to.
-export const dirOf = (w) => w.path || weightDir(w);
+// Weights you already have: a folder named like the repo inside one of the extra folders. It is used where it is,
+// read-only, once every file the recipe needs has been checked against Hugging Face's list for the pinned commit.
+// What passed is kept in found.json, so the check is made once.
+const foundFile = at('found.json'), found = Object.assign(Object.create(null), readJson(foundFile, {}));
+const keyOf = (w) => `${w.repo}@${w.revision}${w.files ? `#${w.files}` : ''}`;
+const foundAt = (w) => { const hit = own(found, keyOf(w)); return typeof hit?.path === 'string' && existsSync(hit.path) ? hit.path : null; };
+const candidate = (w) => (w.layout === 'hub' || typeof w.repo !== 'string' ? null : LOOK.map((dir) => join(dir, w.repo.split('/').pop())).find((dir) => existsSync(dir)) ?? null);
+
+// Where a weight lives on this machine: its own folder, one found and checked, or the one it is downloaded to.
+export const dirOf = (w) => w.path || foundAt(w) || weightDir(w);
 const markerOf = (w) => join(weightDir(w), `.complete-${createHash('sha256').update(String(w.files || '')).digest('hex').slice(0, 12)}`);
 // The docker arguments that put the weights inside the engine's container.
 export const mounts = (launch) => [...weightsOf(launch).map((w) => `--volume=${weightMount(w)}`), ...(weightsOf(launch).some((w) => w.layout === 'hub') ? ['--env=HF_HUB_OFFLINE=1'] : [])];
-export const onDisk = (launch) => weightsOf(launch).every((w) => existsSync(w.path || markerOf(w)));
+// A folder that is here but not yet checked counts as on disk: starting the recipe checks it, and downloads only if it differs.
+export const onDisk = (launch) => weightsOf(launch).every((w) => existsSync(w.path || markerOf(w)) || !!foundAt(w) || !!candidate(w));
 
 // Fetches whatever the recipe's weights still need. report() is told the phase, the detail line and the progress.
 const busy = new Map(); // one download at a time per folder, because two recipes can share the same weights
@@ -104,18 +128,59 @@ export async function download(launch, signal, report) {
       await busy.get(dest).catch(() => {});
       signal.throwIfAborted();
     }
-    if (existsSync(marker)) continue;
-    const job = fetchAll(w, dest, signal, report).then(() => writeFileSync(marker, new Date().toISOString()));
+    if (existsSync(marker) || foundAt(w)) continue;
+    const job = (async () => {
+      const there = candidate(w), differs = there && await matches(w, there, signal, report);
+      if (there && !differs) return;
+      try { await fetchAll(w, dest, signal, report); } catch (e) { throw differs && !signal.aborted ? new Error(`${e.message}. The copy in ${there} was not used: ${differs}`) : e; }
+      writeFileSync(marker, new Date().toISOString());
+    })();
     busy.set(dest, job);
     try { await job; } finally { busy.delete(dest); }
   }
 }
 
-async function fetchAll(w, dest, signal, report) {
-  report({ phase: 'weights', detail: `Listing ${w.repo}`, progress: 0 });
+// The files of the repo that the recipe needs, as Hugging Face lists them at the pinned commit.
+async function wanted(w, signal) {
   const only = String(w.files || '').split(',').filter(Boolean);
   const files = (await hfFiles(w.repo, w.revision, signal)).filter((f) => !only.length || only.includes(f.path));
   if (only.length && files.length < only.length) throw new Error(`${w.repo} is missing some recipe files`);
+  return files;
+}
+
+// Checks a folder you already have against the pinned commit: every file the recipe needs is there, of the listed
+// size, with the checksum Hugging Face gives (SHA-256 for a large file, git's own for a small one). Nothing in the
+// folder is written or changed. Says what differs, or null when it is the same and has been noted as found.
+async function matches(w, dir, signal, report) {
+  report({ phase: 'weights', detail: `Checking the weights in ${dir}`, progress: 0 });
+  const files = await wanted(w, signal), total = files.reduce((n, f) => n + f.size, 0), pending = [...files];
+  let done = 0, told = 0, differs = null;
+  const onBytes = (n) => {
+    done += n;
+    if (Date.now() - told < 250) return;
+    told = Date.now();
+    report({ detail: `Checking the weights in ${dir}: ${size(done, total)} of ${size(total, total)}`, progress: total ? Math.min(1, done / total) : 1 });
+  };
+  const same = async (f, either) => {
+    const file = join(dir, f.path);
+    if (!existsSync(file)) return `${f.path} is missing`;
+    if (statSync(file).size !== f.size) return `${f.path} has another size`;
+    const sum = f.lfs?.oid ? await digest(file, either, { onBytes }) : /^[0-9a-f]{40}$/.test(f.oid || '') ? await digest(file, either, { kind: 'sha1', start: `blob ${f.size}\0`, onBytes }) : null;
+    return sum === null || sum === (f.lfs?.oid || f.oid) ? null : `${f.path} has other contents`;
+  };
+  await together(signal, Array.from({ length: 4 }, () => async (either) => {
+    for (let f = pending.shift(); f && !differs; f = pending.shift()) differs = (await same(f, either)) || differs;
+  }));
+  if (differs) { event('warn', 'weights.differ', { repo: w.repo, folder: dir, why: differs }); return differs; }
+  found[keyOf(w)] = { path: dir, at: new Date().toISOString() };
+  writeJson(foundFile, found);
+  event('info', 'weights.found', { repo: w.repo, folder: dir, files: files.length });
+  return null;
+}
+
+async function fetchAll(w, dest, signal, report) {
+  report({ phase: 'weights', detail: `Listing ${w.repo}`, progress: 0 });
+  const files = await wanted(w, signal);
   const total = files.reduce((n, f) => n + f.size, 0);
   mkdirSync(dest, { recursive: true });
   const space = statfsSync(dest), have = (p) => (existsSync(p) ? statSync(p).size : 0); // a part already downloaded needs no more room

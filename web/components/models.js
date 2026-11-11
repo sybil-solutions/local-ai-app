@@ -29,17 +29,24 @@ export const EditButton = (r, style) => !r.host && Button({ label: 'Edit', act: 
 
 // Home's list of picks in the panel: press one to choose it, the plus for its details.
 export const PickRow = (r) => html`<div class="mrow${r.id === chosen().id ? ' on' : ''}"><div class="mhead"><button class="mpick"${data({ act: 'pick', id: r.id })}><span>${r.name}</span><small>${r.tier || ''}</small></button><button class="plus"${data({ act: 'expand', id: r.id })} aria-label="Details">${Icon(s.expanded === r.id ? 'minus' : 'plus', 14)}</button></div>${s.expanded === r.id && html`${ModelDetail(r)}<div class="mdetail" style="padding-top:0">${EditButton(r)}</div>`}</div>`;
+// What the registry holds for this machine's cards that the app will not start: listed under this, each with its reason.
+export const OTHERS = 'In the registry, not started by this app';
 // A model in the panel's full list.
-export const ListRow = (r) => html`<div class="arow"><button class="ahead"${data({ act: 'model', id: r.id, go: 'model-page' })}><span class="at"><b>${r.name}</b><small>${meta(r)}</small></span><span class="ics">${Caps(r)}<span class="chev">${Icon('right', 14)}</span></span></button></div>`;
+export const ListRow = (r) => html`<div class="arow"><button class="ahead"${data({ act: 'model', id: r.id, go: 'model-page' })}><span class="at"><b>${r.name}</b><small>${r.why || meta(r)}</small></span><span class="ics">${Caps(r)}<span class="chev">${Icon('right', 14)}</span></span></button></div>`;
 
 // The model's Hugging Face card, once it has been fetched. Its Markdown was turned into this app's own markup by markdown.js.
+// With it come the recipe's own notes from whoever published it, and what it needs of the machine beside the cards.
+const needsOf = (n) => [n?.ram && `${Math.ceil(n.ram)} GB of memory`, n?.disk && `${Math.ceil(n.disk)} GB of disk${n.nvme ? ' on an NVMe drive' : ''}`].filter(Boolean).join(' and ');
 export function ModelCard(r) {
   const c = s.cards[cardKey(r.id)];
   if (!c || c.error) return html`${Label('Model card', { group: true })}${Note(c ? c.error : 'Loading')}`;
-  return html`${Label('Model card', { group: true })}<div class="cardsrc"><a href="https://huggingface.co/${c.repo}" target="_blank" rel="noopener">${c.repo}</a>${c.license ? ` · ${c.license}` : ''}${c.downloads != null ? ` · ${fmt(c.downloads)} downloads` : ''}</div><div class="mdcard">${c.html}</div>`;
+  const needs = needsOf(c.needs), recipe = (needs || c.notes) && html`${Label('From the recipe', { group: true })}${needs && Note(`Needs ${needs} beside the GPUs`)}${c.notes && html`<div class="mdcard notes">${c.notes}</div>`}`;
+  if (!c.repo) return recipe;
+  return html`${recipe}${Label('Model card', { group: true })}<div class="cardsrc"><a href="https://huggingface.co/${c.repo}" target="_blank" rel="noopener">${c.repo}</a>${c.license ? ` · ${c.license}` : ''}${c.downloads != null ? ` · ${fmt(c.downloads)} downloads` : ''}</div><div class="mdcard">${c.html}</div>`;
 }
 // The main button on a model's page: start it, pick it for Home, or swap it for the one running. Nothing for the one running.
 export function UseButton(r) {
+  if (r.why) return Button({ label: 'Can’t be started here', disabled: true });
   const live = run();
   if (live) return live.recipe !== r.id && Button({ label: live.external ? 'Run' : 'Switch to this model', act: 'switch', kind: 'go', data: { id: r.id } });
   return r.id === chosen()?.id ? Button({ label: r.ready ? 'Run' : 'Download', act: 'start', go: 'home', kind: 'go' }) : Button({ label: 'Use', act: 'pick', go: 'home', kind: 'go', data: { id: r.id } });

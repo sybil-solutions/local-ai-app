@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { flagProblem } from './docker.js';
+import { totalmem } from 'node:os';
+import { flagProblem, resourceProblem } from './docker.js';
 import { loadSeconds, speedOf } from './speed.js';
 import { at, bytesUpTo, config, event, fail, jsonUpTo, own, readJson, saveConfig, writeJson } from './util.js';
 
 const FEED = process.env.LOCAL_AI_REGISTRY || 'https://raw.githubusercontent.com/sybil-solutions/local-ai-registry/main/dist/catalog.json';
+const HF = process.env.HF_ENDPOINT || 'https://huggingface.co'; // the same Hugging Face the weights come from
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const REVISION = /^[0-9a-f]{40}$/;
 const ENGINES = { vllm: 'vLLM', sglang: 'SGLang', tabbyapi: 'TabbyAPI', 'llama.cpp': 'llama.cpp', mlx: 'MLX' };
@@ -72,6 +74,9 @@ function sysctlNow(key) {
 // Why a recipe may not be started, or null. Your own recipes (`trusted`) are yours to write; a registry recipe must be
 // pinned and need nothing beyond one docker run, or one pinned host run. Nothing here reads anything but the recipe,
 // so tests/fuzz.mjs can ask it about recipes no registry would ever hold.
+// A recipe's `setup` is its source's notes on what it ran on (hardware, timings, how the weights got there). It is
+// shown with the recipe and stops nothing: the app fetches the pinned weights and image itself. What the app can't
+// do for a recipe is a step before the engine (`prepare`), a build, a second container or a second machine.
 export function problemWith(recipe, { trusted = false } = {}) {
   const launch = recipe?.launch;
   if (!launch || typeof launch !== 'object') return 'Has no launch';
@@ -79,8 +84,10 @@ export function problemWith(recipe, { trusted = false } = {}) {
   if (typeof launch.image !== 'string' || !launch.image) return 'Has no container image';
   if (trusted) return null;
   if (launch.build) return 'Image must be built from source';
-  if (launch.setup || launch.prepare || launch.resources) return 'Needs manual setup';
+  if (launch.prepare) return 'Needs a step before the engine that this app does not run';
+  if (launch.companion) return 'Needs a second container beside the engine';
   if ((launch.machines || 1) > 1) return 'Needs several machines';
+  if (resourceProblem(launch)) return resourceProblem(launch);
   if (!/^[a-z0-9][\w./:-]*@sha256:[0-9a-f]{64}$/i.test(launch.image)) return 'Image is not pinned';
   // Anything a recipe gives Docker must be of the plain shape expected, so none of it can pass for something else.
   const flags = flagProblem(launch);
@@ -96,7 +103,13 @@ export function problemWith(recipe, { trusted = false } = {}) {
   if (/(--host[ =]|host:\s*)127\.0\.0\.1/.test(`${(launch.args || []).join(' ')} ${launch.config?.text || ''}`)) return 'Only listens on loopback';
   return recipe.proof?.[0]?.failed ? 'Failed its last test' : null;
 }
-export const blocked = (id) => problemWith(find(id), { trusted: isLocal(id) });
+// What the recipe says the host needs besides the card, held against this machine: memory for what it keeps off the GPU.
+const GB = 2 ** 30;
+function shortOf(launch) {
+  const ram = launch?.needs?.host_ram_gb;
+  return typeof ram === 'number' && ram > totalmem() / GB ? `Needs ${Math.ceil(ram)} GB of memory beside the GPUs; this machine has ${Math.floor(totalmem() / GB)}` : null;
+}
+export const blocked = (id) => problemWith(find(id), { trusted: isLocal(id) }) || shortOf(find(id).launch);
 
 // A host recipe runs as this user, outside any container, so the registry naming it is not enough: it starts only once
 // the person at this machine has been shown what it runs and allowed it. What was allowed is this exact launch (its
@@ -152,7 +165,8 @@ const familyOf = (model) => model.match(/^\D*/)[0];
 const versionOf = (model) => model.match(/\d+(\.\d+)*(?![\d.]*b)/i)?.[0] || '';
 const isNewer = (a, b) => a.localeCompare(b, 'en', { numeric: true }) > 0;
 
-// Keeps only the newest version of each family that this machine can run. Your own recipes always stay.
+// Only the newest version of each family that this machine can run. Your own recipes always stay. The picks are
+// chosen among these; the list of models still shows the older ones.
 function latestOfEachFamily(list) {
   const newest = new Map();
   for (const { id, local: yours } of list) {
@@ -208,14 +222,16 @@ export const cardFor = (gpu) => (gpu.unified ? appleCard(gpu.name, gpu.total / 1
 // A recipe's id is written on its container as a label and read back from Docker's listing, one line a container,
 // so it is plain text on one line.
 const PLAIN_ID = /^[^\x00-\x1f\x7f]{1,200}$/; // eslint-disable-line no-control-regex
-// A recipe this machine may start, as the app shows it. One that can't be read is reported and left out.
+// A recipe for this machine's cards, as the app shows it: with `why` when it is one this app will not start. One that
+// can't be read is reported and left out, as is one for more cards than the machine has.
 const unreadable = new Set();
-function usable(id, card, count) {
+function listed(id, card, count) {
   try {
     const recipe = find(id);
-    if (!PLAIN_ID.test(id) || recipe.card !== card || whole(recipe.launch.cards, 1) > count || blocked(id)) return [];
+    if (!PLAIN_ID.test(id) || recipe.card !== card || whole(recipe.launch.cards, 1) > count) return [];
     if (!isLocal(id)) familyOf(recipe.model); // a registry recipe is ranked by its model's name
-    return [view(id)];
+    const why = blocked(id);
+    return [why ? { ...view(id), why } : view(id)];
   } catch (e) {
     if (!unreadable.has(id)) event('warn', 'recipe.unreadable', { id, error: e.message });
     unreadable.add(id);
@@ -223,7 +239,9 @@ function usable(id, card, count) {
   }
 }
 
-// One group per kind of card on the machine: its three picks plus everything else it can launch.
+// One group per kind of card on the machine: its three picks, everything else it can launch (`recipes`), and what
+// the registry holds for these cards that this app will not start, each with the reason (`blocked`). Nothing the
+// registry has for the machine is left out without a word.
 export function groups(gpus) {
   const byCard = new Map();
   for (const gpu of gpus) {
@@ -233,8 +251,8 @@ export function groups(gpus) {
   }
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
-    const list = latestOfEachFamily(ids.flatMap((id) => usable(id, card, members.length))).sort((a, b) => (b.tps || 0) - (a.tps || 0));
-    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(list), recipes: list };
+    const all = ids.flatMap((id) => listed(id, card, members.length)).sort((a, b) => (b.tps || 0) - (a.tps || 0)), list = all.filter((r) => !r.why);
+    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(latestOfEachFamily(list)), recipes: list, blocked: all.filter((r) => r.why) };
   });
 }
 
@@ -273,13 +291,19 @@ export const registry = () => ({ ...feed, count: Object.keys(catalog.recipes).le
 // The model's page on Hugging Face: the repo the registry names. Only a model the registry gives no repo for is looked
 // up by name, since anyone can publish a repo with a matching name. A card is kept for a day; a model that has none is
 // not asked about again for ten minutes.
+// With the card come the recipe's own notes from its source (`setup`) and what it says the host needs. They are the
+// recipe's, not the model's, so they are added to each answer and a recipe that has them answers even with no card.
 const cards = new Map(); // model → { at, card }, or { at, missing } with why there is none
 export async function card(id) {
   const recipe = find(id) || fail(404, 'No such recipe');
+  const L = recipe.launch || {}, needs = L.needs && typeof L.needs === 'object' ? L.needs : {};
+  const notes = { notes: typeof L.setup === 'string' ? L.setup.slice(0, 8000) : null, needs: { ram: amount(needs.host_ram_gb), disk: amount(needs.disk_gb), nvme: needs.fast_storage === 'nvme' } };
+  const said = notes.notes || notes.needs.ram || notes.needs.disk || notes.needs.nvme;
   const hit = cards.get(recipe.model);
-  if (hit && Date.now() - hit.at < (hit.card ? 864e5 : 600e3)) return hit.card || fail(404, hit.missing);
-  try { return await fetchCard(recipe); } catch (e) {
+  if (hit && Date.now() - hit.at < (hit.card ? 864e5 : 600e3)) return hit.card ? { ...hit.card, ...notes } : said ? notes : fail(404, hit.missing);
+  try { return { ...(await fetchCard(recipe)), ...notes }; } catch (e) {
     if (e.status === 404) cards.set(recipe.model, { at: Date.now(), missing: e.message });
+    if (e.status === 404 && said) return notes;
     throw e;
   }
 }
@@ -289,12 +313,12 @@ async function fetchCard(recipe) {
   let repo = REPO.test(model.hf || '') ? model.hf : null;
   if (!repo) {
     const name = String(model.name || recipe.model).replace(/\s+/g, '-');
-    const found = await get(`https://huggingface.co/api/models?search=${encodeURIComponent(name)}&sort=downloads&limit=20`).then((r) => r.json()).catch(() => []);
+    const found = await get(`${HF}/api/models?search=${encodeURIComponent(name)}&sort=downloads&limit=20`).then((r) => r.json()).catch(() => []);
     repo = (Array.isArray(found) ? found : []).map((m) => String(m?.id || '')).find((hit) => REPO.test(hit) && hit.split('/').pop().toLowerCase().replace(/-it$/, '') === name.toLowerCase()) || fail(404, 'This model has no card on Hugging Face');
   }
   const [meta, readme] = await Promise.all([ // side by side: neither waits for the other
-    get(`https://huggingface.co/api/models/${repo}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-    get(`https://huggingface.co/${repo}/raw/main/README.md`).catch(() => null),
+    get(`${HF}/api/models/${repo}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+    get(`${HF}/${repo}/raw/main/README.md`).catch(() => null),
   ]);
   if (!readme?.ok) fail(404, 'This model has no card on Hugging Face');
   const text = (await bytesUpTo(readme, 4e6).catch(() => fail(404, 'This model’s card is too long to show'))).toString('utf8');

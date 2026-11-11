@@ -4,7 +4,7 @@
 // Options that take a value. Given as `--name value` they take the NEXT argument whatever it is, even one that looks
 // like an option, which is exactly how a recipe could once have slipped something in.
 const VALUE = new Set(['--name', '--label', '-l', '--gpus', '-p', '--publish', '--security-opt', '--shm-size', '-e', '--env', '-v', '--volume', '--entrypoint', '--ipc', '--ulimit', '--workdir', '-w',
-  '--network', '--net', '--restart', '--cap-add', '--cap-drop', '--device', '--pid', '--user', '-u', '--mount', '--runtime', '--add-host', '--hostname', '-h', '--memory', '-m', '--cpus', '--userns', '--uts', '--cgroupns', '--env-file', '--volumes-from']);
+  '--network', '--net', '--restart', '--cap-add', '--cap-drop', '--device', '--pid', '--user', '-u', '--mount', '--runtime', '--add-host', '--hostname', '-h', '--memory', '-m', '--memory-swap', '--cpus', '--userns', '--uts', '--cgroupns', '--env-file', '--volumes-from']);
 const BARE = new Set(['-d', '--detach', '--rm', '--privileged', '-i', '--interactive', '-t', '--tty', '--init', '--read-only', '-P', '--publish-all']);
 
 // { options: [[name, value]], image, command } or { error }.

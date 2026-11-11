@@ -50,23 +50,25 @@ const { html } = await import('../web/html.js');
 
 // ---- 1. the option grammar, exhaustively --------------------------------------------------------------------------
 {
-  const ALLOWED = ['--ipc', '--network', '--net', '--gpus', '--shm-size', '--ulimit', '--workdir', '-w'];
-  const names = [...ALLOWED, '--privileged', '-v', '--pid', '--cap-add', '', '-', '--'], seps = ['', ' ', '=', '\n', '\t', '  ', '= ', ' =', '=='];
+  const ALLOWED = ['--ipc', '--network', '--net', '--gpus', '--shm-size', '--ulimit', '--workdir', '-w', '--cap-add'];
+  const names = [...ALLOWED, '--privileged', '-v', '--pid', '--cap-drop', '', '-', '--'], seps = ['', ' ', '=', '\n', '\t', '  ', '= ', ' =', '=='];
   const alphabet = ['-', ' ', '=', '\n', 'a', '/', '"'];
   const values = [''];
   for (let len = 1; len <= 4; len++) for (const v of values.filter((x) => x.length === len - 1)) for (const ch of alphabet) values.push(v + ch);
+  // The one capability a recipe may add, and others it may not, alone and joined the ways Docker would split them.
+  values.push('IPC_LOCK', 'ALL', 'SYS_ADMIN', 'ipc_lock', 'IPC_LOCK,SYS_ADMIN', 'IPC_LOCK SYS_ADMIN', 'IPC_LOCK --privileged', 'CAP_IPC_LOCK', 'IPC_LOCK\nALL', 'host', 'private');
   let cases = 0;
   for (const name of names) for (const s of seps) for (const value of values) {
     const flag = `${name}${s}${value}`;
     cases++;
     if (flagProblem({ flags: [flag] })) continue;
     const pairs = flagsOf({ flags: [flag] }), [got, val] = pairs[0];
-    if (pairs.length !== 1 || !ALLOWED.includes(got) || typeof val !== 'string' || !val || /\s/.test(val) || val.startsWith('-')) { found('an option accepted that is not one allowed option with one plain value', JSON.stringify(flag)); continue; }
+    if (pairs.length !== 1 || !ALLOWED.includes(got) || typeof val !== 'string' || !val || /\s/.test(val) || val.startsWith('-') || (got === '--cap-add' && val !== 'IPC_LOCK')) { found('an option accepted that is not one allowed option with one plain value', JSON.stringify(flag)); continue; }
     const read = parseRun([`${got}=${val}`, 'image']);
     if (read.error || read.options.length !== 1 || read.options[0][0] !== got || read.options[0][1] !== val || read.image !== 'image') found('an accepted option that Docker would read as something else', JSON.stringify(flag));
   }
   // Lists of options: one bad option anywhere must refuse the whole list.
-  const good = ['--ipc host', '--shm-size=1g', '-w /x'], bad = ['', ' ', '--privileged', '--ipc', '-v /:/host', '--ipc host --privileged', '--pid=host', null, 7, {}, ['--privileged']];
+  const good = ['--ipc host', '--shm-size=1g', '-w /x', '--cap-add IPC_LOCK', '--cap-add=IPC_LOCK'], bad = ['', ' ', '--privileged', '--ipc', '-v /:/host', '--ipc host --privileged', '--pid=host', '--cap-add ALL', '--cap-add=SYS_ADMIN', '--cap-add IPC_LOCK,SYS_ADMIN', null, 7, {}, ['--privileged']];
   for (let i = 0; i < 20000; i++) {
     const list = some([...good, ...bad], 5);
     cases++;
@@ -81,10 +83,13 @@ const { html } = await import('../web/html.js');
   const PIN = `example/engine@sha256:${'a'.repeat(64)}`, REV = 'b'.repeat(40);
   const NASTY = ['', ' ', '-', '--', '--privileged', '--pid=host', '-v /:/host', '--volume=/:/host', '--network host', '--cap-add=ALL', '--security-opt seccomp=unconfined', '--device /dev/sda', '--entrypoint sh', '--name x', '--rm',
     'evil/image:latest', 'x --privileged', 'a\nb', '../../etc', '/', '$(id)', '`id`', ';id', '&&id', '|id', '\0', '"', "'", '\\', '%0a', '--', '=', '--=', '-=x', '--ipc', '--ipc host --privileged', '--ipc=host\n--privileged'];
-  const flagPool = ['--ipc host', '--ipc=host', '--shm-size 2g', '--ulimit memlock=-1', '-w /work', '--workdir=/x', '--gpus all', '--network host', ...NASTY, null, 3, {}, ['--privileged'], true];
+  const flagPool = ['--ipc host', '--ipc=host', '--shm-size 2g', '--ulimit memlock=-1', '-w /work', '--workdir=/x', '--gpus all', '--network host', '--cap-add IPC_LOCK', '--cap-add=SYS_ADMIN', ...NASTY, null, 3, {}, ['--privileged'], true];
+  // What a recipe may ask of the host, in the registry's typed form, and things in its place that are not that.
+  const resourcePool = [{ ipcLock: true, memlockUnlimited: true }, { memoryBytes: 2 ** 34, memorySwapBytes: 2 ** 34 }, { memoryBytes: 2 ** 33 }, { ipcLock: false }, {}, { memorySwapBytes: 2 ** 34 }, { memoryBytes: 2 ** 34, memorySwapBytes: 1 },
+    { memoryBytes: '8g --privileged' }, { memoryBytes: -1 }, { memoryBytes: 1.5 }, { memoryBytes: 2 ** 60 }, { ipcLock: 'true' }, { memlockUnlimited: 1 }, { privileged: true }, { ipcLock: true, capAdd: 'ALL' }, ['--privileged'], '--privileged', 7, true];
   const str = () => (rnd() < 0.5 ? pick(NASTY) : text(['-', ' ', '=', '\n', 'a', 'z', '/', ':', '.', '@', '0', '"', "'", '\\', '$', ';'], 12));
   const maybe = (good, p = 0.85) => (rnd() < p ? good : (rnd() < 0.5 ? str() : pick([null, 0, -1, 1.5, 70000, {}, [], true, [str()]])));
-  const options = new Set(['-d', '--name', '--label', '--gpus', '--publish', '--security-opt', '--shm-size', '--env', '--volume', '--entrypoint', '--ipc', '--ulimit', '--workdir', '-w']);
+  const options = new Set(['-d', '--name', '--label', '--gpus', '--publish', '--security-opt', '--shm-size', '--env', '--volume', '--entrypoint', '--ipc', '--ulimit', '--workdir', '-w', '--cap-add', '--memory', '--memory-swap']);
   const roots = [join(HOME, 'models'), join(HOME, 'hf', 'hub'), join(HOME, 'runs')];
   let started = 0;
   for (let i = 0; i < N; i++) {
@@ -95,7 +100,8 @@ const { html } = await import('../web/html.js');
     if (rnd() < 0.3) launch.entrypoint = rnd() < 0.8 ? some(['python3', '-m', 'engine', ...NASTY], 3) : maybe(['x']);
     if (rnd() < 0.3) launch.config = { at: maybe(pick(['/app/config.yml', '/etc/engine/c.json']), 0.7), text: maybe('a: 1', 0.9) };
     if (rnd() < 0.4) launch.weights = some([{ repo: 'org/model', revision: REV, at: '/models' }, { repo: maybe('org/m', 0.6), revision: maybe(REV, 0.6), at: maybe('/weights', 0.6) }, { path: '/etc', at: '/x' }, { repo: 'org/m', revision: REV, at: '/models', layout: 'hub' }], 2);
-    for (const k of ['build', 'setup', 'prepare', 'resources', 'machines']) if (rnd() < 0.03) launch[k] = maybe(2, 0.5);
+    for (const k of ['build', 'setup', 'prepare', 'companion', 'machines']) if (rnd() < 0.03) launch[k] = maybe(2, 0.5);
+    if (rnd() < 0.3) launch.resources = pick(resourcePool);
     const recipe = { card: 'c', model: 'm', engine: 'vllm', launch };
     let why;
     try { why = problemWith(recipe); } catch (e) { found('the recipe check threw instead of refusing', `${e.message} for ${JSON.stringify(recipe).slice(0, 300)}`); continue; }
@@ -114,6 +120,10 @@ const { html } = await import('../web/html.js');
     if (of('--name').join() !== 'local-ai-18701' || of('--gpus').join() !== '"device=0"' || of('--publish').join() !== `127.0.0.1:18701:${launch.port}` || of('--security-opt').join() !== 'no-new-privileges') found('the app\'s own options were changed', show());
     for (const v of of('--volume')) { const [from, , mode] = v.split(':'); if (mode !== 'ro' || !roots.some((r) => resolve(from) === r || resolve(from).startsWith(`${r}${sep}`))) found('a mount that is not one of the app\'s own folders, read-only', `${v} in ${show()}`); }
     for (const v of of('--env')) if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(v)) found('an environment setting that is not NAME=value', `${v} in ${show()}`);
+    if (of('--cap-add').some((v) => v !== 'IPC_LOCK')) found('a capability other than locking memory', show());
+    if ([...of('--memory'), ...of('--memory-swap')].some((v) => !/^[1-9]\d*$/.test(v))) found('a memory limit that is not a plain number of bytes', show());
+    const asked = launch.resources || {}, lock = of('--cap-add').length > 0 && !(launch.flags || []).some((f) => /cap-add/.test(String(f)));
+    if (lock !== (asked.ipcLock === true) || (of('--memory').join() || null) !== (asked.memoryBytes ? String(asked.memoryBytes) : null)) found('resources that are not the ones the recipe asked for', show());
   }
   section(`hostile registry recipes: every one the app would start (${started.toLocaleString('en-US')}) runs the pinned image with only the app's options`, N);
 }

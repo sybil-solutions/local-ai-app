@@ -36,12 +36,18 @@ export const D = () => (s.dev === -1 ? s.snap : s.snap.devices[s.dev]?.state);
 export const here = () => (s.dev === -1 ? s.snap.name : s.snap.devices[s.dev]?.name || s.snap.name);
 // The models of the machine being shown, newest first. Every part of a screen asks for this, so it is worked out
 // once for each snapshot.
-let listed = { of: null, list: [] };
-export function all() {
+let listed = { of: null, list: [], others: [] };
+const newestFirst = (a, b) => (b.released || '').localeCompare(a.released || '');
+function lists() {
   const d = D();
-  if (listed.of !== d) listed = { of: d, list: d.groups.flatMap((g) => g.recipes).sort((a, b) => (b.released || '').localeCompare(a.released || '')) };
-  return listed.list;
+  if (listed.of !== d) listed = { of: d, list: d.groups.flatMap((g) => g.recipes).sort(newestFirst), others: d.groups.flatMap((g) => g.blocked || []).sort(newestFirst) };
+  return listed;
 }
+export const all = () => lists().list;
+// What the registry holds for this machine's cards that the app will not start. Each says why (`why`).
+export const others = () => lists().others;
+// A model by its id, whether the machine can start it or not.
+export const model = (id) => all().find((r) => r.id === id) || others().find((r) => r.id === id) || null;
 export const group = () => [...D().groups].sort((a, b) => b.recipes.length - a.recipes.length)[0];
 const TIERS = [['fastest', 'Fast'], ['balanced', 'Balanced'], ['smartest', 'Smart']];
 export function picks() {

@@ -6,13 +6,15 @@
 //   machine, files outside web/ can't be read and an unchanged one is not sent twice, pairing and the installer
 //   refuse strangers, a model someone else started is found and its tokens and prefill speed are counted from its
 //   /metrics, a container recipe starts, is adopted and stops, a second machine is connected and followed, and a look
-//   costs what the README says it does (Docker asked every fifth one, nvidia-smi started once).
+//   costs what the README says it does (Docker asked every fifth one, nvidia-smi started once). Every recipe the
+//   registry has for the machine's cards is listed, with the reason when the app will not start it; a recipe's typed
+//   resources reach Docker; weights already on the machine are checked and used where they are, not downloaded.
 //   On Apple silicon also: a pinned host recipe is offered (a tampered one is not), starts in its own venv, answers
 //   through the app's port, counts its tokens, survives an app restart, and is gone after Stop.
 // Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -90,6 +92,29 @@ const BROKEN = {
   'weights mounted outside a plain path': docked({ weights: [{ repo: 'org/model', revision: '0'.repeat(40), at: '/models/../../etc' }] }),
 };
 Object.entries(BROKEN).forEach(([, recipe], i) => { catalog.recipes[`smoke/gpu/broken-${i}.docker`] = recipe; });
+// Recipes the registry holds for the same card that say more: notes from their source, what the host must have beside
+// the card, typed resources, and weights. Two repos stand in for Hugging Face's: `kept` is already on this machine as
+// it was published; `changed` is here too, but one file in it is not the published one.
+const REV = 'c'.repeat(40), NOTED = 'smoke/gpu/noted.docker', CHANGED = 'smoke/gpu/changed.docker', HUNGRY = 'smoke/gpu/hungry.docker', HAVE = join(HOME, 'have');
+const published = { 'config.json': '{"model_type":"stand-in"}\n', 'model.safetensors': 'w'.repeat(70000) };
+const gitBlob = (text) => createHash('sha1').update(`blob ${Buffer.byteLength(text)}\0${text}`).digest('hex');
+const tree = Object.entries(published).map(([path, text]) => ({ type: 'file', path, size: Buffer.byteLength(text), oid: gitBlob(text),
+  ...(path.endsWith('.safetensors') ? { lfs: { oid: createHash('sha256').update(text).digest('hex'), size: Buffer.byteLength(text) } } : {}) }));
+for (const [repo, files] of [['kept', published], ['changed', { ...published, 'model.safetensors': 'x'.repeat(70000) }]]) {
+  mkdirSync(join(HAVE, repo), { recursive: true });
+  for (const [path, text] of Object.entries(files)) writeFileSync(join(HAVE, repo, path), text);
+}
+const downloads = []; // every file asked of the stand-in Hugging Face
+const hf = await serve((req) => {
+  const listing = /^\/api\/models\/org\/(kept|changed)\/tree\/c{40}\?/.exec(req.url), file = /^\/org\/(kept|changed)\/resolve\/c{40}\/(.+)$/.exec(req.url);
+  if (listing) return [200, tree];
+  if (file && published[file[2]] !== undefined) { downloads.push(`${file[1]}/${file[2]}`); return [200, published[file[2]], 'application/octet-stream']; }
+  return req.url.startsWith('/api/models?search=') ? [200, []] : [404, { error: 'not found' }];
+});
+catalog.recipes[NOTED] = { ...docked({ setup: 'NEEDS: one card. Measured on the reference host.', needs: { host_ram_gb: 1, disk_gb: 3, fast_storage: 'nvme' },
+  resources: { ipcLock: true, memlockUnlimited: true, memoryBytes: 2 ** 33, memorySwapBytes: 2 ** 33 }, weights: [{ repo: 'org/kept', revision: REV, at: '/models' }] }), model: 'kept-1' };
+catalog.recipes[CHANGED] = { ...docked({ weights: [{ repo: 'org/changed', revision: REV, at: '/models' }] }), model: 'changed-1' };
+catalog.recipes[HUNGRY] = { ...docked({ needs: { host_ram_gb: 1e6 } }), model: 'hungry-1' };
 const HOSTED = 'smoke/chip/fake.host', TAMPERED = 'smoke/chip/tampered.host';
 if (APPLE) {
   const sysctl = (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', timeout: 5000 }).trim();
@@ -110,6 +135,7 @@ let server = null, log = '';
 const FAKE_DOCKER = join(HOME, 'docker'), THERE_DOCKER = join(HOME, 'docker-second');
 function startServer({ nvidia = false } = {}) {
   server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'),
+    HF_ENDPOINT: `http://127.0.0.1:${hf.address().port}`, LOCAL_AI_MODELS: `${join(HOME, 'models')}:${HAVE}`, // downloads go to the first folder; the second holds weights already here
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
     ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (b) => { log += b; });
@@ -147,7 +173,7 @@ async function cleanup() {
   for (const dir of [FAKE_DOCKER, THERE_DOCKER]) { try { for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) pids.push(JSON.parse(readFileSync(join(dir, f), 'utf8')).pid); } catch { /* the Docker path never ran */ } }
   try { pids = pids.concat(Object.values(JSON.parse(readFileSync(join(HOME, 'hosts.json'), 'utf8'))).map((h) => h.pid)); } catch { /* none started */ }
   for (const pid of pids) if (pid && alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
-  outside.close(); registry.close(); proxy.close();
+  outside.close(); registry.close(); proxy.close(); hf.close();
   writeFileSync(logFile, log);
   if (failures.length) console.log(`\n--- server log (last 60 lines) ---\n${log.trim().split('\n').slice(-60).join('\n')}`);
   rmSync(HOME, { recursive: true, force: true });
@@ -345,10 +371,19 @@ try {
   const offered = nv.groups.flatMap((g) => g.recipes).map((r) => r.id);
   check('finds the NVIDIA cards and asks for Docker', nv.gpus.length === 2 && nv.needsDocker === true && nv.docker.ok === true, JSON.stringify([nv.gpus.length, nv.needsDocker, nv.docker]));
   check('offers the pinned container recipe', offered.includes(DOCKED), offered.join(' '));
+  const refused = nv.groups.flatMap((g) => g.blocked);
   for (const [i, why] of Object.keys(BROKEN).entries()) {
     const id = `smoke/gpu/broken-${i}.docker`;
     check(`does not offer or start a recipe with ${why}`, !offered.includes(id) && (await api('/api/runs', { method: 'POST', body: { recipe: id } })).status === 409);
+    check('and lists it with the reason, so nothing the registry has for the card goes missing', refused.some((r) => r.id === id && typeof r.why === 'string' && r.why.length > 3), JSON.stringify(refused.find((r) => r.id === id)?.why));
   }
+  check('every recipe the registry has for the card is either offered or listed with why not', Object.entries(catalog.recipes).filter(([, r]) => r.card === 'smoke-gpu').every(([id]) => offered.includes(id) !== refused.some((r) => r.id === id)));
+  const hungry = refused.find((r) => r.id === HUNGRY);
+  check('a recipe that needs more memory than this machine has says so and is not started', /Needs 1000000 GB of memory/.test(hungry?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: HUNGRY } })).status === 409, hungry?.why);
+  check('notes from a recipe\'s source do not keep it from being offered', offered.includes(NOTED));
+  const noted = await api(`/api/card?id=${encodeURIComponent(NOTED)}`);
+  check('they come with its card, with what it needs of the host, even when the model has no card', noted.status === 200 && /^NEEDS: one card/.test(noted.json?.notes || '') && noted.json.needs.ram === 1 && noted.json.needs.disk === 3 && noted.json.needs.nvme === true, JSON.stringify(noted.json));
+  check('a recipe with no notes and no card still answers that it has none', (await api(`/api/card?id=${encodeURIComponent(DOCKED)}`)).status === 404);
   const begun = await api('/api/runs', { method: 'POST', body: { recipe: DOCKED } });
   check('starts the container recipe', Number.isInteger(begun.json?.id), JSON.stringify(begun));
   const cid = begun.json.id;
@@ -389,6 +424,25 @@ try {
   const dead = await until('the dead container to be noticed', async () => { const r = (await state()).runs.find((x) => x.id === second); return r?.phase === 'failed' && r; }, 30000);
   check('a container that dies is shown as failed, with why', dead.view.word === 'Stopped' && /Engine stopped/.test(dead.error), JSON.stringify(dead.view));
   check('a failed run can be cleared', (await api(`/api/runs/${second}`, { method: 'DELETE' })).status === 200 && !(await state()).runs.some((x) => x.id === second));
+
+  // Weights already on this machine. LOCAL_AI_MODELS names a second folder; the repo `kept` is in it exactly as
+  // published, so the recipe is shown as ready, is checked against the published checksums once, and runs from there.
+  const ready = (id) => nv.groups.flatMap((g) => g.recipes).find((r) => r.id === id)?.ready;
+  check('weights already on this machine count as on disk', ready(NOTED) === true && ready(DOCKED) === true);
+  const kept = (await api('/api/runs', { method: 'POST', body: { recipe: NOTED } })).json.id;
+  await until('the recipe with weights already here to be ready', async () => { const r = (await state()).runs.find((x) => x.id === kept); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
+  const keptRun = JSON.parse(readFileSync(join(FAKE_DOCKER, `local-ai-${kept}.json`), 'utf8')), keptOpt = (name) => keptRun.options.filter((o) => o[0] === name).map((o) => o[1]);
+  check('they are used where they are, read-only, and nothing is downloaded', keptOpt('--volume').join() === `${join(HAVE, 'kept')}:/models:ro` && !downloads.some((d) => d.startsWith('kept/')) && !existsSync(join(HOME, 'models', `kept-${REV.slice(0, 8)}`)), `${keptOpt('--volume')} ${downloads}`);
+  check('what was checked is noted, so it is checked once', JSON.parse(readFileSync(join(HOME, 'found.json'), 'utf8'))[`org/kept@${REV}`]?.path === join(HAVE, 'kept') && readdirSync(join(HAVE, 'kept')).sort().join() === 'config.json,model.safetensors');
+  check('a recipe\'s typed resources reach Docker: locked memory and a memory limit, and still no new privileges', keptOpt('--cap-add').join() === 'IPC_LOCK' && keptOpt('--ulimit').includes('memlock=-1:-1') && keptOpt('--memory').join() === String(2 ** 33) && keptOpt('--memory-swap').join() === String(2 ** 33) && keptOpt('--security-opt').join() === 'no-new-privileges', JSON.stringify(keptRun.options));
+  await api(`/api/runs/${kept}`, { method: 'DELETE' });
+  // The repo `changed` is here too, but one file is not the published one: it is left alone and the weights are downloaded.
+  const other = (await api('/api/runs', { method: 'POST', body: { recipe: CHANGED } })).json.id;
+  await until('the recipe whose weights here differ to be ready', async () => { const r = (await state()).runs.find((x) => x.id === other); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
+  const otherRun = JSON.parse(readFileSync(join(FAKE_DOCKER, `local-ai-${other}.json`), 'utf8')), own = join(HOME, 'models', `changed-${REV.slice(0, 8)}`);
+  check('a folder that differs from what was published is not used: the weights are downloaded to the app\'s own folder', otherRun.options.filter((o) => o[0] === '--volume').map((o) => o[1]).join() === `${own}:/models:ro` && downloads.includes('changed/model.safetensors') && readFileSync(join(own, 'model.safetensors'), 'utf8') === published['model.safetensors'], `${downloads}`);
+  check('and the folder that differs is left as it was', readFileSync(join(HAVE, 'changed', 'model.safetensors'), 'utf8') === 'x'.repeat(70000) && readdirSync(join(HAVE, 'changed')).length === 2);
+  await api(`/api/runs/${other}`, { method: 'DELETE' });
 } catch (e) {
   check('the integration test ran to the end', false, e.message);
 }
