@@ -160,7 +160,9 @@ try {
   await fetch(`http://127.0.0.1:${mine.id}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'fake-engine', messages: [{ role: 'user', content: 'hi' }] }) }).then((r) => r.text());
   await until('its tokens to be counted', async () => (await state(PORT, 'here')).usage.all > 0, 60000);
   await press('[data-nav=usage]');
-  check('Usage shows what was served', /served|tokens/i.test(await shows('the Usage page', '#page', /\d/, 10000)));
+  const usage = await shows('the Usage page', '#page', /tokens served by/, 10000);
+  check('Usage shows what was served, and says which machine served it', /tokens served by \S/.test(usage) && /Swift One/.test(usage), usage.slice(0, 200));
+  check('with no other machine connected, Usage shows no total across machines', !/All machines/i.test(usage));
 
   // 5. Models: the list, a model's page, and editing a recipe and putting it back.
   await press('[data-nav=adv-models]');
@@ -205,6 +207,13 @@ try {
   await press('[data-nav=machines]');
   await press('[data-act=use][data-dev="-1"]');
   check('back on this computer, Home shows its own model', /Swift One/.test(await shows('this computer\'s model', '.cin .nname', /Swift One/)) && !(await page('!!document.querySelector(".where")')));
+  // Usage is one machine's own. The other machine's model is not in it; the one total across machines says what it is.
+  await press('[data-nav=usage]');
+  const both = await shows('Usage with a machine connected', '#page', /All machines/i, 10000);
+  const own = both.slice(0, both.search(/All machines/i)), total = both.slice(both.search(/All machines/i));
+  check('this computer\'s usage does not hold a connected machine\'s model', /Swift One/.test(own) && !/Even Three/.test(own), own.slice(0, 300));
+  check('the total across machines is labelled as one, machine by machine', /added up across this computer and 1 connected machine/.test(total) && /\(this computer\)/.test(total), total.slice(0, 300));
+  await press('[data-nav=home]');
 
   // 8. The panel: the window takes its shape, with nothing around it, and comes back.
   await press('[data-act=fs]');

@@ -1,7 +1,7 @@
 // Usage: one period at a time, how it grew, which models served it, and a calendar of activity.
 import { count, fmt, mins } from '../format.js';
 import { html } from '../html.js';
-import { D, s } from '../state.js';
+import { D, here, s } from '../state.js';
 import { Segmented } from './controls.js';
 import { Label, Note } from './layout.js';
 
@@ -94,9 +94,20 @@ function Calendar() {
   return html`${grid}<div class="readout" data-readout>${Readout(list[last])}</div>`;
 }
 
+// Tokens ever served, machine by machine, and added up. This is the one place where numbers from several machines
+// are shown together, and it says so. Everything else on the page is one machine's own: a model is counted on the
+// machine it runs on, and nowhere else.
+function AllMachines() {
+  if (!s.snap.devices.length) return '';
+  const known = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
+  const rows = [{ name: `${s.snap.name} (this computer)`, v: known(s.snap.usage?.all) }, ...s.snap.devices.map((d) => ({ name: d.name, v: known(d.state?.usage?.all) }))];
+  const sum = rows.reduce((n, r) => n + (r.v || 0), 0);
+  return html`${Label('All machines')}<div class="umeta"><span><b>${fmt(sum)}</b> tokens, all time, added up across this computer and ${rows.length - 1} connected machine${rows.length > 2 ? 's' : ''}</span></div><div class="umodels">${rows.map((r) => html`<div class="umodel"><span>${r.name}</span><b>${r.v === null ? '—' : fmt(r.v)}</b><span>${r.v === null ? '' : `${Math.round((r.v / (sum || 1)) * 100)}%`}</span><i><u style="width:${(((r.v || 0) / (sum || 1)) * 100).toFixed(1)}%"></u></i></div>`)}</div>`;
+}
+
 export function UsageBody() {
   if (!s.usage) return Note('Loading');
   const u = period(), total = [...u.by.values()].reduce((n, v) => n + v, 0) || 1;
   const models = [...u.by].sort((x, y) => y[1] - x[1]).map(([name, v]) => html`<div class="umodel"><span>${name}</span><b>${fmt(v)}</b><span>${Math.round((v / total) * 100)}%</span><i><u style="width:${((v / total) * 100).toFixed(1)}%"></u></i></div>`);
-  return html`<div class="ugrid"><section class="usec">${Segmented({ choices: [['run', 'This run'], ['today', 'Today'], ['month', 'Month'], ['all', 'All time']], on: s.span, act: 'span', kind: 'useg' })}<div class="hero"><b>${fmt(u.tokens)}</b><span>tokens · ${u.sub}</span></div><div class="umeta"><span><b>${fmt(u.wrote)}</b> generated</span><span><b>${count(u.requests)}</b> requests</span></div>${Label('Growth')}${Growth(u.points)}${Label('By model')}<div class="umodels">${models.length ? models : Note('Nothing yet')}</div></section><section class="usec">${Label('Activity')}${Segmented({ choices: [['days', 'Days'], ['weeks', 'Weeks'], ['months', 'Months']], on: s.period, act: 'period', kind: 'tabs' })}${Calendar()}<div class="legend"><span>Less</span>${LEVELS.map((c) => html`<i style="background:${c}"></i>`)}<span>More</span></div></section></div>`;
+  return html`<div class="ugrid"><section class="usec">${Segmented({ choices: [['run', 'This run'], ['today', 'Today'], ['month', 'Month'], ['all', 'All time']], on: s.span, act: 'span', kind: 'useg' })}<div class="hero"><b>${fmt(u.tokens)}</b><span>tokens served by ${here()} · ${u.sub}</span></div><div class="umeta"><span><b>${fmt(u.wrote)}</b> generated</span><span><b>${count(u.requests)}</b> requests</span></div>${Label('Growth')}${Growth(u.points)}${Label('By model')}<div class="umodels">${models.length ? models : Note('Nothing yet')}</div>${AllMachines()}</section><section class="usec">${Label('Activity')}${Segmented({ choices: [['days', 'Days'], ['weeks', 'Weeks'], ['months', 'Months']], on: s.period, act: 'period', kind: 'tabs' })}${Calendar()}<div class="legend"><span>Less</span>${LEVELS.map((c) => html`<i style="background:${c}"></i>`)}<span>More</span></div></section></div>`;
 }

@@ -11,6 +11,21 @@ function rowOf(rows, name) {
   return rows[name];
 }
 export const forget = (r) => { delete usage.last[keyOf(r)]; dirty = true; };
+// Takes back what was counted for a run since it was first seen. A port that turns out to only pass requests on to a
+// model on another machine served nothing here: those tokens are that machine's, and it counts them itself.
+export function uncount(r) {
+  for (const [hour, counted] of Object.entries(r.counted || {})) {
+    for (const rows of [usage.hours[hour], usage.days[hour.slice(0, 10)]]) {
+      const row = rows && Object.hasOwn(rows, r.name) ? rows[r.name] : null;
+      if (!row) continue;
+      for (const k of Object.keys(counted)) row[k] = Math.max(0, row[k] - counted[k]);
+      if (!row.in && !row.out && !row.req) delete rows[r.name];
+    }
+    for (const [all, k] of [[usage.hours, hour], [usage.days, hour.slice(0, 10)]]) if (all[k] && !Object.keys(all[k]).length) delete all[k];
+  }
+  r.counted = null;
+  dirty = true;
+}
 
 export function parseMetrics(text) {
   const out = {};
@@ -66,6 +81,7 @@ export async function scrape(r, now) {
       m = parseMetrics(await res.text());
     } catch { return false; }
   }
+  if (m.process_start) r.born = m.process_start; // which engine this is, wherever it is reached from
   const cur = { in: m.prompt_tokens_total || 0, out: m.generation_tokens_total || m.tokens_predicted_total || 0, req: m.request_success_total || 0 };
   const last = usage.last[keyOf(r)] || cur;
   const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : cur[k]]));
@@ -77,7 +93,8 @@ export async function scrape(r, now) {
   if (moved) dirty = true;
   if (moved && !benchmark) {
     const stamp = new Date(now).toISOString(), row = rowOf(usage.days[stamp.slice(0, 10)] ||= {}, r.name), hour = rowOf(usage.hours[stamp.slice(0, 13)] ||= {}, r.name);
-    for (const k of Object.keys(delta)) { row[k] += delta[k]; hour[k] += delta[k]; r.used[k] += delta[k]; }
+    const counted = (r.counted ||= {})[stamp.slice(0, 13)] ||= { in: 0, out: 0, req: 0 }; // what this run added, by hour, so it can be taken back (uncount)
+    for (const k of Object.keys(delta)) { row[k] += delta[k]; hour[k] += delta[k]; r.used[k] += delta[k]; counted[k] += delta[k]; }
   }
   r.series ||= [];
   if (!r.series.length || now - r.series.at(-1)[0] >= 60000) { r.series.push([now, r.used.in + r.used.out]); if (r.series.length > 240) r.series.shift(); }

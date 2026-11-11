@@ -142,7 +142,7 @@ function describe(r) {
 
 export const all = () => [...runs.values()];
 // What the app is told about a run. Anything not named here stays inside the server.
-const SHOWN = ['id', 'host', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external', 'reachable'];
+const SHOWN = ['id', 'host', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external', 'reachable', 'born'];
 export const listRuns = () => all().sort((a, b) => a.id - b.id).map((r) => ({
   ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch?.ctx || r.window || 0, vision: !!find(r.recipe)?.launch?.vision,
 }));
