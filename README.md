@@ -72,6 +72,7 @@ server/
   recipes.js    the registry catalog, your own recipes, the three picks per GPU, model cards
   speed.js      measured tokens per second and load times
   agents.js     coding agents and the terminal they open in: find, open on a model, install, update
+  dsh.js        DeepSeek Harness: writes the running models into its settings, as text
   machines.js   connected machines, your Tailscale machines, key-less pairing
   update.js     the app updating itself from the repo it was cloned from
   util.js       paths, config, events, running commands
@@ -194,8 +195,8 @@ Run    = { id,            // the port it serves on
 | Hugging Face | Weights, and model cards. The token is read from `HF_TOKEN` or the HF cache's `token` file. |
 | npm registry | The newest version of each agent. |
 | An agent | Opened in a terminal with its own config folder, so it stays signed in: the model is passed in environment variables or flags for that run only. Pi and Oh My Pi get it from an extension (`-e agents/local-ai.js`) that registers each running model as a provider. On a Mac the terminal is the first installed of Ghostty, iTerm, kitty, WezTerm, Alacritty, Terminal, or the one chosen under Agents; Warp can't be started on a script. |
-| T3 Code | A desktop app: Open places the same extension in Pi's `extensions/` folder (once), records the model and folder, and runs `t3 app <folder>`. The model is listed under Pi, and a Pi session T3 Code starts in that folder begins on it ("Pi default"). |
-| DeepSeek Harness | A desktop app with its own model list and credential store: Open only opens it. |
+| T3 Code | A desktop app that runs Pi itself and keeps a model for every thread. Open places the same extension in Pi's `extensions/` folder (once), then starts a thread on the model by its exact name: `t3 thread start <folder> … --provider pi --model la-<machine>-<port>/<model>` (the folder is added as a project first if T3 Code has not seen it). Nothing is left to "Pi default". A thread has to begin with a message, so it begins by asking the model to say it is ready; the answer shows the thread is on the model. Then `t3 app <folder>` brings the app forward. |
+| DeepSeek Harness | A desktop app with its own model list (`~/.dsh/profiles/web/cordis.patch.yml`, reloaded as it changes) and key store. Open writes the running models into that list, each as a provider named as Pi's are (`la-<machine>-<port>`), makes the one opened the model new conversations start on, and adds one key name (`LOCAL_AI_API_KEY`) to `~/.dsh/.credentials.yaml`, since the Harness asks every provider for a key. Only those three places are edited, as text; your own providers and keys are left byte for byte (`server/dsh.js`), and the settings as they were are kept in `cordis.patch.yml.before-local-ai`. Models that are no longer running are taken out again the next time you open it from here. |
 | `ssh` | Installing Local AI on one of your own Tailscale machines when you ask: it signs in as you would (the machine's name, its tailnet name, its address) and runs the installer this machine serves. |
 | `git` | The app's own updates, when it was installed from a clone. |
 

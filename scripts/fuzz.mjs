@@ -10,7 +10,9 @@
 //   5. What a connected machine says about itself: junk is refused whole or cut down to the shape the app reads.
 //   6. The door in front of a model's port: only this machine's own address, and no page from another site.
 //   7. Host recipes (programs run on the machine itself): one that is accepted runs its own hashed script and nothing else.
-//   8. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
+//   8. DeepSeek Harness's settings, which the app edits as text: whatever models are written in, with whatever names,
+//      every line that was the person's own is still there, in order, and taking the models out again gives the file back.
+//   9. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
 //      requests to the API must never crash it, hang it, or give anything away without the key.
 // Usage: node scripts/fuzz.mjs [seed]     exit code 0 when nothing was found. FUZZ_N sets how many random cases (default 40000).
 import { spawn } from 'node:child_process';
@@ -42,6 +44,7 @@ const weights = await import('../server/weights.js');
 const { markdown } = await import('../web/markdown.js');
 const { conform } = await import('../server/machines.js');
 const { refusal } = await import('../server/meter.js');
+const dsh = await import('../server/dsh.js');
 const { createHash } = await import('node:crypto');
 const { html } = await import('../web/html.js');
 
@@ -230,7 +233,40 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
   section(`host recipes: every one accepted (${passed.toLocaleString('en-US')}) runs its own hashed script, pinned, on the port the app gives it`, cases);
 }
 
-// ---- 8. the running server -----------------------------------------------------------------------------------------
+// ---- 8. DeepSeek Harness's settings ---------------------------------------------------------------------------------
+{
+  const mine = (n) => Array.from({ length: n }, (_, i) => [`      box-${i}:`, `        displayName: Box ${i} # mine`, '        apiKeyEnv: BOX_KEY', '        baseURL: http://box:8080/v1', '        models:', `          - id: model-${i}`, '            contextWindow: 262144', ...(i % 2 ? ['', '      # a note of mine'] : [])]).flat();
+  const file = (n, extra = []) => ['# Your patch layer.', '- id: ui', '  config:', '    welcome: 1', '- id: llm-pi-ai', '  name: "@deepseek-ai/dsh-llm-pi-ai"', '  config:', '    providers:', ...mine(n), ...extra, '- id: agent-default-model', '  config:', '    provider: box-0', '    model: model-0', '- id: last', '  config:', '    x: 1', ''].join('\n');
+  const odd = ['plain', 'with "quotes"', "it's", 'a: b', '# not a comment', '- not an item', 'line\nbreak', '  spaces  ', '{braces}', '[x]', '!!js evil', '&anchor *alias', '\\ back', 'ünï · code', '', '\t', '|', '>', '---', '%'];
+  let cases = 0;
+  for (let i = 0; i < Math.min(N, 20000); i++) {
+    const before = file(Math.floor(rnd() * 4)), keys = new Set();
+    const models = Array.from({ length: Math.floor(rnd() * 4) }, () => ({ key: `la-${pick(['self', '0', '1', '12'])}-${18701 + Math.floor(rnd() * 50)}`, model: pick(odd), title: pick(odd), url: `http://${pick(['127.0.0.1', '100.90.62.80'])}:${8000 + Math.floor(rnd() * 99)}`, ctx: pick([8192, 1048576]), vision: rnd() < 0.5 })).filter((m) => !keys.has(m.key) && keys.add(m.key));
+    cases++;
+    let after;
+    try { after = dsh.withModels(before, models); } catch (e) { found('writing models into the Harness settings threw', `${e.message} for ${JSON.stringify(models)}`); continue; }
+    if (after === null) { found('a settings file laid out as expected was refused', JSON.stringify(models)); continue; }
+    const was = before.split('\n'), now = after.split('\n');
+    let at = 0;
+    for (const line of now) if (at < was.length && line === was[at]) at++; // every line of the person's own, in order
+    if (at !== was.length) found('a line of the person\'s own went missing from the Harness settings', JSON.stringify(models));
+    if (now.length !== was.length + models.reduce((n, m) => n + 12 + (m.vision ? 1 : 0), 0)) found('the Harness settings gained lines that are not a model\'s', JSON.stringify(models));
+    if (now.filter((l) => l.startsWith('- ')).length !== was.filter((l) => l.startsWith('- ')).length) found('a model\'s name became an entry of its own in the Harness settings', JSON.stringify(models));
+    if (dsh.withModels(after, models) !== after) found('writing the same models twice changed the Harness settings', JSON.stringify(models));
+    if (dsh.withModels(after, []) !== before) found('taking the models out again did not give the Harness settings back', JSON.stringify(models));
+    const chosen = models[0] || { key: 'la-0-8000', model: pick(odd) }, set = dsh.withDefault(after, chosen.key, chosen.model);
+    if (set === null || set.split('\n').length !== now.length || set.split('\n').filter((l, n) => l !== now[n]).length > 2) found('setting the Harness\'s default model changed more than its two lines', JSON.stringify(chosen));
+  }
+  for (const [text, lines] of [[null, 3], ['version: 1\nrefs:\n  A_KEY: x\nrecords:\n  a/b:\n    kind: k\n', 1], ['version: 1\nrecords: {}\n', 2], ['version: 1\nrefs:\n    A_KEY: x\n', 1]]) {
+    const keyed = dsh.withKey(text);
+    cases++;
+    if (keyed === null || dsh.withKey(keyed) !== keyed || keyed.split('\n').length !== (text === null ? 1 : text.split('\n').length) + lines || !/^\s+LOCAL_AI_API_KEY: local$/m.test(keyed) || (text !== null && !text.split('\n').every((l) => keyed.split('\n').includes(l)))) found('the Harness keys file was not given one key and left otherwise alone', JSON.stringify(text));
+  }
+  for (const text of ['A_KEY: x\n', 'version: 2\nrefs:\n  A: x\n', 'version: 1\nrefs: { A: x }\n']) { cases++; if (dsh.withKey(text) !== null) found('a Harness keys file in another layout was edited', JSON.stringify(text)); }
+  section('DeepSeek Harness settings: models go in and out, and every line that was the person\'s own stays', cases);
+}
+
+// ---- 9. the running server -----------------------------------------------------------------------------------------
 const PORT = 29700 + Math.floor(rnd() * 200) * 2;
 const registry = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ cards: {}, models: {}, builds: {}, recipes: { 'fuzz/none': { card: 'none', model: 'm', engine: 'vllm', launch: { image: 'x', port: 1 } } } })); });
 await new Promise((done) => registry.listen(0, '127.0.0.1', done));
