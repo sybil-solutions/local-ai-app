@@ -16,7 +16,7 @@ import { at, config, event, fail, HOST, PORT, saveConfig } from './util.js';
 import * as weights from './weights.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..'), WEB = join(ROOT, 'web');
-const TYPES = { png: 'image/png', html: 'text/html', js: 'text/javascript', css: 'text/css', webp: 'image/webp', woff2: 'font/woff2' };
+const TYPES = { svg: 'image/svg+xml', png: 'image/png', html: 'text/html', js: 'text/javascript', css: 'text/css', webp: 'image/webp', woff2: 'font/woff2' };
 const LOOPBACK = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?$/i;
 const JSON_TYPE = { 'content-type': 'application/json' };
 let shared = null; // this machine's tailnet address, once the app is also listening there
@@ -31,7 +31,7 @@ async function publish() {
     name: hostname(), docker: engine.status.docker, needsDocker: !engine.status.gpus.length || !engine.status.gpus.every((g) => g.unified), gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
     usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
     agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder, ...term,
-    home: config.home || null, background: config.background || 'fresco', tone: config.tone || null, picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
+    home: config.home || null, background: config.background || 'clouds', tone: config.tone || null, picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
   };
   const text = JSON.stringify(state);
   if (text === signature) return;
@@ -85,7 +85,7 @@ async function endpoints() {
 async function saveSettings({ b }) {
   if (typeof b.terminal === 'string') await agents.setTerminal(b.terminal);
   for (const k of ['folder', 'agent']) if (typeof b[k] === 'string') config[k] = b[k];
-  if (['fresco', 'own', 'none'].includes(b.background)) config.background = b.background;
+  if (['clouds', 'fresco', 'own', 'none'].includes(b.background)) config.background = b.background;
   if (['gray', 'color'].includes(b.tone)) config.tone = b.tone;
   if (Array.isArray(b.home?.order) && Array.isArray(b.home?.on)) config.home = { order: b.home.order.map(String), on: b.home.on.map(String) };
   if (typeof b.autoUpdate === 'boolean') config.autoUpdate = b.autoUpdate;

@@ -22,7 +22,10 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .chip { display: inline-flex; align-items: center; height: 30px; box-sizing: border-box; border-radius: 15px; background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .top .mark.chip, .nav .mark.chip { gap: 7px; height: 30px; padding: 0 12px 0 11px; font: 500 13px/1 var(--ui); color: var(--text); }
 /* The machine's name is blurred until you point at it or focus it, so it stays out of screenshots. */
-.who { filter: blur(5px); transition: filter .15s; }
+.who { filter: blur(5px); transition: filter .15s; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long machine name is cut short; the buttons beside it always fit. */
+.top .mark.chip { min-width: 0; flex: 0 1 auto; }
+.top .topr.chip { flex: none; }
 .mark.chip:hover .who, .mark.chip:focus-visible .who { filter: none; }
 .mark.chip i { margin: 0; vertical-align: 0; flex: none; }
 .top .topr.chip { gap: 0; padding: 0 2px; }
@@ -176,6 +179,9 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 [data-tone=gray] .bgthumb { filter: grayscale(1); }
 .bg-own { background-image: var(--own, none); background-size: cover; background-position: center; }
 .bg-none { background: var(--bg); }
+.bg-clouds { background: url(/clouds.webp) 60% 30% / cover no-repeat; }
+.dove { height: 16px; width: auto; flex: none; margin-right: 7px; }
+.mark.chip .dove { margin-right: 0; }
 .bgrow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgrow > span { min-width: 0; }
 
