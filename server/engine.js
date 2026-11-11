@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, copyFileSync, existsSync, fstatSync, ftruncateSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, fstatSync, ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join } from 'node:path';
 import * as machines from './machines.js';
@@ -64,6 +64,14 @@ async function readAppleGpu() {
   return [{ index: 0, name: chip.name, total: chip.total, used, util: null, power: null, temp: null, unified: true }];
 }
 
+// The machine's RAM in MiB, from /proc/meminfo, as { total, used }.
+function systemMemory() {
+  try {
+    const text = readFileSync('/proc/meminfo', 'utf8'), kb = (key) => +(new RegExp(`^${key}:\\s+(\\d+)`, 'm').exec(text)?.[1] || 0);
+    return { total: Math.round(kb('MemTotal') / 1024), used: Math.round((kb('MemTotal') - kb('MemAvailable')) / 1024) };
+  } catch { return null; }
+}
+
 async function readGpus() {
   if (process.platform === 'darwin' && process.arch === 'arm64') return readAppleGpu();
   const q = 'index,name,memory.total,memory.used,utilization.gpu,power.draw,temperature.gpu';
@@ -72,14 +80,16 @@ async function readGpus() {
   const num = (s) => (Number.isFinite(+s) ? +s : null);
   return r.stdout.trim().split('\n').filter(Boolean).map((line) => {
     const [index, name, total, used, util, power, temp] = line.split(', ');
-    return { index: +index, name, total: +total, used: num(used), util: num(util), power: num(power), temp: num(temp) };
+    // A GPU that shares the system's memory (DGX Spark) reports none of its own: its memory is the machine's RAM.
+    const own = num(total), ram = own ? null : systemMemory();
+    return { index: +index, name, total: own ?? ram?.total ?? 0, used: own ? num(used) : ram?.used ?? null, util: num(util), power: num(power), temp: num(temp), ...(own ? {} : { shared: true }) };
   });
 }
 
 const claimed = () => new Set([...runs.values()].filter((r) => r.phase !== 'failed').flatMap((r) => r.gpus));
 export const freeGpus = () => {
   const taken = claimed();
-  return status.gpus.filter((g) => !taken.has(g.index) && (g.unified || (g.used ?? 0) < 2048));
+  return status.gpus.filter((g) => !taken.has(g.index) && (g.unified || g.shared || (g.used ?? 0) < 2048)); // shared memory is always partly in use by the system
 };
 
 const portFree = (port) => new Promise((done) => {
@@ -321,11 +331,11 @@ async function health(r) {
 
 // An engine serves one model, or says what it is on /metrics. A proxy in front of cloud APIs (or of several engines)
 // lists many models and has no engine counters, so it is not shown as a model running here. Returns the model id.
-async function isEngine(port, models) {
+async function isEngine(url, models) {
   const id = Array.isArray(models) ? models[0]?.id : null;
   if (!id || models.length === 1) return id || null;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/metrics`, { signal: AbortSignal.timeout(800) });
+    const res = await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(800) });
     return res.ok && /^(vllm|sglang|llamacpp)[:_]/m.test(await res.text()) ? id : null;
   } catch { return null; }
 }
@@ -333,7 +343,7 @@ async function isEngine(port, models) {
 // A forwarder on this machine in front of a model on a connected machine answers exactly like that model, counters
 // and all. It is that machine's model, not one running here. It is recognised by the same model id being ready there
 // and the same counters: read here, there, then here again, the numbers there fall between the two readings here.
-async function forwards(port, model) {
+async function forwards(here, model) {
   const totals = async (url) => {
     const m = usage.parseMetrics(await (await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(1500) })).text());
     return [m.prompt_tokens_total, m.generation_tokens_total ?? m.tokens_predicted_total, m.request_success_total];
@@ -342,7 +352,7 @@ async function forwards(port, model) {
     for (const r of d.online && d.state ? d.state.runs : []) {
       if (r.phase !== 'ready' || r.served !== model || r.reachable === false) continue;
       try {
-        const here = `http://127.0.0.1:${port}`, first = await totals(here), there = await totals(`http://${new URL(d.url).hostname}:${r.id}`), second = await totals(here);
+        const first = await totals(here), there = await totals(`http://${new URL(d.url).hostname}:${r.id}`), second = await totals(here);
         if (there.some((v) => v > 0) && there.every((v, i) => v !== undefined && first[i] <= v && v <= second[i])) return d.name;
       } catch { /* one of them has no counters, so nothing says it is a forwarder */ }
     }
@@ -368,20 +378,26 @@ async function discover(now) {
   if (now - scanned < 30000) return;
   scanned = now;
   for (const r of runs.values()) {
-    const to = r.external && r.phase === 'ready' && await forwards(r.id, r.served);
+    const to = r.external && r.phase === 'ready' && await forwards(r.url, r.served);
     if (to) { runs.delete(r.id); usage.forget(r); event('info', 'run.forwarded', { id: r.id, model: r.served, to }); notify(); }
   }
   const text = (process.platform === 'darwin' ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnH'])).stdout;
-  const open = new Map([...text.matchAll(/(\S+):(\d+)\s/g)].map((m) => [+m[2], !/^(127\.|\[::1\])/.test(m[1])]));
+  // Each listening port with the address to ask it on: loopback, unless it listens on one address only (a server bound
+  // to the tailnet address alone does not answer on loopback).
+  const open = new Map();
+  for (const [, where, port] of text.matchAll(/(\S+):(\d+)\s/g)) {
+    const ip = where.replace(/%.*$/, ''), only = /^\d+\.\d+\.\d+\.\d+$/.test(ip) && ip !== '0.0.0.0' && !ip.startsWith('127.') ? ip : null;
+    if (!open.has(+port) || !only) open.set(+port, { host: only || '127.0.0.1', outside: !/^(127\.|\[::1\])/.test(where) });
+  }
   const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p) && !innerPorts().has(p)).sort((a, b) => a - b).map(async (port) => {
-    try { const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await isEngine(port, (await res.json()).data))]; } catch { return [port, null]; }
+    try { const res = await fetch(`http://${open.get(port).host}:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await isEngine(`http://${open.get(port).host}:${port}`, (await res.json()).data))]; } catch { return [port, null]; }
   }));
   const known = new Set([...runs.values()].map((r) => r.served));
   for (const [port, model] of found) {
     if (!model || known.has(model)) continue; // the same model behind a proxy is still one model
     known.add(model);
-    if (await forwards(port, model)) continue; // a forwarder to a connected machine's model
-    runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port), name: model, url: `http://127.0.0.1:${port}`, served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
+    if (await forwards(`http://${open.get(port).host}:${port}`, model)) continue; // a forwarder to a connected machine's model
+    runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port).outside, name: model, url: `http://${open.get(port).host}:${port}`, served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
     event('info', 'run.found', { id: port, model });
     notify();
   }
