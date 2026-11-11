@@ -65,6 +65,9 @@ export function HOME() {
 // The desktop app's window fits itself to the layout (electron/preload.cjs); a browser's can't be resized from here.
 export const shellWindow = window.localAiWindow || null;
 const roomy = () => innerWidth >= 640;
+// The panel's width and least height, in its own units. The stylesheet is where they are set.
+const size = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+export const PANEL = { w: size('--pw') || 312, h: size('--ph') || 432 };
 export const canFull = () => roomy() || !!shellWindow; // whether the layout can be switched at all
 export const isFull = () => s.full && roomy();
 

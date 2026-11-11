@@ -3,7 +3,7 @@
 import { applyBg, fitArt, loadOwn, onChange, pickBg, setTone } from './art.js';
 import { homeHtml, NAV, navBar, pageHtml } from './desktop.js';
 import { CTX, lit, look, markdown, SCREENS, STATE } from './screens.js';
-import { all, api, cardKey, chosen, D, hasRoom, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shellWindow, shown, store } from './state.js';
+import { all, api, cardKey, chosen, D, hasRoom, homeCfg, isFull, PANEL, outdated, picks, resolve, run, s, scoped, send, shellWindow, shown, store } from './state.js';
 import { ctxOf, fmt, notice } from './ui.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -57,18 +57,18 @@ function natural() {
 }
 // In the desktop app the panel's window follows Home: it grows when Home shows more and shrinks back when it shows
 // less, so nothing is cut off. Other screens keep the height Home had, so the window does not jump as you move about.
-let fitted = 480;
+let fitted = PANEL.h;
 function fitPanel() {
   if (!shellWindow || s.full || s.nav || !panel.firstElementChild) return;
-  const want = Math.max(480, natural());
+  const want = Math.max(PANEL.h, natural());
   if (Math.abs(want - fitted) < 2) return;
   fitted = want;
-  shellWindow.compact(true, want);
+  shellWindow.compact(true, want, PANEL.w);
 }
-// The panel is drawn 260 units wide and scaled to the window, up to one and a half times.
+// The panel is drawn in its own units and scaled to the window, up to one and a half times.
 function layout() {
-  const k = Math.min(innerWidth / 260, innerHeight / (shellWindow && !s.full ? fitted : 480), 1.5);
-  Object.assign(frame.style, { transform: `scale(${k})`, left: `${(innerWidth - 260 * k) / 2}px` });
+  const k = Math.min(innerWidth / PANEL.w, innerHeight / (shellWindow && !s.full ? fitted : PANEL.h), 1.5);
+  Object.assign(frame.style, { transform: `scale(${k})`, left: `${(innerWidth - PANEL.w * k) / 2}px` });
   panel.style.height = `${innerHeight / k}px`;
   render(true);
 }
@@ -227,7 +227,7 @@ const ACTS = {
     store('la-full', s.full ? '1' : '0');
     if (s.full) await shellWindow?.compact(false); // the window gets its room back before it fills the screen
     if (s.full) root.requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-    if (!s.full) { fitted = 480; await shellWindow?.compact(true, fitted); }
+    if (!s.full) { fitted = PANEL.h; await shellWindow?.compact(true, fitted, PANEL.w); }
     if (shellWindow) setTimeout(layout, 300); // the window has changed size; a window in the background may not say so
   },
 };
@@ -317,5 +317,5 @@ async function follow() {
     if (lost) await sleep(1500);
   }
 }
-if (!s.full) shellWindow?.compact(true, fitted); // a window that was left showing the panel opens fitted to it
+if (!s.full) shellWindow?.compact(true, fitted, PANEL.w); // a window that was left showing the panel opens fitted to it
 applyBg(); layout(); follow();
