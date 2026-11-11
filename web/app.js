@@ -3,7 +3,7 @@
 import { applyBg, fitArt, loadOwn, onChange, pickBg, setTone } from './art.js';
 import { homeHtml, NAV, navBar, pageHtml } from './desktop.js';
 import { CTX, lit, look, markdown, SCREENS, STATE } from './screens.js';
-import { all, api, cardKey, chosen, D, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shown, store } from './state.js';
+import { all, api, cardKey, chosen, D, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shellWindow, shown, store } from './state.js';
 import { ctxOf, fmt, notice } from './ui.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -193,10 +193,13 @@ const ACTS = {
   },
   resetedit: async () => { await send(scoped(`recipes?id=${encodeURIComponent(s.draft.raw.id)}`), 'DELETE'); delete s.cards[cardKey(s.draft.raw.id)]; go('back'); },
   dismiss: () => { s.note = ''; },
-  fs: () => {
+  fs: async () => {
     s.full = !s.full;
     store('la-full', s.full ? '1' : '0');
-    if (s.full) root.requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (s.full) await shellWindow?.compact(false); // the window gets its room back before it fills the screen
+    if (s.full) root.requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    if (!s.full) await shellWindow?.compact(true);
+    if (shellWindow) setTimeout(layout, 300); // the window has changed size; a window in the background may not say so
   },
 };
 
@@ -285,4 +288,5 @@ async function follow() {
     if (lost) await sleep(1500);
   }
 }
+if (!s.full) shellWindow?.compact(true); // a window that was left showing the panel opens fitted to it
 applyBg(); layout(); follow();
