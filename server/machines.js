@@ -63,7 +63,7 @@ export async function isMine(req) {
 // (a firewall here would stop it). Only a machine Tailscale lists as yours is ever contacted, and the name is passed
 // to ssh as a word, never to a shell.
 const SSH_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const unpackAndInstall = (mode) => `T="$(mktemp -d)" && tar -xz -C "$T" && LOCAL_AI_SHIPPED=${mode} bash "$T/install.sh"`;
+const unpackAndInstall = (mode) => `T="$(mktemp -d)" || exit 1; tar -xz -C "$T" && LOCAL_AI_SHIPPED=${mode} bash "$T/install.sh"; code=$?; rm -rf "$T"; exit $code`; // the folder it was unpacked to is not left behind
 // Resolves with ssh's exit code and the last of what it printed. 255: it could not sign in. 3 and 4 are the
 // installer declining (install.sh): the copy there updates itself, or Local AI is already running there.
 // The app's files as one stream. A Mac's tar would add each file's Mac-only attributes, which another system unpacks

@@ -156,7 +156,7 @@ function view(id) {
     vision: !!recipe.launch.vision, tps: measured?.c1 ?? amount(proof?.tps), smart: amount(aa?.index), seqs: whole(recipe.launch.seqs, 1),
     speed: { c1: measured?.c1 ?? amount(proof?.tps), c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: amount(own(catalog.builds, recipe.weights)?.size_gb),
     released: typeof model?.released === 'string' ? model.released : null, loadS: loadSeconds(id),
-    think: !!model?.reasoning, tools: /tool-call-parser|enable-auto-tool-choice|--jinja/.test(text), kv: /--kv-cache-dtype[= ](?!auto)(\S+)/.exec(text)?.[1] || null,
+    think: !!model?.reasoning, tools: /tool-call-parser|enable-auto-tool-choice|--jinja/.test(text) || String(proof?.gates || '').split(' ').includes('tools'), // its arguments say so, or the lab saw it call one kv: /--kv-cache-dtype[= ](?!auto)(\S+)/.exec(text)?.[1] || null,
   };
 }
 
