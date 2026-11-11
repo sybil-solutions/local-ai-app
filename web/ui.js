@@ -52,11 +52,13 @@ export const art = (pose, p = 0) => `<canvas class="art" data-pose="${pose}" dat
 export const status = (pose, word, line = '', p = 0) => `${art(pose, p)}<div class="word">${esc(word)}</div><div class="line">${esc(line)}</div>`;
 
 export const fsBtn = () => (canFull() ? `<button data-act="fs" aria-label="${s.full ? 'Exit fullscreen' : 'Fullscreen'}" title="${s.full ? 'Exit fullscreen' : 'Fullscreen'}">${icon(s.full ? 'shrink' : 'grow')}</button>` : '');
-const bare = '<div class="top"><span class="mark">Local AI</span></div>';
+// The name with its dove, wherever the app shows its own name.
+export const wordmark = '<span class="mark"><img class="dove" src="/dove.svg" alt="">Local AI</span>';
+const bare = `<div class="top">${wordmark}</div>`;
 export const menu = () => (s.snap
   ? `<div class="top"><button class="mark chip" data-go="machines" aria-label="Machine: ${esc(here())}"><i></i><span class="who">${esc(here())}</span></button><span class="topr chip">${fsBtn()}<button data-go="settings" aria-label="Settings" title="Settings">${icon('menu')}</button></span></div>`
   : bare);
-export const close = (go = 'back') => `<div class="top"><span class="mark">Local AI</span><button class="x" data-go="${go}" aria-label="Close">${icon('close')}</button></div>`;
+export const close = (go = 'back') => `<div class="top">${wordmark}<button class="x" data-go="${go}" aria-label="Close">${icon('close')}</button></div>`;
 export const notice = () => (s.note ? `<button class="notice" data-act="dismiss" title="Dismiss">${esc(s.note)}</button>` : '');
 
 export const running = (r) => `<div class="stats">${stat('Decode tok/s', r.stats?.tps || 0, true)}${stat(r.stats?.ppsEst ? 'Prefill tok/s (est.)' : 'Prefill tok/s', r.stats?.pps || 0)}${stat('Session tokens', r.stats?.used || 0)}<button class="linkstat" data-go="usage">${stat('Lifetime tokens', D().usage.all)}</button></div>`;
