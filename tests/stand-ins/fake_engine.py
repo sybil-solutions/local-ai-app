@@ -1,4 +1,7 @@
-"""A stand-in OpenAI-style engine for the smoke test: /v1/models and /v1/chat/completions, streamed or not, with usage.
+"""A stand-in OpenAI-style engine for the tests: /v1/models and /v1/chat/completions, streamed or not, with usage.
+
+It says it is a stand-in (owned_by: local-ai-tests), so only a copy of the app that is under test shows it: the copy in
+use on the same machine never lists a test model or counts its tokens.
 
 Usage: python3 fake_engine.py --host 127.0.0.1 --port 8080
 Only the standard library, so a host recipe that runs it needs no packages.
@@ -9,6 +12,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL = "fake-engine"
+STARTED = time.time()  # reported the way a real engine reports it, so the app can tell this engine from another
 # Counted the way vLLM counts, and served on /metrics, so a container run of this has usage to read.
 COUNTS = {"prompt_tokens_total": 0, "generation_tokens_total": 0, "request_success_total": 0}
 
@@ -30,9 +34,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.split("?")[0] == "/v1/models":
-            return self.send(200, {"object": "list", "data": [{"id": MODEL, "object": "model"}]})
+            return self.send(200, {"object": "list", "data": [{"id": MODEL, "object": "model", "owned_by": "local-ai-tests"}]})
         if self.path == "/metrics":
-            return self.send(200, "".join('vllm:%s{model_name="%s"} %d\n' % (k, MODEL, v) for k, v in COUNTS.items()).encode(), "text/plain")
+            lines = ['vllm:%s{model_name="%s"} %d\n' % (k, MODEL, v) for k, v in COUNTS.items()]
+            return self.send(200, ("".join(lines) + "process_start_time_seconds %r\n" % STARTED).encode(), "text/plain")
         self.send(404, {"error": "not found"})
 
     def do_POST(self):

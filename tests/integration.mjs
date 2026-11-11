@@ -53,7 +53,7 @@ function serve(handler) {
 // It has already read 30,000 prompt tokens in 10 s before the app first sees it.
 const counters = { prompt_tokens_total: 30000, generation_tokens_total: 0, request_success_total: 0, num_requests_running: 0, request_prefill_kv_computed_tokens_sum: 30000, request_prefill_time_seconds_sum: 10 };
 const outside = await serve((req, body) => {
-  if (req.url === '/v1/models') return [200, { data: [{ id: 'outside-model', max_model_len: 65536 }] }];
+  if (req.url === '/v1/models') return [200, { data: [{ id: 'outside-model', max_model_len: 65536, owned_by: 'local-ai-tests' }] }]; // a stand-in, and it says so
   if (req.url === '/metrics') return [200, Object.entries(counters).map(([k, v]) => `vllm:${k}{model_name="outside-model"} ${v}`).join('\n'), 'text/plain'];
   if (req.method === 'POST' && req.url === '/v1/chat/completions') {
     if (!body.includes('messages')) return [400, { error: 'messages required' }]; // the app's probe for which APIs it has
@@ -107,9 +107,9 @@ const proxy = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ 
 const logFile = join(HOME, 'server.log');
 let server = null, log = '';
 // `nvidia: true` starts it as on an NVIDIA machine: the stand-in nvidia-smi and docker come first on the PATH.
-const FAKE_DOCKER = join(HOME, 'docker');
+const FAKE_DOCKER = join(HOME, 'docker'), THERE_DOCKER = join(HOME, 'docker-second');
 function startServer({ nvidia = false } = {}) {
-  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', HF_HOME: join(HOME, 'hf'),
+  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'),
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
     ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (b) => { log += b; });
@@ -144,7 +144,7 @@ async function cleanup() {
   clearTimeout(watchdog);
   await stopServer();
   let pids = [hostPid];
-  try { for (const f of readdirSync(FAKE_DOCKER).filter((x) => x.endsWith('.json'))) pids.push(JSON.parse(readFileSync(join(FAKE_DOCKER, f), 'utf8')).pid); } catch { /* the Docker path never ran */ }
+  for (const dir of [FAKE_DOCKER, THERE_DOCKER]) { try { for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) pids.push(JSON.parse(readFileSync(join(dir, f), 'utf8')).pid); } catch { /* the Docker path never ran */ } }
   try { pids = pids.concat(Object.values(JSON.parse(readFileSync(join(HOME, 'hosts.json'), 'utf8'))).map((h) => h.pid)); } catch { /* none started */ }
   for (const pid of pids) if (pid && alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
   outside.close(); registry.close(); proxy.close();
@@ -224,24 +224,55 @@ try {
   check('a short prefill does not drag the prefill speed down', after.stats.pps === 2000, `pps ${after.stats.pps}`);
   check('stopping a model the app did not start is refused', (await api(`/api/runs/${port}`, { method: 'DELETE' })).status === 409);
 
-  // A second Local AI, connected to this one. It is followed, not asked again and again: what changes there is here
-  // at once.
+  // A second Local AI, with a model of its own that this machine can also reach on a port here (as it would through
+  // a forwarder). Until the two are connected nothing says whose model it is, so it is shown as running here. Once
+  // they are, it is that machine's: it is not shown as running here, and what it served is counted there, not here.
+  // The machine is followed, not asked again and again: what changes there is here at once.
   const THERE = PORT + 400, thereHome = join(HOME, 'second');
-  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_DISCOVER: '0', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json` } });
+  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_DISCOVER: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
+    LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: THERE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } });
   try {
     await until('the second machine to answer', async () => (await fetch(`http://127.0.0.1:${THERE}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
     const thereKey = JSON.parse(readFileSync(join(thereHome, 'config.json'), 'utf8')).key;
-    const tell = (body) => fetch(`http://127.0.0.1:${THERE}/api/settings`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${thereKey}` }, body: JSON.stringify(body) });
+    const far = async (path, { method = 'GET', body } = {}) => (await fetch(`http://127.0.0.1:${THERE}${path}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${thereKey}` }, body: body && JSON.stringify(body), signal: AbortSignal.timeout(20000) })).json();
+    const tell = (body) => far('/api/settings', { method: 'POST', body });
+    await until('the second machine\'s models', async () => (await far('/api/state')).groups?.some((g) => g.recipes.some((r) => r.id === DOCKED)), 30000);
+    const farPort = (await far('/api/runs', { method: 'POST', body: { recipe: DOCKED } })).id;
+    await until('the second machine\'s model to be ready', async () => (await far('/api/state')).runs.find((r) => r.id === farPort && r.phase === 'ready'), 60000);
+    const mistaken = await until('this machine to find that model on a port here', async () => (await state()).runs.find((r) => r.external && r.id === farPort), 45000);
+    check('a model on a machine that is not connected is shown as running here: nothing says whose it is', mistaken.served === 'fake-engine');
+    // Its speed is measured over there first; what that writes is not usage, there or here.
+    await until('the second machine to have measured its model', async () => (await far('/api/state')).groups.flatMap((g) => g.recipes).find((r) => r.id === DOCKED)?.speed.measured, 120000);
+    await sleep(4500);
+    const countedHere = async () => (await api('/api/usage')).json.days.reduce((n, d) => n + (d.models['fake-engine'] || 0), 0);
+    await chat(farPort, false);
+    const meanwhile = await until('its tokens to be counted here', async () => (await countedHere()) >= 2000, 15000).then(() => true, () => false);
+    check('and what it serves is counted here meanwhile', meanwhile, `${await countedHere()} tokens`);
+
     check('a machine is not connected on a wrong key', (await api('/api/devices', { method: 'POST', body: { url: `http://127.0.0.1:${THERE}`, key: 'wrong' } })).status === 401);
     check('a machine is connected by its address and key', (await api('/api/devices', { method: 'POST', body: { url: `http://127.0.0.1:${THERE}`, key: thereKey } })).status === 200);
     const linked = await until('the machine to be followed', async () => (await state()).devices.find((d) => d.online && d.state), 10000);
     check('a connected machine is shown with what it says about itself', Array.isArray(linked.state.groups) && Array.isArray(linked.state.runs) && linked.state.devices.length === 0);
+    check('it says which engine each of its models is, so the same one reached from here can be told', typeof linked.state.runs.find((r) => r.id === farPort)?.born === 'number');
     await tell({ tone: 'gray' });
     const told = Date.now();
     let arrived = 0;
     while (!arrived && Date.now() - told < 5000) { if ((await state()).devices[0]?.state?.tone === 'gray') arrived = Date.now() - told; else await sleep(40); }
     check('a change on a connected machine is here in under a second', arrived > 0 && arrived < 1000, `${arrived} ms`);
     check('a call is run on the connected machine through this one', (await api('/api/devices/0/usage')).status === 200 && (await api('/api/devices/0/endpoints')).json?.key === thereKey);
+
+    const theirs = await until('the model to be seen as that machine\'s', async () => !(await state()).runs.some((r) => r.id === farPort), 45000).then(() => true, () => false);
+    check('once its machine is connected, a model reached through a port here is not shown as running here', theirs);
+    const hours = (await api('/api/usage')).json.hours;
+    check('what it served is taken out of this machine\'s usage', (await countedHere()) === 0 && !Object.values(hours).some((rows) => 'fake-engine' in rows), `${await countedHere()} tokens still counted here`);
+    const farCount = (await state()).devices[0].state.usage.all;
+    check('and is counted on the machine it runs on', farCount >= 2000, `${farCount} tokens there`);
+    await chat(farPort, false);
+    await until('the second machine to count another answer', async () => (await state()).devices[0].state.usage.all >= farCount + 2000, 15000);
+    await sleep(2500); // long enough for this machine to have counted it too, had it still been counting
+    check('nothing it serves afterwards is counted here', (await countedHere()) === 0 && (await state()).usage.all === (await state()).usage.days.reduce((n, d) => n + d.v, 0), `${await countedHere()} tokens`);
+
+    await far(`/api/runs/${farPort}`, { method: 'DELETE' });
     there.kill('SIGKILL');
     await until('the machine to be seen as gone', async () => (await state()).devices[0]?.online === false, 30000);
     check('a machine that is gone is shown offline, with its last models and nothing running', (await state()).devices[0].state.runs.length === 0);

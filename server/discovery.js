@@ -6,10 +6,16 @@ import { changed, runs, update } from './runs.js';
 import * as usage from './usage.js';
 import { event, PORT, run } from './util.js';
 
+// The stand-in engines of this app's own tests say what they are (owned_by: local-ai-tests). Only a copy under test
+// (LOCAL_AI_STAND_INS=1) shows them, so running the tests on a machine never puts a test model on the Home, or its
+// tokens in the usage, of the copy in use there.
+const STAND_INS = process.env.LOCAL_AI_STAND_INS === '1';
+
 // An engine serves one model, or says what it is on /metrics. A proxy in front of cloud APIs (or of several engines)
 // lists many models and has no engine counters, so it is not shown as a model running here. Returns the model id.
 async function isEngine(url, models) {
   const id = Array.isArray(models) ? models[0]?.id : null;
+  if (id && !STAND_INS && models.some((m) => m?.owned_by === 'local-ai-tests')) return null;
   if (!id || models.length === 1) return id || null;
   try {
     const res = await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(800) });
@@ -18,19 +24,27 @@ async function isEngine(url, models) {
 }
 
 // A forwarder on this machine in front of a model on a connected machine answers exactly like that model, counters
-// and all. It is that machine's model, not one running here. It is recognised by the same model id being ready there
-// and by being the same engine: the same process start time where the engine reports one, else the same counters
-// (read here, there, then here again, the numbers there fall between the two readings here).
+// and all. It is that machine's model, not one running here, and what it serves is that machine's usage. It is
+// recognised by the same model id being there and by being the same engine:
+//   - the engine's process start time, which each machine puts in its snapshot (`born`). Nothing has to be asked of
+//     the other machine, so this works at once, over a slow link, and for a model there that only this forwarder reaches;
+//   - where the engine reports no start time (or that machine runs an older Local AI): the same counters, read here,
+//     there, then here again, with the numbers there falling between the two readings here.
+// Returns that machine's name, or null.
 async function forwards(here, model) {
   const read = async (url) => usage.parseMetrics(await (await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(1500) })).text());
   const totals = (m) => [m.prompt_tokens_total, m.generation_tokens_total ?? m.tokens_predicted_total, m.request_success_total];
+  let mine = null;
   for (const d of machines.views()) {
-    for (const r of d.online && Array.isArray(d.state?.runs) ? d.state.runs : []) {
-      if (r.phase !== 'ready' || r.served !== model || r.reachable === false) continue;
+    for (const r of Array.isArray(d.state?.runs) ? d.state.runs : []) {
+      if (r.served !== model) continue;
       try {
-        const a = await read(here), far = await read(`http://${new URL(d.url).hostname}:${r.id}`);
-        if (a.process_start && far.process_start) { if (a.process_start === far.process_start) return d.name; continue; }
-        const first = totals(a), there = totals(far), second = totals(await read(here));
+        mine ||= await read(here);
+        if (mine.process_start && typeof r.born === 'number') { if (mine.process_start === r.born) return d.name; continue; }
+        if (!d.online || r.phase !== 'ready' || r.reachable === false) continue;
+        const far = await read(`http://${new URL(d.url).hostname}:${r.id}`);
+        if (mine.process_start && far.process_start) { if (mine.process_start === far.process_start) return d.name; continue; }
+        const first = totals(mine), there = totals(far), second = totals(await read(here));
         if (there.some((v) => v > 0) && there.every((v, i) => v !== undefined && first[i] <= v && v <= second[i])) return d.name;
       } catch { /* one of them has no counters, so nothing says it is a forwarder */ }
     }
@@ -64,7 +78,7 @@ export async function discover(now) {
   scanned = now;
   for (const r of runs.values()) {
     const to = r.external && r.phase === 'ready' && await forwards(r.url, r.served);
-    if (to) { runs.delete(r.id); usage.forget(r); event('info', 'run.forwarded', { id: r.id, model: r.served, to }); changed(); }
+    if (to) { runs.delete(r.id); usage.uncount(r); usage.forget(r); event('info', 'run.forwarded', { id: r.id, model: r.served, to }); changed(); } // what it counted while it looked like a model here is taken back
   }
   const mac = process.platform === 'darwin', text = (mac ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnpH'])).stdout;
   // Each listening port with the address to ask it on: loopback, unless it listens on one address only (a server bound
