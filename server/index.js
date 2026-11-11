@@ -51,9 +51,27 @@ function targets() {
   return [...ready(engine.listRuns()).map(toTarget(hostname(), null, 'self')), ...machines.views().flatMap((d) => (d.state ? ready(d.state.runs).filter((r) => r.reachable !== false).map(toTarget(d.name, new URL(d.url).hostname, d.i)) : []))];
 }
 
-function openAgent({ b }) {
-  const target = targets().find((t) => String(t.deviceIndex) === String(b.device) && t.id === b.port) || fail(404, 'That model is not ready');
-  agents.syncPi(targets());
+// A model whose machine does not say its context length (an older Local AI there, or a model it found and has no
+// recipe for) is asked for it directly: vLLM and SGLang report max_model_len in /v1/models. Asked again after ten
+// minutes when it did not answer.
+const windows = new Map();
+async function sized() {
+  const list = targets();
+  await Promise.all(list.filter((t) => !t.ctx).map(async (t) => {
+    const k = `${t.url} ${t.model}`, hit = windows.get(k);
+    if (!hit || (!hit.ctx && Date.now() - hit.at > 600e3)) {
+      let ctx = 0;
+      try { ctx = +(await (await fetch(`${t.url}/v1/models`, { signal: AbortSignal.timeout(4000) })).json()).data?.find((m) => m.id === t.model)?.max_model_len || 0; } catch { /* asked again later */ }
+      windows.set(k, { ctx, at: Date.now() });
+    }
+    t.ctx = windows.get(k).ctx;
+  }));
+  return list;
+}
+
+async function openAgent({ b }) {
+  const all = await sized(), target = all.find((t) => String(t.deviceIndex) === String(b.device) && t.id === b.port) || fail(404, 'That model is not ready');
+  agents.syncPi(all);
   if (target.deviceIndex === 'self') engine.cancelMeasure(target.id);
   return agents.open(b.agent, target, b.folder || config.folder);
 }
@@ -205,7 +223,7 @@ export async function start() {
   await engine.tick();
   await publish();
   every(2000, async () => { await engine.tick(); await publish(); });
-  every(3000, async () => { await machines.poll(); agents.syncPi(targets()); });
+  every(3000, async () => { await machines.poll(); agents.syncPi(await sized()); });
   every(30000, async () => { usage.flush(); await share(); });
   every(3600e3, recipes.refresh);
   every(6 * 3600e3, update.check);
