@@ -8,10 +8,11 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 @property --r { syntax: '<length>'; inherits: true; initial-value: 0px; }
 @property --pr { syntax: '<length>'; inherits: true; initial-value: 0px; }
 
-/* The panel: one screen, 260 units wide, scaled to the window. Header, picture, word and line. */
+/* The panel: one screen, --pw units wide and at least --ph tall, scaled to the window. Header, picture, word and line. */
+:root { --pw: 312px; --ph: 432px; }
 #view { position: fixed; inset: 0; overflow: hidden; cursor: default; touch-action: auto; }
-.frame { position: absolute; width: 260px; top: 0; transform-origin: 0 0; }
-.screen { width: 260px; height: 520px; box-sizing: border-box; padding: 10px 14px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; display: flex; flex-direction: column; gap: 10px; cursor: default; overflow: hidden; position: relative; }
+.frame { position: absolute; width: var(--pw); top: 0; transform-origin: 0 0; }
+.screen { width: var(--pw); height: 520px; box-sizing: border-box; padding: 10px 14px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; display: flex; flex-direction: column; gap: 10px; cursor: default; overflow: hidden; position: relative; }
 .frame .screen { border: 0; border-radius: 0; transition: --pr 1.6s ease-out; }
 .top { display: flex; justify-content: space-between; align-items: center; min-height: 32px; margin-right: 0; gap: 8px; }
 .top .mark { font: 500 13px var(--ui); letter-spacing: -.03em; width: auto; height: 32px; color: var(--text); }
@@ -34,7 +35,7 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .top .topr.chip button { width: 30px; height: 30px; border-radius: 15px; color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 .chip button:hover, .nav .mark.chip:hover { background-color: rgba(255,255,255,.08); }
 .topr { display: flex; align-items: center; }
-canvas.art { display: block; width: 260px; height: 128px; margin: 0 -14px; flex: none; }
+canvas.art { display: block; width: var(--pw); height: 128px; margin: 0 -14px; flex: none; }
 .word { font: var(--ds) var(--dw) var(--dsize)/1.05 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); text-align: center; text-wrap: balance; }
 .line { font: 400 13px/1.4 var(--ui); color: var(--muted); text-align: center; min-height: 20px; font-variant-numeric: tabular-nums; }
 .sp { flex: 1; }
@@ -264,11 +265,11 @@ html:not([data-bg=none]) .frame .screen:has(canvas.art) { position: relative; is
 html:not([data-bg=none]) .frame .screen canvas.art { visibility: hidden; }
 html:not([data-bg=none]) .frame .screen:has(canvas.art)::before, html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { content: ''; position: absolute; inset: var(--py, 0px) 0 0 0; z-index: -1; pointer-events: none; background-image: none, var(--pimg); background-position: 0 0, var(--ppos); background-size: auto, var(--psz); background-repeat: no-repeat; -webkit-mask-image: linear-gradient(#000 156px, transparent 281px); mask-image: linear-gradient(#000 156px, transparent 281px); }
 html:not([data-bg=none]) .frame .screen:has(canvas.art)::before { background-image: none, var(--pimg); filter: grayscale(1) brightness(.4) contrast(1.05); }
-html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { filter: grayscale(1) brightness(.84) contrast(1.08); -webkit-mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); -webkit-mask-composite: source-in; mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-composite: intersect; }
+html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { filter: grayscale(1) brightness(.84) contrast(1.08); -webkit-mask-image: radial-gradient(circle at calc(var(--pw) / 2) 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); -webkit-mask-composite: source-in; mask-image: radial-gradient(circle at calc(var(--pw) / 2) 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-composite: intersect; }
 html[data-tone=color] .frame .screen:has(canvas.art)::after { filter: brightness(.9) contrast(1.04); }
 /* Under another block the picture starts at its own block and fades in, instead of reaching up behind what is above it. */
 html:not([data-bg=none]) .frame .screen.lowpic:has(canvas.art)::before { -webkit-mask-image: linear-gradient(transparent 52px, #000 100px, #000 156px, transparent 281px); mask-image: linear-gradient(transparent 52px, #000 100px, #000 156px, transparent 281px); }
-html:not([data-bg=none]) .frame .screen.lowpic:has(canvas.art)::after { -webkit-mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(transparent 52px, #000 100px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(transparent 52px, #000 100px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); }
+html:not([data-bg=none]) .frame .screen.lowpic:has(canvas.art)::after { -webkit-mask-image: radial-gradient(circle at calc(var(--pw) / 2) 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(transparent 52px, #000 100px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-image: radial-gradient(circle at calc(var(--pw) / 2) 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(transparent 52px, #000 100px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); }
 
 /* Desktop layout: the top bar, Home along the bottom, and pages. */
 #fs { display: none; }

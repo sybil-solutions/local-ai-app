@@ -1,11 +1,11 @@
 // The picture behind everything. One choice lights both layouts: dark when off, lit outward from one point as a model starts.
-import { s, send, store } from './state.js';
+import { PANEL as SIZE, s, send, store } from './state.js';
 
 const root = document.documentElement, frame = document.querySelector('#art'), picker = document.querySelector('#picker');
 // Where the light starts in each picture (the gap between the fingers; the dove), where that point sits
 // in the panel, and where it sits on the desktop. The fresco is shown in the panel at a scale chosen for the hands.
 const PICS = { clouds: { url: '/clouds.webp', x: 1100, y: 760, w: 2000, h: 1611 }, fresco: { url: '/fresco.webp', x: 982, y: 566, w: 2000, h: 1015, k: 0.56 } };
-const FIRST = 'clouds', PANEL = { x: 130, y: 116, top: 368 }, DESK = [0.5, 0.36];
+const FIRST = 'clouds', PANEL = { x: SIZE.w / 2, y: 116, top: 368 }, DESK = [0.5, 0.36];
 let own = null, redraw = () => {};
 export const onChange = (fn) => { redraw = fn; };
 const picture = () => (root.dataset.bg === 'own' ? own : PICS[root.dataset.bg] || PICS[FIRST]);
@@ -21,7 +21,7 @@ export function applyBg() {
   root.dataset.tone = s.snap?.tone || store('la-tone') || tone;
   store('la-bg', choice);
   store('la-tone', root.dataset.tone);
-  const pic = picture(), k = pic.k || Math.max(260 / pic.w, PANEL.top / pic.h);
+  const pic = picture(), k = pic.k || Math.max(SIZE.w / pic.w, PANEL.top / pic.h);
   for (const img of frame.querySelectorAll('img')) if (img.getAttribute('src') !== pic.url) img.src = pic.url;
   root.style.setProperty('--pimg', `url("${pic.url}")`);
   root.style.setProperty('--psz', `${pic.w * k}px ${pic.h * k}px`);
@@ -77,7 +77,7 @@ export function fitArt(glow) {
 // With no picture chosen, the panel draws the two cut-out hands instead.
 const adam = Object.assign(new Image(), { src: '/adam.webp' }), god = Object.assign(new Image(), { src: '/god.webp' });
 function drawHands(c, t) {
-  const CW = 260, CH = 128, { pose } = c.dataset, g = c.getContext('2d');
+  const CW = SIZE.w, CH = 128, { pose } = c.dataset, g = c.getContext('2d');
   if (c.width !== CW * 2) { c.width = CW * 2; c.height = CH * 2; }
   g.setTransform(2, 0, 0, 2, 0, 0);
   g.clearRect(0, 0, CW, CH);
