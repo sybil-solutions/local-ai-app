@@ -5,11 +5,11 @@ import { Button, CopyField, Field, LinkButton, ScreenTabs, TextLink, Toggle } fr
 import { HomeBlocks, OpenButtons, StartButton, Status, StopButton } from './components/home.js';
 import { Grip } from './components/icons.js';
 import { BareBar, Box, CloseBar, Head, HomeBar, KeyValue, Label, Line, NavRow, Note, ProgressBar, Row, Scroll, Spacer, SwitchRow, VersionFoot } from './components/layout.js';
-import { EditButton, EditForm, ListRow, meta, ModelCard, ModelDetail, OTHERS, UseButton } from './components/models.js';
+import { EditButton, EditForm, ListRow, meta, ModelCard, ModelDetail, UseButton } from './components/models.js';
 import { UsageBody } from './components/usage.js';
 import { ago, count, mins } from './format.js';
 import { data, html } from './html.js';
-import { all, D, here, homeCfg, model, newer, others, picks, run, s } from './state.js';
+import { all, D, here, homeCfg, model, newer, picks, run, s, sections } from './state.js';
 
 // Another machine that can run models, offered when this one can't.
 export function Elsewhere() {
@@ -108,7 +108,7 @@ export const SCREENS = {
   },
   addmachine: () => html`${CloseBar()}${Head('Add machine')}${typed('host', 'Address', 'http://100.90.62.80:18700')}${typed('mkey', 'Key', 'Not needed on your Tailscale')}${Spacer}${Button({ label: 'Add machine', act: 'connect', kind: 'go' })}`,
   usage: () => html`${CloseBar()}${Head('Usage')}${Scroll(UsageBody())}`,
-  'adv-models': () => html`${CloseBar()}${Head('Models')}${Label('Runs on this machine, newest first')}${Scroll(html`${all().map(ListRow)}${others().length > 0 && html`${Label(OTHERS, { group: true })}${others().map(ListRow)}`}`)}`,
+  'adv-models': () => html`${CloseBar()}${Head('Models')}${Label(`${all().length} this machine can start, largest setup first`)}${Scroll(sections().map((sec) => html`${Label(sec.label, { group: true })}${sec.rows.map(ListRow)}`))}`,
   'model-page': () => {
     const r = model(s.modelOpen);
     if (!r) return html`${CloseBar()}${Note('This model is no longer in the list')}`;

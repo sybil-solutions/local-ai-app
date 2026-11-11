@@ -169,10 +169,11 @@ try {
 
   // 5. Models: the list, a model's page, and editing a recipe and putting it back.
   await press('[data-nav=adv-models]');
-  check('Models lists all three', (await page(`${seen('.mitem')}.length`)) === 4 && /3 run on this machine/.test(await text('.mleft .psub')));
-  // A recipe the registry has for this card that the app will not start is listed too, under its own heading, with the reason.
+  check('Models lists all three', (await page(`${seen('.mitem')}.length`)) === 4 && /3 this machine can start/.test(await text('.mleft .psub')));
+  // The list is headed by the setup its recipes are for. A recipe the registry has for this card that the app will
+  // not start is listed too, after the ones it can, with the reason.
   const held = await text('.mitem[data-id="e2e/held"]');
-  check('a recipe the app will not start is listed with the reason, not left out', /Held Four/.test(held) && /Uses --privileged/.test(held) && /not started by this app/.test(await text('.mlist .label')), held);
+  check('a recipe the app will not start is listed with the reason, not left out', /Held Four/.test(held) && /Uses --privileged/.test(held) && (await text('.mlist .label')) === 'Smoke Test GPU' && (await page(`${seen('.mitem')}.at(-1).dataset.id`)) === 'e2e/held', held);
   await press('.mitem[data-id="e2e/held"]');
   const heldPage = await shows('its page', '.mright', /From the recipe/);
   check('its page says why, shows the notes from its source and what it needs, and offers no start', /Uses --privileged/.test(await text('.mright .why')) && /Measured on the reference host/.test(heldPage) && /Needs 1 GB of memory beside the GPUs/.test(heldPage) && (await page('document.querySelector(".macts .btn").disabled')) === true, heldPage.slice(0, 300));

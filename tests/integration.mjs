@@ -115,6 +115,12 @@ catalog.recipes[NOTED] = { ...docked({ setup: 'NEEDS: one card. Measured on the 
   resources: { ipcLock: true, memlockUnlimited: true, memoryBytes: 2 ** 33, memorySwapBytes: 2 ** 33 }, weights: [{ repo: 'org/kept', revision: REV, at: '/models' }] }), model: 'kept-1' };
 catalog.recipes[CHANGED] = { ...docked({ weights: [{ repo: 'org/changed', revision: REV, at: '/models' }] }), model: 'changed-1' };
 catalog.recipes[HUNGRY] = { ...docked({ needs: { host_ram_gb: 1e6 } }), model: 'hungry-1' };
+// Setups, as the registry names them: one card, the machine's two cards together, and two machines of the card.
+// One recipe needs both cards; another is one engine across two machines.
+const PAIR = 'smoke/gpu/pair.docker.2x', SPREAD = 'smoke/gpu/spread.docker.2x';
+catalog.cards['smoke-gpu'].setups = [{ cards: 1, machines: 1, label: 'Smoke Test GPU' }, { cards: 2, machines: 1, label: '2 × Smoke Test GPU (one machine)' }, { cards: 1, machines: 2, label: '2 × Smoke Test GPU' }];
+catalog.recipes[PAIR] = { ...docked({ cards: 2 }), model: 'pair-1', proof: [{ tps: 20 }] };
+catalog.recipes[SPREAD] = { ...docked({ machines: 2, flags: ['--network host'] }), model: 'spread-1' };
 const HOSTED = 'smoke/chip/fake.host', TAMPERED = 'smoke/chip/tampered.host';
 if (APPLE) {
   const sysctl = (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', timeout: 5000 }).trim();
@@ -378,6 +384,13 @@ try {
     check('and lists it with the reason, so nothing the registry has for the card goes missing', refused.some((r) => r.id === id && typeof r.why === 'string' && r.why.length > 3), JSON.stringify(refused.find((r) => r.id === id)?.why));
   }
   check('every recipe the registry has for the card is either offered or listed with why not', Object.entries(catalog.recipes).filter(([, r]) => r.card === 'smoke-gpu').every(([id]) => offered.includes(id) !== refused.some((r) => r.id === id)));
+  // Recipes are listed by the setup they are for. This machine has two cards: the registry's two-card setup comes
+  // first and gives a pick; a recipe that is one engine across two machines is listed under its own setup, with why not.
+  const setups = nv.groups.find((g) => g.card === 'smoke-gpu')?.setups || [], picked = Object.values(nv.groups.find((g) => g.card === 'smoke-gpu')?.tiers || {}).filter(Boolean).map((r) => r.id);
+  check('lists the setups this machine\'s cards can be part of, largest first, as the registry names them', setups.map((s) => s.label).join(' | ') === '2 × Smoke Test GPU (one machine) | 2 × Smoke Test GPU | Smoke Test GPU', JSON.stringify(setups));
+  check('a recipe for both of the machine\'s cards is offered, and is one of the picks', offered.includes(PAIR) && picked.includes(PAIR) && nv.groups.flatMap((g) => g.recipes).find((r) => r.id === PAIR)?.cards === 2, picked.join(' '));
+  const spread = refused.find((r) => r.id === SPREAD);
+  check('a recipe that is one engine across two machines is listed under its setup, says so, and is not started', spread?.machines === 2 && /Runs across 2 machines/.test(spread?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: SPREAD } })).status === 409, spread?.why);
   const hungry = refused.find((r) => r.id === HUNGRY);
   check('a recipe that needs more memory than this machine has says so and is not started', /Needs 1000000 GB of memory/.test(hungry?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: HUNGRY } })).status === 409, hungry?.why);
   check('notes from a recipe\'s source do not keep it from being offered', offered.includes(NOTED));

@@ -81,12 +81,13 @@ export function problemWith(recipe, { trusted = false } = {}) {
   const launch = recipe?.launch;
   if (!launch || typeof launch !== 'object') return 'Has no launch';
   if (launch.kind === 'host') return hostProblem(launch) || (recipe.proof?.[0]?.failed ? 'Failed its last test' : null);
-  if (typeof launch.image !== 'string' || !launch.image) return 'Has no container image';
+  // One engine spread over several machines is started on each of them in step, which this app does not do yet.
+  if (whole(launch.machines, 1) > 1) return `Runs across ${whole(launch.machines, 1)} machines; this app starts a model on one`;
+  if (typeof launch.image !== 'string' || !launch.image) return launch.build ? 'Image must be built from source' : 'Has no container image';
   if (trusted) return null;
   if (launch.build) return 'Image must be built from source';
   if (launch.prepare) return 'Needs a step before the engine that this app does not run';
   if (launch.companion) return 'Needs a second container beside the engine';
-  if ((launch.machines || 1) > 1) return 'Needs several machines';
   if (resourceProblem(launch)) return resourceProblem(launch);
   if (!/^[a-z0-9][\w./:-]*@sha256:[0-9a-f]{64}$/i.test(launch.image)) return 'Image is not pinned';
   // Anything a recipe gives Docker must be of the plain shape expected, so none of it can pass for something else.
@@ -151,7 +152,7 @@ function view(id) {
   const text = `${(recipe.launch.args || []).join(' ')} ${recipe.launch.config?.text || ''}`;
   return {
     id, local: isLocal(id), host: recipe.launch.kind === 'host', approve: asks(id), name: String(recipe.name || model?.name || recipe.model), card: recipe.card,
-    cards: whole(recipe.launch.cards, 1), engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: whole(recipe.launch.ctx),
+    cards: whole(recipe.launch.cards, 1), machines: whole(recipe.launch.machines, 1), engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: whole(recipe.launch.ctx),
     vision: !!recipe.launch.vision, tps: measured?.c1 ?? amount(proof?.tps), smart: amount(aa?.index), seqs: whole(recipe.launch.seqs, 1),
     speed: { c1: measured?.c1 ?? amount(proof?.tps), c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: amount(own(catalog.builds, recipe.weights)?.size_gb),
     released: typeof model?.released === 'string' ? model.released : null, loadS: loadSeconds(id),
@@ -239,9 +240,35 @@ function listed(id, card, count) {
   }
 }
 
-// One group per kind of card on the machine: its three picks, everything else it can launch (`recipes`), and what
-// the registry holds for these cards that this app will not start, each with the reason (`blocked`). Nothing the
-// registry has for the machine is left out without a word.
+// The setups the registry knows for a card that this machine's cards can be part of: one card, several in this
+// machine, and several machines of the card working together. Largest first; one the registry does not name but
+// has a recipe for is named here.
+function setupsOf(card, count, all) {
+  const name = own(catalog.cards, card)?.name || card, known = Array.isArray(own(catalog.cards, card)?.setups) ? own(catalog.cards, card).setups : [];
+  const key = (s) => `${s.cards}x${s.machines}`, found = new Map();
+  for (const s of known) {
+    const cards = whole(s?.cards, 1), machines = whole(s?.machines, 1);
+    if (cards <= count && typeof s?.label === 'string') found.set(key({ cards, machines }), { cards, machines, label: s.label.slice(0, 80) });
+  }
+  for (const r of all) {
+    if (!found.has(key(r))) found.set(key(r), { cards: r.cards, machines: r.machines, label: r.cards * r.machines === 1 ? name : `${r.cards * r.machines} × ${name}${r.machines === 1 ? ' (one machine)' : ''}` });
+  }
+  const used = new Set(all.map(key));
+  return [...found.values()].filter((s) => used.has(key(s))).sort((a, b) => b.cards * b.machines - a.cards * a.machines || a.machines - b.machines);
+}
+// The three picks. On a machine with several cards they come from the largest setup in this machine that has a
+// model it can start (four cards run a model one card cannot); a pick that setup has no model for is the one-card pick.
+function picksOf(list, setups) {
+  const whole_ = tiers(latestOfEachFamily(list));
+  const many = setups.filter((s) => s.machines === 1 && s.cards > 1).map((s) => list.filter((r) => r.cards === s.cards && r.machines === 1)).find((rs) => rs.length);
+  if (!many) return whole_;
+  const top = tiers(many), names = new Set(Object.values(top).filter(Boolean).map((r) => r.name)), rest = tiers(latestOfEachFamily(list.filter((r) => !names.has(r.name))));
+  return { fastest: top.fastest || rest.fastest, balanced: top.balanced || rest.balanced, smartest: top.smartest || rest.smartest };
+}
+
+// One group per kind of card on the machine: its three picks, everything it can launch (`recipes`), what the
+// registry holds for these cards that this app will not start, each with the reason (`blocked`), and the setups
+// those belong to (`setups`). Nothing the registry has for the machine's cards is left out without a word.
 export function groups(gpus) {
   const byCard = new Map();
   for (const gpu of gpus) {
@@ -251,8 +278,8 @@ export function groups(gpus) {
   }
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
-    const all = ids.flatMap((id) => listed(id, card, members.length)).sort((a, b) => (b.tps || 0) - (a.tps || 0)), list = all.filter((r) => !r.why);
-    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(latestOfEachFamily(list)), recipes: list, blocked: all.filter((r) => r.why) };
+    const all = ids.flatMap((id) => listed(id, card, members.length)).sort((a, b) => (b.tps || 0) - (a.tps || 0)), list = all.filter((r) => !r.why), setups = setupsOf(card, members.length, all);
+    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: picksOf(list, setups), recipes: list, blocked: all.filter((r) => r.why), setups };
   });
 }
 
