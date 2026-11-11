@@ -22,6 +22,8 @@ node server/index.js        # or just the server: open http://127.0.0.1:18700
 npm install && npm start    # or the same page in an Electron window, from source
 ```
 
+Run from source on a Mac, the Dock and the first word of the menu bar say Electron, because that is the name of the program `npm start` runs. The installed app is Local AI everywhere.
+
 The server needs Node 20 or newer (the Mac app and `install.sh` bring it). Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the app.
 
 A page opened in a browser asks for the machine's key once (the app's own window, and the Omarchy app-menu entry, are handed it). The key is under Settings › API endpoints, and in `~/.local-ai/config.json`.

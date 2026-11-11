@@ -5,7 +5,13 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, session, shell } from 'electron';
+
+// The app is Local AI, whichever way it was started. The installed app says so by itself. Run from source, the
+// program doing the running is Electron's own, and the Dock and the menu bar's first word take its name; everything
+// the app can name itself (its menus, About, the folder its window's settings are kept in) is named here.
+const NAME = 'Local AI';
+app.setName(NAME);
 
 const PORT = +(process.env.LOCAL_AI_PORT || 18700);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -79,7 +85,16 @@ ipcMain.handle('compact', (e, on, height, width) => {
   if (win && ours(e.senderFrame?.url || '')) fit(win, on === true, +height || 0, +width || 0);
 });
 
+// The menu bar: the app's own menu, editing (so copy and paste work in a field), the view and the window. Electron's
+// stock menu also opens the developer tools, which the installed app has no use for.
+function setMenu() {
+  const view = [{ role: 'reload' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, ...(app.isPackaged ? [] : [{ type: 'separator' }, { role: 'toggleDevTools' }])];
+  Menu.setApplicationMenu(Menu.buildFromTemplate([...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []), { role: 'editMenu' }, { label: 'View', submenu: view }, { role: 'windowMenu' }]));
+  app.setAboutPanelOptions({ applicationName: NAME, applicationVersion: app.getVersion(), version: '' });
+}
+
 async function boot() {
+  setMenu();
   app.dock?.setIcon(ICON); // run from source there is no bundle to carry the icon
   session.defaultSession.setPermissionRequestHandler((_contents, permission, done) => done(ALLOWED.has(permission)));
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => ALLOWED.has(permission));
