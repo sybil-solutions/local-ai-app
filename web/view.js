@@ -40,7 +40,7 @@ function paint(force) {
   } else {
     swap(panel, html`${SCREENS[id]()}${Notice()}`, id, force, '.scroll');
     const picture = $('canvas.art', panel), lower = picture ? picture.offsetTop - 52 : 0; // the picture sits where its block is; 52 is where the first block starts
-    panel.style.setProperty('--pr', `${picture ? lit(picture.dataset) * 460 : 0}px`);
+    panel.style.setProperty('--lit', picture ? lit(picture.dataset) : 0);
     panel.style.setProperty('--py', `${lower}px`);
     panel.classList.toggle('lowpic', lower > 0);
     fitPanel();
