@@ -179,6 +179,9 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 [data-tone=gray] .bgthumb { filter: grayscale(1); }
 .bg-own { background-image: var(--own, none); background-size: cover; background-position: center; }
 .bg-none { background: var(--bg); }
+.bg-clouds { background: url(/clouds.webp) 60% 30% / cover no-repeat; }
+.dove { height: 16px; width: auto; flex: none; margin-right: 7px; }
+.mark.chip .dove { margin-right: 0; }
 .bgrow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgrow > span { min-width: 0; }
 

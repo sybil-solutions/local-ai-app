@@ -15,6 +15,7 @@
   },
   "build": {
     "appId": "ai.sybilsolutions.local",
+    "icon": "electron/icon.png",
     "files": [
       "electron/**",
       "server/**",

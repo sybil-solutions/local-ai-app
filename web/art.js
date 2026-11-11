@@ -1,24 +1,27 @@
-// The painting. One choice lights both layouts: dark when off, lit outward from the fingertips as a model starts.
+// The picture behind everything. One choice lights both layouts: dark when off, lit outward from one point as a model starts.
 import { s, send, store } from './state.js';
 
 const root = document.documentElement, frame = document.querySelector('#art'), picker = document.querySelector('#picker');
-// Where the gap between the fingers is in the picture, where it sits in the panel, and where it sits on the desktop.
-const FRESCO = { url: '/fresco.webp', x: 982, y: 566, w: 2000, h: 1015 }, PANEL = { x: 130, y: 116, top: 368 }, DESK = [0.5, 0.36];
+// Where the light starts in each picture (the gap between the fingers; the crown of the cloud), where that point sits
+// in the panel, and where it sits on the desktop. The fresco is shown in the panel at a scale chosen for the hands.
+const PICS = { clouds: { url: '/clouds.webp', x: 1190, y: 500, w: 2000, h: 1611 }, fresco: { url: '/fresco.webp', x: 982, y: 566, w: 2000, h: 1015, k: 0.56 } };
+const FIRST = 'clouds', PANEL = { x: 130, y: 116, top: 368 }, DESK = [0.5, 0.36];
 let own = null, redraw = () => {};
 export const onChange = (fn) => { redraw = fn; };
-const picture = () => (root.dataset.bg === 'own' ? own : FRESCO);
+const picture = () => (root.dataset.bg === 'own' ? own : PICS[root.dataset.bg] || PICS[FIRST]);
 
-// The picture (fresco, own or none) and its tone (gray or color) are two settings. Older versions saved one value,
+// The picture (clouds, fresco, own or none) and its tone (gray or color) are two settings. The sky and your own
+// picture start in colour, the fresco in grey. Older versions saved one value,
 // 'gray' or 'color', meaning the fresco in that tone; an own picture was always in colour.
 const LEGACY = { gray: ['fresco', 'gray'], color: ['fresco', 'color'] };
 export function applyBg() {
-  const saved = s.snap?.background || store('la-bg') || 'fresco';
-  const [choice, tone] = LEGACY[saved] || [saved, saved === 'own' ? 'color' : 'gray'];
-  root.dataset.bg = choice === 'own' && !own ? 'fresco' : choice;
+  const saved = s.snap?.background || store('la-bg') || FIRST;
+  const [choice, tone] = LEGACY[saved] || [saved, saved === 'fresco' ? 'gray' : 'color'];
+  root.dataset.bg = choice === 'own' && !own ? FIRST : choice;
   root.dataset.tone = s.snap?.tone || store('la-tone') || tone;
   store('la-bg', choice);
   store('la-tone', root.dataset.tone);
-  const pic = picture(), k = pic === FRESCO ? 0.56 : Math.max(260 / pic.w, PANEL.top / pic.h);
+  const pic = picture(), k = pic.k || Math.max(260 / pic.w, PANEL.top / pic.h);
   for (const img of frame.querySelectorAll('img')) if (img.getAttribute('src') !== pic.url) img.src = pic.url;
   root.style.setProperty('--pimg', `url("${pic.url}")`);
   root.style.setProperty('--psz', `${pic.w * k}px ${pic.h * k}px`);

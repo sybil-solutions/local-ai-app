@@ -11,7 +11,7 @@ const existing = () => fetch(`${URL_}/api/health`, { signal: AbortSignal.timeout
 // The panel is drawn 260 by 480 and shown at up to one and a half times that. When the page shows the panel, the
 // window takes exactly that shape, so there is nothing around it, and keeps the shape while it is resized. When the
 // page goes back to the desktop layout the window gets back the size it had.
-const PANEL = { w: 260, h: 480, most: 1.5 }, ROOMY = { w: 420, h: 500 };
+const PANEL = { w: 260, h: 480, most: 1.5 }, ROOMY = { w: 640, h: 500 }; // the desktop layout needs 640; narrower than that the page would show the panel with room around it
 let before = null;
 function fit(win, compact, tries = 0) {
   if (win.isDestroyed()) return;
@@ -35,10 +35,13 @@ function fit(win, compact, tries = 0) {
 }
 ipcMain.handle('compact', (e, on) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) fit(win, on === true); });
 
+const ICON = join(dirname(fileURLToPath(import.meta.url)), 'icon.png');
+
 async function boot() {
+  app.dock?.setIcon(ICON); // run from source there is no bundle to carry the icon
   let server = null;
   if (!(await existing())) server = await (await import('../server/index.js')).start();
-  const win = new BrowserWindow({ width: 1080, height: 820, minWidth: ROOMY.w, minHeight: ROOMY.h, backgroundColor: '#161616', autoHideMenuBar: true, title: 'Local AI',
+  const win = new BrowserWindow({ width: 1080, height: 820, minWidth: ROOMY.w, minHeight: ROOMY.h, backgroundColor: '#161616', autoHideMenuBar: true, title: 'Local AI', icon: ICON,
     webPreferences: { preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs') } });
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   await win.loadURL(URL_);

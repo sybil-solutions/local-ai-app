@@ -13,7 +13,7 @@ const SECTION = {
 const SETTINGS = [['home-edit', 'Home screen'], ['background', 'Background'], ['endpoints', 'API endpoints'], ['registry', 'Registry'], ['hf-token', 'Hugging Face token']];
 
 export function navBar(page) {
-  if (!s.snap) return '<header class="nav"><span class="mark chip"><i></i><span>Local AI</span></span></header>';
+  if (!s.snap) return '<header class="nav"><span class="mark chip"><img class="dove" src="/dove.svg" alt=""><span>Local AI</span></span></header>';
   const now = page ? SECTION[page] : 'home', r = D() && (s.dev === -1 || s.snap.devices[s.dev]?.online) && run(); // an offline machine's last snapshot is not live
   const links = NAV.map(([k, label, to], i) => `<button data-nav="${to}" title="${label} (${i + 1})"${now === k ? ' aria-current="page"' : ''}>${label}</button>`).join('');
   const live = r?.phase === 'ready' ? `<button class="nlive" data-nav="home" aria-label="${esc(r.name)} is running. Go to Home"><i></i><span class="nm">${esc(r.name)}</span><em>${fmt(r.stats?.tps || 0)} tok/s</em></button>` : '';
