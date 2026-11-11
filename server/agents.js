@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
+import * as dsh from './dsh.js';
 import { at, config, event, fail, HOME, once, own, run, saveConfig, writeJson } from './util.js';
 
 const openai = (url, model) => ({ env: { OPENAI_BASE_URL: `${url}/v1`, OPENAI_API_BASE: `${url}/v1`, OPENAI_API_KEY: 'local', OPENAI_MODEL: model }, args: [] });
@@ -125,24 +126,15 @@ const providersFor = (targets) => Object.fromEntries(targets.map((t) => [t.key, 
     input: t.vision ? ['text', 'image'] : ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { supportsDeveloperRole: false } }],
 }]));
 // The extension reads the model list each time Pi starts, so it is always what is running now. A missing or broken
-// list registers nothing, so Pi still starts. `prefer` is the model last opened in T3 Code and the folder it was opened
-// on: an app that drives Pi for you starts a new session there on that model, where Pi would have used its own default.
-// A terminal Pi is told its model on the command line, and a session you resume keeps the model it had.
+// list registers nothing, so Pi still starts. It only adds models: which one a session uses is always said outright,
+// on the command line for a terminal Pi and by its exact name (la-<machine>-<port>/<model>) for an app that drives Pi.
+// Pi's own default is never changed.
 const EXTENSION = `// Written by Local AI. Registers each model Local AI is running as a provider. Safe to delete.
 import { readFileSync } from 'node:fs';
 const read = () => { try { return JSON.parse(readFileSync(${JSON.stringify(piModels)}, 'utf8')); } catch { return {}; } };
 export default function (pi) {
   const { providers = {} } = read();
   for (const [id, provider] of Object.entries(providers)) pi.registerProvider(id, provider);
-  pi.on?.('session_start', async (event, ctx) => {
-    try {
-      const { prefer } = read();
-      if (ctx.mode !== 'rpc' || !['startup', 'new'].includes(event.reason) || !prefer || !providers[prefer.provider]) return;
-      if (ctx.cwd !== prefer.folder && !String(ctx.cwd).startsWith(prefer.folder + '/')) return;
-      const model = ctx.modelRegistry.find(prefer.provider, prefer.model);
-      if (model) await pi.setModel(model);
-    } catch { /* Pi keeps its own default */ }
-  });
 }
 `;
 const writeExtension = (file) => { if (!existsSync(file) || readFileSync(file, 'utf8') !== EXTENSION) writeFileSync(file, EXTENSION, { mode: 0o600 }); };
@@ -161,10 +153,9 @@ function sharedIsOurs() {
 }
 
 let lastModels = null;
-// Keeps the extension's model list equal to what is running. The preferred model is listed only while it runs.
+// Keeps the extension's model list equal to what is running.
 export function syncPi(targets) {
-  const providers = providersFor(targets), prefer = config.prefer && providers[config.prefer.provider] ? config.prefer : undefined;
-  const text = JSON.stringify({ providers, prefer });
+  const text = JSON.stringify({ providers: providersFor(targets) });
   if (text === lastModels) return;
   mkdirSync(at('agents'), { recursive: true, mode: 0o700 });
   writeJson(piModels, JSON.parse(text));
@@ -228,28 +219,46 @@ const launched = (cmd, args) => new Promise((done) => {
   child.once('spawn', () => { child.unref(); done(true); });
 });
 
-// T3 Code: Pi inside it is given the extension and told which model to start on in this folder, then the folder is
-// opened in the desktop app. T3 Code's own choice of provider for a new thread is its to keep; under Pi, "Pi default"
-// is now this model.
+// A model as an app's own list shows it: "glm-5.3-flash · workstation".
+const titleOf = (t) => `${t.name} · ${t.device}`;
+
+// T3 Code: a thread is started on this exact model. T3 Code runs Pi itself and keeps a model for every thread, so
+// Pi is given the extension (which lists the model as la-<machine>-<port>/<model>) and the thread is asked for under
+// that name, with Pi as its provider. Nothing is left to "Pi default", which would be T3 Code's choice of model, not
+// this one. A thread has to begin with a message, so it begins by asking the model to say it is there: the answer
+// is the proof that the thread is on the model and the model works.
+const T3_PROVIDER = 'pi';
 async function openT3(target, folder, targets) {
   mkdirSync(join(piHome(), 'extensions'), { recursive: true, mode: 0o700 });
   writeExtension(piShared());
-  config.prefer = { folder, provider: target.key, model: target.model };
-  saveConfig();
   syncPi(targets);
-  const bin = binOf('t3'), out = await run(bin, ['app', folder], { timeout: 30000 });
-  if (out.code) fail(502, `T3 Code did not open: ${(out.stderr.trim() || out.stdout.trim()).split('\n').pop().slice(0, 200) || 'is it running?'}`);
-  event('info', 'harness.open', { agent: 't3', model: target.model, opened: true });
-  return { opened: true, command: `${q(bin)} app ${q(folder)}`, note: `In T3 Code, choose Pi. Its default there is now ${target.name} · ${target.device}` };
+  if (config.prefer) { delete config.prefer; saveConfig(); } // older versions kept a model here for "Pi default" to pick up
+  const bin = binOf('t3'), model = `${target.key}/${target.model}`, title = titleOf(target);
+  const hello = `Local AI opened this thread on ${target.name}, running on ${target.device}. Reply with one short line to say you are ready.`;
+  const start = () => run(bin, ['thread', 'start', folder, hello, '--provider', T3_PROVIDER, '--model', model, '--title', title, '--json'], { timeout: 60000 });
+  const said = (out) => (out.stderr.trim() || out.stdout.trim()).split('\n').pop().slice(0, 200);
+  let started = await start();
+  // A folder T3 Code has not seen yet is added as a project first.
+  if (started.code && /No T3 Code project matches/.test(`${started.stdout}${started.stderr}`) && !(await run(bin, ['project', 'add', folder], { timeout: 30000 })).code) started = await start();
+  let thread = null;
+  try { thread = JSON.parse(started.stdout.trim().split('\n').pop()).threadId || null; } catch { /* it did not start: said below */ }
+  const shown = await run(bin, ['app', folder], { timeout: 30000 });
+  if (!thread && shown.code) fail(502, `T3 Code did not open: ${said(shown) || 'is it running?'}`);
+  event(thread ? 'info' : 'warn', 'harness.open', { agent: 't3', model, thread, opened: true, ...(thread ? {} : { error: said(started) }) });
+  const command = `${q(bin)} thread start ${q(folder)} ${q(hello)} --provider ${T3_PROVIDER} --model ${q(model)}`;
+  return { opened: true, command, thread, note: thread ? `A T3 Code thread is open on ${title} (Pi, ${model})` : `T3 Code is open, but no thread could be started: ${said(started) || 'it gave no reason'}. Start one there and choose Pi, then ${model}` };
 }
 
-// DeepSeek Harness keeps its own list of models, and each needs a key from its own credential store, so this only
-// opens it. The model has to be added there by hand.
-async function openDsh(target) {
+// DeepSeek Harness: the running models are written into its settings as providers named as Pi's are, and the one
+// opened becomes the model its new conversations start on (see dsh.js). Then the app is opened.
+async function openDsh(target, _folder, targets) {
+  const models = targets.filter((t) => !t.apis || t.apis.includes('chat')).map((t) => ({ key: t.key, model: t.model, title: titleOf(t), url: t.url, ctx: t.ctx || WINDOW, vision: !!t.vision }));
+  let why;
+  try { why = dsh.wire(models, { key: target.key, model: target.model }); } catch (e) { why = e.message; }
   const bundle = binOf('dsh'), opened = await launched('open', [bundle]);
-  event(opened ? 'info' : 'warn', 'harness.open', { agent: 'dsh', model: target.model, opened });
+  event(opened && !why ? 'info' : 'warn', 'harness.open', { agent: 'dsh', model: `${target.key}/${target.model}`, opened, ...(why ? { error: why } : {}) });
   if (!opened) fail(502, 'DeepSeek Harness did not open');
-  return { opened: true, command: `open ${q(bundle)}`, note: `DeepSeek Harness uses its own model list. Add ${target.url}/v1 there to use ${target.name}` };
+  return { opened: true, command: `open ${q(bundle)}`, note: why ? `DeepSeek Harness is open, but ${target.name} could not be added to it: ${why}. Add ${target.url}/v1 there by hand` : `DeepSeek Harness now starts new conversations on ${titleOf(target)} (${target.key}, ${target.model})` };
 }
 
 // Always returns the command, so a machine without a terminal or display still gets something to paste.
