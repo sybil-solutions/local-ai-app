@@ -3,7 +3,7 @@
 import { pickBg, setTone } from './art.js';
 import { markdown } from './markdown.js';
 import { STATE } from './screens.js';
-import { all, api, cardKey, chosen, homeCfg, isFull, outdated, picks, run, s, scoped, send, shellWindow, store } from './state.js';
+import { all, api, cardKey, chosen, homeCfg, isFull, model, outdated, picks, run, s, scoped, send, shellWindow, store } from './state.js';
 import { fitWindow, layout, render } from './view.js';
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -21,7 +21,7 @@ async function load(path, use) {
 async function loadCard(id) {
   const k = cardKey(id);
   if (!id || s.cards[k]) return;
-  s.cards[k] = await api(scoped(`card?id=${encodeURIComponent(id)}`)).then((c) => ({ ...c, html: markdown(c.md) }), (e) => ({ error: e.message }));
+  s.cards[k] = await api(scoped(`card?id=${encodeURIComponent(id)}`)).then((c) => ({ ...c, html: c.md ? markdown(c.md) : '' }), (e) => ({ error: e.message }));
   render();
 }
 export const LOAD = {
@@ -41,7 +41,7 @@ export const LOAD = {
   approve: () => load(`recipe?id=${encodeURIComponent(s.asking)}`, (recipe) => { s.look = recipe; }),
   edit: () => {
     s.draft = null;
-    const view = all().find((r) => r.id === s.modelOpen);
+    const view = model(s.modelOpen);
     return load(`recipe?id=${encodeURIComponent(s.modelOpen)}`, (recipe) => {
       const L = recipe.launch, shown = (x) => (!x || /[\s"']/.test(x) ? JSON.stringify(x) : x);
       s.draft = { raw: recipe, name: view.name, engine: view.engine, local: view.local, ctx: L.ctx || 0, cards: L.cards || 1, seqs: L.seqs || 1, kv: view.kv || 'Off', args: (L.args || []).map(shown).join(' '), touched: new Set() };

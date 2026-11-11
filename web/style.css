@@ -161,6 +161,9 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .mdcard th, .mdcard td { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: left; }
 .mdcard pre { overflow-x: auto; padding: 8px; border-radius: 4px; background: var(--surface); font-size: 11px; }
 .mdcard code { font-size: 11px; }
+.mdcard.notes { white-space: pre-wrap; }
+.psub.why { margin: 6px 0 0; color: var(--text); }
+.mlist .label.group { margin: 14px 10px 6px; }
 .mright .mdcard { font-size: 13px; max-width: 760px; }
 .mright .mdcard h2 { font-size: 16px; }
 

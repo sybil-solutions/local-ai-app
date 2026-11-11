@@ -36,12 +36,31 @@ export const D = () => (s.dev === -1 ? s.snap : s.snap.devices[s.dev]?.state);
 export const here = () => (s.dev === -1 ? s.snap.name : s.snap.devices[s.dev]?.name || s.snap.name);
 // The models of the machine being shown, newest first. Every part of a screen asks for this, so it is worked out
 // once for each snapshot.
-let listed = { of: null, list: [] };
-export function all() {
-  const d = D();
-  if (listed.of !== d) listed = { of: d, list: d.groups.flatMap((g) => g.recipes).sort((a, b) => (b.released || '').localeCompare(a.released || '')) };
-  return listed.list;
+let listed = { of: null, list: [], others: [], sections: [] };
+const newestFirst = (a, b) => (b.released || '').localeCompare(a.released || '');
+// The registry's recipes for the machine being shown, by setup: four cards in the machine, one card, several
+// machines of the card together. Largest first. In each, what the machine can start comes first, newest first, then
+// what the app will not start, each saying why. A machine on an older version names no setups: it has one list.
+function sectionsOf(d) {
+  const out = [];
+  for (const g of d.groups) {
+    const rows = (pick) => [...g.recipes.filter(pick).sort(newestFirst), ...(g.blocked || []).filter(pick).sort(newestFirst)];
+    if (!g.setups) { out.push({ label: g.name, cards: 1, machines: 1, rows: rows(() => true) }); continue; }
+    for (const s of g.setups) out.push({ ...s, rows: rows((r) => r.cards === s.cards && (r.machines || 1) === s.machines) });
+  }
+  return out.filter((s) => s.rows.length);
 }
+function lists() {
+  const d = D();
+  if (listed.of !== d) listed = { of: d, list: d.groups.flatMap((g) => g.recipes).sort(newestFirst), others: d.groups.flatMap((g) => g.blocked || []).sort(newestFirst), sections: sectionsOf(d) };
+  return listed;
+}
+export const all = () => lists().list;
+// What the registry holds for this machine's cards that the app will not start. Each says why (`why`).
+export const others = () => lists().others;
+export const sections = () => lists().sections;
+// A model by its id, whether the machine can start it or not.
+export const model = (id) => all().find((r) => r.id === id) || others().find((r) => r.id === id) || null;
 export const group = () => [...D().groups].sort((a, b) => b.recipes.length - a.recipes.length)[0];
 const TIERS = [['fastest', 'Fast'], ['balanced', 'Balanced'], ['smartest', 'Smart']];
 export function picks() {
