@@ -3,3 +3,10 @@ dist/
 *.log
 __pycache__/
 build/
+
+# The iPhone app: the fetched llama.cpp framework, the generated project, build output
+ios/Vendor/
+ios/*.xcodeproj/
+ios/build/
+ios/.build/
+ios/LocalAI/Info.plist

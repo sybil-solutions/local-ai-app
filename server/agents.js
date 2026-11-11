@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { at, config, event, fail, HOME, once, own, run, saveConfig, writeJson } from './util.js';
 
@@ -38,7 +38,8 @@ const HARNESSES = {
 };
 
 const WIN = process.platform === 'win32';
-const shell = process.env.SHELL || 'sh';
+// Your shell: what the environment names, else the one your account logs in with (an app can be started with no SHELL set).
+const shell = process.env.SHELL || (() => { try { return userInfo().shell; } catch { return null; } })() || 'sh';
 let cached = { at: 0, found: new Set() };
 
 // A terminal reads your shell's startup files, and those often put newer tools first on PATH (a Node, a Bun). A
