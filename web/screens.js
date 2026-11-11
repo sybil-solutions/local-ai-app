@@ -13,7 +13,7 @@ const modelRow = (r) => `<div class="mrow${r.id === chosen().id ? ' on' : ''}"><
   + `<button class="mpick" data-act="pick" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${r.tier || ''}</small></button>`
   + `<button class="plus" data-act="expand" data-id="${esc(r.id)}" aria-label="Details">${icon(s.expanded === r.id ? 'minus' : 'plus', 14)}</button></div>`
   + `${s.expanded === r.id ? `${detail(r)}<div class="mdetail" style="padding-top:0">${editBtn(r)}</div>` : ''}</div>`;
-const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => `<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0)}%"></u></i><span>${Math.round((g.used || 0) / 1024)} of ${Math.round(g.total / 1024)} GB</span></div>`).join('')}</div>`;
+const gpuRows = () => `<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => `<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${g.total ? Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0) : 0}%"></u></i><span>${g.total ? `${Math.round((g.used || 0) / 1024)} of ${Math.round(g.total / 1024)} GB` : '—'}</span></div>`).join('')}</div>`;
 export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.external ? 'Running · started outside Local AI' : 'Running');
 export const BLOCKS = {
   hands: (ph) => (ph === 'off' ? `${art('apart')}<div class="line">${offLine(chosen())}</div>` : status('work', run().name, ph === 'opened' ? `Running · ${runLine(run(), true)}` : runLine(run()), 1)),

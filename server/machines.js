@@ -1,5 +1,10 @@
 // Your other machines. Connected ones are polled and their API is proxied; Tailscale says which computers are yours at all.
+import { spawn } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config, event, fail, PORT, run, saveConfig } from './util.js';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const remote = new Map();
 let tail = { at: 0, status: null }, seen = { at: 0, list: [] };
@@ -45,19 +50,37 @@ export async function isMine(req) {
 
 // Installs Local AI on one of your own Tailscale machines, so nobody has to paste a command there. This computer signs
 // in over SSH the way you would: by the machine's name (which finds an entry in your SSH config), its tailnet name,
-// then its address. The machine fetches the installer from this computer, which serves it only to your own machines.
-// Only a machine Tailscale lists as yours is ever contacted, and the name is passed to ssh as a word, never to a shell.
+// then its address. The app's files go over that same connection, so the other machine never has to reach this one
+// (a firewall here would stop it). Only a machine Tailscale lists as yours is ever contacted, and the name is passed
+// to ssh as a word, never to a shell.
 const SSH_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const UNPACK_AND_INSTALL = 'T="$(mktemp -d)" && tar -xz -C "$T" && bash "$T/install.sh"';
+// Resolves with ssh's exit code (255 when it could not sign in) and the last of what it printed.
+const ship = (host) => new Promise((done) => {
+  const tar = spawn('tar', ['-czf', '-', '-C', ROOT, 'server', 'web', 'package.json', 'install.sh', 'README.md'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const ssh = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '--', host, UNPACK_AND_INSTALL], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let out = '';
+  const keep = (text) => { out = `${out}${text}`.slice(-4000); };
+  const timer = setTimeout(() => ssh.kill(), 600000);
+  const end = (code) => { clearTimeout(timer); tar.kill(); done({ code, out: out.trim() }); };
+  ssh.stdout.on('data', keep);
+  ssh.stderr.on('data', keep);
+  ssh.stdin.on('error', () => {}); // an ssh that could not sign in closes its end while tar still writes
+  tar.on('error', () => ssh.kill());
+  tar.stdout.pipe(ssh.stdin);
+  ssh.on('error', () => end(127));
+  ssh.on('close', (code) => end(code ?? 1));
+});
 export async function install({ ip }) {
   seen.at = 0;
   const peer = (await peers()).find((p) => p.ip === ip) || fail(404, 'That is not one of your Tailscale machines');
   if (!peer.online) fail(409, `${peer.name} is offline`);
   if (!/linux/i.test(peer.os)) fail(409, `Open the Local AI app on ${peer.name}. Installing it from here works on Linux machines`);
-  const me = await self() || fail(503, 'Tailscale is not running on this computer');
-  const command = `curl -fsSL http://${me.ip}:${PORT}/install | bash`;
+  // A copy that updates itself (it was cloned from the repo) is left to do that: writing files into it would break it.
+  if ([...remote].some(([url, r]) => new URL(url).hostname === ip && r.state?.app?.can)) fail(409, `${peer.name} updates itself. Use Update there`);
   let last = '';
   for (const host of [...new Set([peer.name, peer.dns, peer.ip])].filter((h) => SSH_NAME.test(h || ''))) {
-    const out = await run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '--', host, command], { timeout: 600000 });
+    const out = await ship(host);
     if (!out.code) {
       for (let i = 0; i < 40; i++) {
         if (await fetch(`http://${peer.ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false)) { seen.at = 0; event('info', 'device.installed', { name: peer.name }); return { ok: true }; }
@@ -65,7 +88,7 @@ export async function install({ ip }) {
       }
       fail(502, `Local AI was installed on ${peer.name}, but it is not answering on your Tailscale yet. Is Tailscale running there?`);
     }
-    last = (out.stderr.trim() || out.stdout.trim()).split('\n').pop().slice(0, 200);
+    last = out.out.split('\n').pop().slice(0, 200);
     if (out.code !== 255) { event('warn', 'device.install', { name: peer.name, error: last }); fail(502, `The install on ${peer.name} stopped: ${last}`); } // it signed in; the installer itself failed
   }
   event('warn', 'device.install', { name: peer.name, error: last });
