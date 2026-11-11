@@ -20,7 +20,7 @@ npm install && npm start    # or the same page in an Electron window
 
 The server needs Node 20 or newer. Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the Electron app.
 
-A machine that already runs Local AI can install another one on your tailnet: Machines shows the one-line command for it.
+A machine that already runs Local AI installs it on another Linux machine on your tailnet: under Machines, choose Set up. It signs in over SSH; where it can't, it shows the one-line command instead. The installer brings its own Node.js when the machine has none.
 
 | Setting | Default | |
 |---|---|---|
@@ -107,6 +107,7 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 | `POST /api/settings` `{ folder?, agent?, terminal?, home?, background?, picture?, autoUpdate?, hfToken? }` | Save settings. | `index.js` `saveSettings` |
 | `GET /api/background` | Your own background picture. | `index.js` |
 | `GET /api/tailscale` | Your other Tailscale computers and the command that installs Local AI on one. | `machines.peers` |
+| `POST /api/tailscale/install` `{ ip }` | Install Local AI on one of your Tailscale machines, over SSH from this one. | `machines.install` |
 | `POST /api/devices` `{ url, key? }` | Connect a machine. No key needed for your own Tailscale machines. | `machines.add` |
 | `DELETE /api/devices?i=` | Forget a machine. | `machines.remove` |
 | `ANY /api/devices/:i/*` | Any route above, run on a connected machine. | `machines.forward` |
@@ -175,7 +176,9 @@ Run    = { id,            // the port it serves on
 | Hugging Face | Weights, and model cards. The token is read from `HF_TOKEN` or the HF cache's `token` file. |
 | npm registry | The newest version of each agent. |
 | An agent | Opened in a terminal with its own config folder, so it stays signed in: the model is passed in environment variables or flags for that run only. Pi and Oh My Pi get it from an extension (`-e agents/local-ai.js`) that registers each running model as a provider. On a Mac the terminal is the first installed of Ghostty, iTerm, kitty, WezTerm, Alacritty, Terminal, or the one chosen under Agents; Warp can't be started on a script. |
-| T3 Code | A desktop app: Open places the same extension in Pi's `extensions/` folder (once) and runs `t3 app <folder>`. The model is then listed under Pi in T3 Code. |
+| T3 Code | A desktop app: Open places the same extension in Pi's `extensions/` folder (once), records the model and folder, and runs `t3 app <folder>`. The model is listed under Pi, and a Pi session T3 Code starts in that folder begins on it ("Pi default"). |
+| DeepSeek Harness | A desktop app with its own model list and credential store: Open only opens it. |
+| `ssh` | Installing Local AI on one of your own Tailscale machines when you ask: it signs in as you would (the machine's name, its tailnet name, its address) and runs the installer this machine serves. |
 | `git` | The app's own updates, when it was installed from a clone. |
 
 A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` with `image`, `port`, `args`, `env`, `weights`, `ctx`, `cards`, `seqs` (a host recipe has `kind: host`, `backend`, `command`, `pip` and `config` instead of `image` and `args`). A registry recipe only runs when its image and weights are pinned and it needs nothing beyond one `docker run`, or for a host recipe, when everything above is pinned; your own recipes are trusted as written. Host recipes can't be edited in the app yet.

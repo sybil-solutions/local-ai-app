@@ -32,8 +32,9 @@ const HARNESSES = {
   }) },
   hermes: { name: 'Hermes', needs: 'chat', self: 'hermes update', build: (t) => openai(t.url, t.model) },
   copilot: { name: 'GitHub Copilot', needs: 'chat', npm: '@github/copilot', build: (t) => ({ env: { COPILOT_PROVIDER_BASE_URL: `${t.url}/v1`, COPILOT_PROVIDER_API_KEY: 'local' }, args: ['--model', t.model] }) },
-  // A desktop app, not a terminal program: Open shows the folder in T3 Code, where the model is listed under Pi.
-  t3: { name: 'T3 Code', needs: 'chat', app: true, paths: [join(homedir(), '.t3', 'bin', 't3')] },
+  // Desktop apps, not terminal programs. Each is opened its own way (`open`, further down) and updates itself.
+  t3: { name: 'T3 Code', needs: 'chat', paths: [join(homedir(), '.t3', 'bin', 't3')], open: (...args) => openT3(...args) },
+  dsh: { name: 'DeepSeek Harness', needs: 'chat', bare: true, paths: ['/Applications/DeepSeek Harness.app', join(homedir(), 'Applications', 'DeepSeek Harness.app')], open: (...args) => openDsh(...args) },
 };
 
 const WIN = process.platform === 'win32';
@@ -60,7 +61,8 @@ async function refreshVersions(found) {
   const before = JSON.stringify([versions.of, latest.of]);
   if (Date.now() - versions.at > 900e3 || [...found].some((n) => !(n in versions.of))) {
     versions.at = Date.now();
-    versions.of = Object.fromEntries(await Promise.all([...found].map(async (n) => [n, /\d+\.\d+\.\d+(?:[\w.-]*\w)?/.exec((await inShell(`${q(binOf(n))} --version`, 15000)).stdout)?.[0] || null])));
+    // `bare` marks one found as an app bundle, which has no --version to ask.
+    versions.of = Object.fromEntries(await Promise.all([...found].map(async (n) => [n, HARNESSES[n].bare ? null : /\d+\.\d+\.\d+(?:[\w.-]*\w)?/.exec((await inShell(`${q(binOf(n))} --version`, 15000)).stdout)?.[0] || null])));
   }
   if (Date.now() - latest.at > 6 * 3600e3) {
     latest.at = Date.now();
@@ -74,7 +76,7 @@ async function refreshVersions(found) {
 export const list = async () => {
   const found = await installed();
   refreshVersions(found).then((changed) => changed && notify(), () => {});
-  return Object.entries(HARNESSES).map(([id, h]) => ({ id, name: h.name, needs: h.needs, installed: found.has(id), version: versions.of[id] || null, latest: latest.of[id] || null, canInstall: !!h.npm, canUpdate: !!(h.npm || h.self), app: !!h.app, job: jobs[id] || null }));
+  return Object.entries(HARNESSES).map(([id, h]) => ({ id, name: h.name, needs: h.needs, installed: found.has(id), version: versions.of[id] || null, latest: latest.of[id] || null, canInstall: !!h.npm, canUpdate: !!(h.npm || h.self), app: !!h.open, job: jobs[id] || null }));
 };
 
 // Installs a missing agent, or updates one with its own updater when it has one.
@@ -102,13 +104,24 @@ const providersFor = (targets) => Object.fromEntries(targets.map((t) => [t.key, 
     input: t.vision ? ['text', 'image'] : ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { supportsDeveloperRole: false } }],
 }]));
 // The extension reads the model list each time Pi starts, so it is always what is running now. A missing or broken
-// list registers nothing, so Pi still starts.
+// list registers nothing, so Pi still starts. `prefer` is the model last opened in T3 Code and the folder it was opened
+// on: an app that drives Pi for you starts a new session there on that model, where Pi would have used its own default.
+// A terminal Pi is told its model on the command line, and a session you resume keeps the model it had.
 const EXTENSION = `// Written by Local AI. Registers each model Local AI is running as a provider. Safe to delete.
 import { readFileSync } from 'node:fs';
+const read = () => { try { return JSON.parse(readFileSync(${JSON.stringify(piModels)}, 'utf8')); } catch { return {}; } };
 export default function (pi) {
-  let providers = {};
-  try { ({ providers } = JSON.parse(readFileSync(${JSON.stringify(piModels)}, 'utf8'))); } catch { /* Local AI is not running anything */ }
-  for (const [id, provider] of Object.entries(providers || {})) pi.registerProvider(id, provider);
+  const { providers = {} } = read();
+  for (const [id, provider] of Object.entries(providers)) pi.registerProvider(id, provider);
+  pi.on?.('session_start', async (event, ctx) => {
+    try {
+      const { prefer } = read();
+      if (ctx.mode !== 'rpc' || !['startup', 'new'].includes(event.reason) || !prefer || !providers[prefer.provider]) return;
+      if (ctx.cwd !== prefer.folder && !String(ctx.cwd).startsWith(prefer.folder + '/')) return;
+      const model = ctx.modelRegistry.find(prefer.provider, prefer.model);
+      if (model) await pi.setModel(model);
+    } catch { /* Pi keeps its own default */ }
+  });
 }
 `;
 const writeExtension = (file) => { if (!existsSync(file) || readFileSync(file, 'utf8') !== EXTENSION) writeFileSync(file, EXTENSION, { mode: 0o600 }); };
@@ -119,9 +132,10 @@ const piHome = () => process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', '
 const piShared = () => join(piHome(), 'extensions', 'local-ai.js');
 
 let lastModels = null;
-// Keeps the extension's model list equal to what is running.
+// Keeps the extension's model list equal to what is running. The preferred model is listed only while it runs.
 export function syncPi(targets) {
-  const text = JSON.stringify({ providers: providersFor(targets) });
+  const providers = providersFor(targets), prefer = config.prefer && providers[config.prefer.provider] ? config.prefer : undefined;
+  const text = JSON.stringify({ providers, prefer });
   if (text === lastModels) return;
   mkdirSync(at('agents'), { recursive: true, mode: 0o700 });
   writeJson(piModels, JSON.parse(text));
@@ -185,23 +199,37 @@ const launched = (cmd, args) => new Promise((done) => {
   child.once('spawn', () => { child.unref(); done(true); });
 });
 
-// T3 Code: Pi inside it is given the extension, then the folder is opened in the desktop app.
-async function openT3(target, folder) {
+// T3 Code: Pi inside it is given the extension and told which model to start on in this folder, then the folder is
+// opened in the desktop app. T3 Code's own choice of provider for a new thread is its to keep; under Pi, "Pi default"
+// is now this model.
+async function openT3(target, folder, targets) {
   mkdirSync(join(piHome(), 'extensions'), { recursive: true, mode: 0o700 });
   writeExtension(piShared());
+  config.prefer = { folder, provider: target.key, model: target.model };
+  saveConfig();
+  syncPi(targets);
   const bin = binOf('t3'), out = await run(bin, ['app', folder], { timeout: 30000 });
   if (out.code) fail(502, `T3 Code did not open: ${(out.stderr.trim() || out.stdout.trim()).split('\n').pop().slice(0, 200) || 'is it running?'}`);
   event('info', 'harness.open', { agent: 't3', model: target.model, opened: true });
-  return { opened: true, command: `${q(bin)} app ${q(folder)}`, pick: `Pi › ${target.name} · ${target.device}` };
+  return { opened: true, command: `${q(bin)} app ${q(folder)}`, note: `In T3 Code, choose Pi. Its default there is now ${target.name} · ${target.device}` };
+}
+
+// DeepSeek Harness keeps its own list of models, and each needs a key from its own credential store, so this only
+// opens it. The model has to be added there by hand.
+async function openDsh(target) {
+  const bundle = binOf('dsh'), opened = await launched('open', [bundle]);
+  event(opened ? 'info' : 'warn', 'harness.open', { agent: 'dsh', model: target.model, opened });
+  if (!opened) fail(502, 'DeepSeek Harness did not open');
+  return { opened: true, command: `open ${q(bundle)}`, note: `DeepSeek Harness uses its own model list. Add ${target.url}/v1 there to use ${target.name}` };
 }
 
 // Always returns the command, so a machine without a terminal or display still gets something to paste.
-export async function open(agent, target, folder) {
+export async function open(agent, target, folder, targets = [target]) {
   const harness = HARNESSES[agent] || fail(400, 'Unknown agent');
   if (!(await installed()).has(agent)) fail(409, `${harness.name} is not installed`);
   if (target.apis && !target.apis.includes(harness.needs)) fail(409, `This engine has no ${harness.needs} API, which ${harness.name} needs`);
   if (!existsSync(folder)) fail(400, `Folder ${folder} does not exist`);
-  if (harness.app) return openT3(target, folder);
+  if (harness.open) return harness.open(target, folder, targets);
   const { env, args } = harness.build(target), bin = binOf(agent);
   mkdirSync(at('agents'), { recursive: true, mode: 0o700 });
   const script = at('agents', `open-${agent}${WIN ? '.cmd' : '.command'}`);

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, copyFileSync, existsSync, fstatSync, ftruncateSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join } from 'node:path';
+import * as machines from './machines.js';
 import { meter } from './meter.js';
 import { blocked, cardFor, find, flagsOf, isLocal, label } from './recipes.js';
 import { loadSeconds, measure, saveLoad, speedOf } from './speed.js';
@@ -198,11 +199,18 @@ export async function logs(rawId, tail) {
   return { text: `${out.stdout}${out.stderr}` };
 }
 
+// Asks the engine whether it is up. `closed` counts answers in a row that say nothing listens on the port at all, which
+// is different from an engine too busy to answer in time.
 async function probe(r) {
   try {
     const res = await fetch(`${r.url}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) { const model = (await res.json()).data?.[0]; update(r, { served: model?.id ?? r.served, window: +model?.max_model_len || r.window || 0, misses: 0 }); return true; }
-  } catch { /* still loading, or busy */ }
+    r.closed = 0;
+    if (res.ok) {
+      const model = (await res.json()).data?.[0], served = model?.id ?? r.served;
+      update(r, { served, window: +model?.max_model_len || r.window || 0, misses: 0, ...(r.external && served ? { name: served } : {}) });
+      return true;
+    }
+  } catch (e) { r.closed = e.cause?.code === 'ECONNREFUSED' ? (r.closed || 0) + 1 : 0; /* still loading, or busy */ }
   r.misses++;
   return false;
 }
@@ -322,17 +330,47 @@ async function isEngine(port, models) {
   } catch { return null; }
 }
 
+// A forwarder on this machine in front of a model on a connected machine answers exactly like that model, counters
+// and all. It is that machine's model, not one running here. It is recognised by the same model id being ready there
+// and the same counters: read here, there, then here again, the numbers there fall between the two readings here.
+async function forwards(port, model) {
+  const totals = async (url) => {
+    const m = usage.parseMetrics(await (await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(1500) })).text());
+    return [m.prompt_tokens_total, m.generation_tokens_total ?? m.tokens_predicted_total, m.request_success_total];
+  };
+  for (const d of machines.views()) {
+    for (const r of d.online && d.state ? d.state.runs : []) {
+      if (r.phase !== 'ready' || r.served !== model || r.reachable === false) continue;
+      try {
+        const here = `http://127.0.0.1:${port}`, first = await totals(here), there = await totals(`http://${new URL(d.url).hostname}:${r.id}`), second = await totals(here);
+        if (there.some((v) => v > 0) && there.every((v, i) => v !== undefined && first[i] <= v && v <= second[i])) return d.name;
+      } catch { /* one of them has no counters, so nothing says it is a forwarder */ }
+    }
+  }
+  return null;
+}
+
 // Models someone else started: anything on this machine that answers like an OpenAI server. They are shown, never stopped.
 let scanned = 0;
 async function discover(now) {
+  // A model someone else started is dropped once its port is closed, or after five minutes without an answer. One that
+  // is only slow (an engine under load answers late) stays, shown as not replying, so Home does not lose it and find it again.
   for (const r of runs.values()) {
     if (!r.external) continue;
-    if (!(await probe(r)) && r.misses >= 3) { runs.delete(r.id); event('info', 'run.gone', { id: r.id }); continue; }
+    const up = await probe(r);
+    if (!up && (r.closed >= 3 || r.misses >= 150)) { runs.delete(r.id); event('info', 'run.gone', { id: r.id }); notify(); continue; }
+    if (!up && r.misses >= 15 && r.phase === 'ready') { update(r, { phase: 'unresponsive', heard: now - r.misses * 2000 }); event('warn', 'run.unresponsive', { id: r.id }); }
+    if (!up) continue;
+    if (r.phase !== 'ready') update(r, { phase: 'ready', heard: null });
     if (!r.apis) await probeApis(r);
     await usage.scrape(r, now);
   }
   if (now - scanned < 30000) return;
   scanned = now;
+  for (const r of runs.values()) {
+    const to = r.external && r.phase === 'ready' && await forwards(r.id, r.served);
+    if (to) { runs.delete(r.id); usage.forget(r); event('info', 'run.forwarded', { id: r.id, model: r.served, to }); notify(); }
+  }
   const text = (process.platform === 'darwin' ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnH'])).stdout;
   const open = new Map([...text.matchAll(/(\S+):(\d+)\s/g)].map((m) => [+m[2], !/^(127\.|\[::1\])/.test(m[1])]));
   const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p) && !innerPorts().has(p)).sort((a, b) => a - b).map(async (port) => {
@@ -342,6 +380,7 @@ async function discover(now) {
   for (const [port, model] of found) {
     if (!model || known.has(model)) continue; // the same model behind a proxy is still one model
     known.add(model);
+    if (await forwards(port, model)) continue; // a forwarder to a connected machine's model
     runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port), name: model, url: `http://127.0.0.1:${port}`, served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
     event('info', 'run.found', { id: port, model });
     notify();

@@ -155,7 +155,9 @@ try {
   check('gives Pi the model with its whole context and no smaller output limit', listed.id === 'outside-model' && listed.contextWindow === 65536 && listed.maxTokens === 65536 && listed.omitMaxOutputTokens === true, JSON.stringify(listed));
   check('writes the extension that registers it', readFileSync(join(HOME, 'agents', 'local-ai.js'), 'utf8').includes('registerProvider'));
   const snap = await state();
-  check('lists the terminals found here and T3 Code among the agents', Array.isArray(snap.terminals) && snap.agents.some((a) => a.id === 't3' && a.app));
+  check('lists the terminals found here, and T3 Code and DeepSeek Harness among the agents', Array.isArray(snap.terminals) && ['t3', 'dsh'].every((id) => snap.agents.some((a) => a.id === id && a.app)));
+  check('installing on a machine that is not one of your Tailscale machines is refused', [404, 503].includes((await api('/api/tailscale/install', { method: 'POST', body: { ip: '203.0.113.9' } })).status));
+  check('the installer keeps the hash of the Node it may download', /NODE_SUM=[0-9a-f]{64}/.test(readFileSync(join(ROOT, 'install.sh'), 'utf8')));
   check('settings refuse a terminal that is not installed', (await api('/api/settings', { method: 'POST', body: { terminal: 'no-such-terminal' } })).status === 400);
   check('does not take a proxy of several models for a model running here', !(await state()).runs.some((r) => r.id === proxy.address().port));
   const seen = await until('a first read of its counters', async () => (await state()).runs.find((r) => r.id === port)?.stats, 15000);

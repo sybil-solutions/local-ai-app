@@ -3,7 +3,7 @@
 import { applyBg, fitArt, loadOwn, onChange, pickBg, setTone } from './art.js';
 import { homeHtml, NAV, navBar, pageHtml } from './desktop.js';
 import { CTX, lit, look, markdown, SCREENS, STATE } from './screens.js';
-import { all, api, cardKey, chosen, D, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shellWindow, shown, store } from './state.js';
+import { all, api, cardKey, chosen, D, hasRoom, homeCfg, isFull, outdated, picks, resolve, run, s, scoped, send, shellWindow, shown, store } from './state.js';
 import { ctxOf, fmt, notice } from './ui.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -40,12 +40,34 @@ function paint(force) {
     swap(panel, SCREENS[id]() + notice(), id, force, '.scroll');
     const picture = $('canvas.art', panel);
     panel.style.setProperty('--pr', `${picture ? lit(picture.dataset) * 460 : 0}px`);
+    const lower = picture ? picture.offsetTop - 52 : 0; // the picture sits where its block is; 52 is where the first block starts
+    panel.style.setProperty('--py', `${lower}px`);
+    panel.classList.toggle('lowpic', lower > 0);
+    fitPanel();
   }
   drawnId = id;
 }
+// The height the panel's screen needs to show all of itself, in panel units: every part at its own height, a scrolling
+// part at the height of what is in it.
+function natural() {
+  const style = getComputedStyle(panel), parts = [...panel.children].filter((el) => getComputedStyle(el).position !== 'absolute');
+  const tall = (el) => (el.classList.contains('sp') ? 0 : !el.classList.contains('scroll') ? el.offsetHeight
+    : el.lastElementChild ? el.lastElementChild.offsetTop + el.lastElementChild.offsetHeight - el.firstElementChild.offsetTop : 0);
+  return Math.ceil(parts.reduce((n, el) => n + tall(el), 0) + (parseFloat(style.rowGap) || 0) * (parts.length - 1) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom));
+}
+// In the desktop app the panel's window follows Home: it grows when Home shows more and shrinks back when it shows
+// less, so nothing is cut off. Other screens keep the height Home had, so the window does not jump as you move about.
+let fitted = 480;
+function fitPanel() {
+  if (!shellWindow || s.full || s.nav || !panel.firstElementChild) return;
+  const want = Math.max(480, natural());
+  if (Math.abs(want - fitted) < 2) return;
+  fitted = want;
+  shellWindow.compact(true, want);
+}
 // The panel is drawn 260 units wide and scaled to the window, up to one and a half times.
 function layout() {
-  const k = Math.min(innerWidth / 260, innerHeight / 480, 1.5);
+  const k = Math.min(innerWidth / 260, innerHeight / (shellWindow && !s.full ? fitted : 480), 1.5);
   Object.assign(frame.style, { transform: `scale(${k})`, left: `${(innerWidth - 260 * k) / 2}px` });
   panel.style.height = `${innerHeight / k}px`;
   render(true);
@@ -124,7 +146,7 @@ const ACTS = {
     const out = await send('open', 'POST', { agent, device: s.dev === -1 ? 'self' : s.dev, port: r.id, folder: s.snap.folder });
     s.opened = r.id;
     go('home');
-    if (!out.opened) { s.command = out.command; go('runthis'); } else if (out.pick) s.note = `In T3 Code, choose ${out.pick}`;
+    if (!out.opened) { s.command = out.command; go('runthis'); } else if (out.note) s.note = out.note;
   },
   default: (d) => send('settings', 'POST', { agent: d.agent }),
   agent: (d) => send('agents', 'POST', { id: d.agent }),
@@ -137,11 +159,18 @@ const ACTS = {
   },
   use: (d) => { s.dev = +d.dev; s.sel = s.opened = s.usage = s.ends = null; go('home'); },
   uselinked: () => ACTS.use({ dev: Math.max(-1, s.snap.devices.findIndex((x) => x.url === s.link.url)) }),
+  // A machine of yours with Local AI is connected; one without gets it installed first, by this computer, over SSH.
+  // The install runs on its own, so the page stays usable while it does.
   peer: (d) => {
-    s.link = { name: d.name };
-    if (!d.app) return go('m-install');
-    Object.assign(s.form, { host: `http://${d.ip}:${location.port || 18700}`, mkey: '' });
-    return ACTS.connect({ peer: d.name });
+    const link = s.link = { name: d.name }, url = `http://${d.ip}:${location.port || 18700}`;
+    const connect = () => { Object.assign(s.form, { host: url, mkey: '' }); return ACTS.connect({ peer: d.name }); };
+    if (d.app) return connect();
+    s.nav = 'm-setup';
+    send('tailscale/install', 'POST', { ip: d.ip }).then(
+      () => (s.nav === 'm-setup' && s.link === link ? connect() : send('devices', 'POST', { url }).then(() => { s.note = `${d.name} is set up and connected`; })),
+      (e) => { Object.assign(link, { error: e.message, manual: !/mac/i.test(d.os) }); if (s.nav === 'm-setup' && s.link === link) s.nav = 'm-install'; else s.note = e.message; }, // the command is for Linux
+    ).catch((e) => { s.note = e.message; }).finally(() => { LOAD.machines(); render(true); });
+    return null;
   },
   connect: async (d) => {
     const typed = (s.form.host || '').trim().replace(/\/$/, ''), url = /^https?:\/\//.test(typed) ? typed : `http://${typed}${/:\d+$/.test(typed) ? '' : ':18700'}`;
@@ -198,7 +227,7 @@ const ACTS = {
     store('la-full', s.full ? '1' : '0');
     if (s.full) await shellWindow?.compact(false); // the window gets its room back before it fills the screen
     if (s.full) root.requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-    if (!s.full) await shellWindow?.compact(true);
+    if (!s.full) { fitted = 480; await shellWindow?.compact(true, fitted); }
     if (shellWindow) setTimeout(layout, 300); // the window has changed size; a window in the background may not say so
   },
 };
@@ -259,7 +288,7 @@ addEventListener('keydown', (e) => {
   }
   // Desktop keys: 1 to 6 for the sections, Esc to go back, and on Home the arrows pick a model and Enter starts it.
   if (!isFull() || !s.snap || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA/.test(e.target.tagName)) return;
-  const home = !s.nav && resolve() === 'off';
+  const home = !s.nav && resolve() === 'off' && hasRoom();
   if (/^[1-6]$/.test(e.key)) jump(NAV[+e.key - 1][2]);
   else if (e.key === 'Escape') { if (s.agentsOpen) s.agentsOpen = false; else go(s.nav === 'edit' ? 'back' : 'home'); }
   else if (home && /^Arrow(Left|Right)$/.test(e.key)) { const list = shown(), i = list.findIndex((r) => r.id === chosen().id); s.sel = list[(i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length].id; }
@@ -288,5 +317,5 @@ async function follow() {
     if (lost) await sleep(1500);
   }
 }
-if (!s.full) shellWindow?.compact(true); // a window that was left showing the panel opens fitted to it
+if (!s.full) shellWindow?.compact(true, fitted); // a window that was left showing the panel opens fitted to it
 applyBg(); layout(); follow();
