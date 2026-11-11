@@ -5,7 +5,7 @@ import { IconButton } from './controls.js';
 import { Dove, Icon } from './icons.js';
 
 // The app's name with its mark.
-export const Wordmark = html`<span class="mark">${Dove}Local AI</span>`;
+const Wordmark = html`<span class="mark">${Dove}Local AI</span>`;
 // Shown before the machine's name while the page shows another machine than the one it is open on. The name itself is blurred.
 const Remote = () => s.dev !== -1 && html`<span class="where">Remote</span>`;
 // The app's mark and the machine being shown. Pressing it opens Machines.

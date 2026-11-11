@@ -43,7 +43,9 @@ async function forwards(here, model) {
 const DULL_MS = 300e3, dull = new Map(); // "port by program" → when it last said it is not a model
 let scanned = 0;
 const booted = Date.now();
+// LOCAL_AI_DISCOVER=0 turns the looking off: only models this app started are shown.
 export async function discover(now) {
+  if (process.env.LOCAL_AI_DISCOVER === '0') return;
   // A model someone else started is dropped once its port is closed, or after five minutes without an answer. One that
   // is only slow (an engine under load answers late) stays, shown as not replying, so Home does not lose it and find it again.
   for (const r of runs.values()) {

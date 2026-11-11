@@ -71,7 +71,7 @@ function sysctlNow(key) {
 
 // Why a recipe may not be started, or null. Your own recipes (`trusted`) are yours to write; a registry recipe must be
 // pinned and need nothing beyond one docker run, or one pinned host run. Nothing here reads anything but the recipe,
-// so scripts/fuzz.mjs can ask it about recipes no registry would ever hold.
+// so tests/fuzz.mjs can ask it about recipes no registry would ever hold.
 export function problemWith(recipe, { trusted = false } = {}) {
   const launch = recipe?.launch;
   if (!launch || typeof launch !== 'object') return 'Has no launch';

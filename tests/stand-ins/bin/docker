@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // A stand-in for docker, for the smoke test. It keeps "containers" as files in FAKE_DOCKER_DIR, and a container that
 // runs is the stand-in engine (fake_engine.py) listening where the real one's port would have been published.
-// It reads `docker run` the way docker does (scripts/docker-model.mjs), so it starts what the real one would.
+// It reads `docker run` the way docker does (tests/stand-ins/docker-model.mjs), so it starts what the real one would.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRun } from '../docker-model.mjs';
@@ -12,6 +12,7 @@ const DIR = process.env.FAKE_DOCKER_DIR, HERE = dirname(fileURLToPath(import.met
 if (!DIR) { console.error('FAKE_DOCKER_DIR is not set'); process.exit(125); }
 mkdirSync(DIR, { recursive: true });
 const [verb, ...args] = process.argv.slice(2);
+appendFileSync(join(DIR, 'docker.calls'), `${verb}\n`); // a tally, so a test can see how often docker was asked
 const file = (name) => join(DIR, `${name}.json`), images = join(DIR, 'images.txt');
 const read = (name) => JSON.parse(readFileSync(file(name), 'utf8'));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
