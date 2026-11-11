@@ -342,17 +342,18 @@ async function isEngine(url, models) {
 
 // A forwarder on this machine in front of a model on a connected machine answers exactly like that model, counters
 // and all. It is that machine's model, not one running here. It is recognised by the same model id being ready there
-// and the same counters: read here, there, then here again, the numbers there fall between the two readings here.
+// and by being the same engine: the same process start time where the engine reports one, else the same counters
+// (read here, there, then here again, the numbers there fall between the two readings here).
 async function forwards(here, model) {
-  const totals = async (url) => {
-    const m = usage.parseMetrics(await (await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(1500) })).text());
-    return [m.prompt_tokens_total, m.generation_tokens_total ?? m.tokens_predicted_total, m.request_success_total];
-  };
+  const read = async (url) => usage.parseMetrics(await (await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(1500) })).text());
+  const totals = (m) => [m.prompt_tokens_total, m.generation_tokens_total ?? m.tokens_predicted_total, m.request_success_total];
   for (const d of machines.views()) {
     for (const r of d.online && d.state ? d.state.runs : []) {
       if (r.phase !== 'ready' || r.served !== model || r.reachable === false) continue;
       try {
-        const first = await totals(here), there = await totals(`http://${new URL(d.url).hostname}:${r.id}`), second = await totals(here);
+        const a = await read(here), far = await read(`http://${new URL(d.url).hostname}:${r.id}`);
+        if (a.process_start && far.process_start) { if (a.process_start === far.process_start) return d.name; continue; }
+        const first = totals(a), there = totals(far), second = totals(await read(here));
         if (there.some((v) => v > 0) && there.every((v, i) => v !== undefined && first[i] <= v && v <= second[i])) return d.name;
       } catch { /* one of them has no counters, so nothing says it is a forwarder */ }
     }
@@ -362,6 +363,7 @@ async function forwards(here, model) {
 
 // Models someone else started: anything on this machine that answers like an OpenAI server. They are shown, never stopped.
 let scanned = 0;
+const booted = Date.now();
 async function discover(now) {
   // A model someone else started is dropped once its port is closed, or after five minutes without an answer. One that
   // is only slow (an engine under load answers late) stays, shown as not replying, so Home does not lose it and find it again.
@@ -375,7 +377,9 @@ async function discover(now) {
     if (!r.apis) await probeApis(r);
     await usage.scrape(r, now);
   }
-  if (now - scanned < 30000) return;
+  // Right after the app starts, connected machines have not answered yet, so a forwarder to one of them could not be
+  // told from a model running here. New finds wait for them, for a few seconds at most.
+  if (now - scanned < 30000 || (!machines.settled() && now - booted < 8000)) return;
   scanned = now;
   for (const r of runs.values()) {
     const to = r.external && r.phase === 'ready' && await forwards(r.url, r.served);

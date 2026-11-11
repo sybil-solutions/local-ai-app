@@ -31,7 +31,7 @@ async function publish() {
     name: hostname(), docker: engine.status.docker, needsDocker: !engine.status.gpus.length || !engine.status.gpus.every((g) => g.unified), gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
     usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
     agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder, ...term,
-    home: config.home || null, background: config.background || 'clouds', tone: config.tone || null, picture: config.picture?.at || null, app: update.view(), hfToken: weights.tokenHint(),
+    home: config.home || null, background: config.background || 'clouds', tone: config.tone || null, picture: (config.picture && existsSync(at('background')) && config.picture.at) || null, app: update.view(), hfToken: weights.tokenHint(),
   };
   const text = JSON.stringify(state);
   if (text === signature) return;
