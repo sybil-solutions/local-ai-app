@@ -1,7 +1,7 @@
 // The desktop layout: a top bar, the painting as the room, Home along the bottom, and every other screen as a page.
 import { all, chosen, D, here, HOME, run, s, shown } from './state.js';
 import { agentList, agentsFoot, BLOCKS, cardHtml, editBody, elsewhere, offLine, openBtns, runLine, SCREENS, startBtn, STATE, stopBtn, useBtn } from './screens.js';
-import { bar, capNames, caps, ctxOf, esc, facts, fmt, fsBtn, icon, kv, meta, running, vfoot } from './ui.js';
+import { bar, capNames, caps, ctxOf, esc, facts, fmt, fsBtn, icon, kv, meta, remote, running, vfoot } from './ui.js';
 
 // [section, label, the screen it opens]. Keys 1 to 6 follow this order.
 export const NAV = [['home', 'Home', 'home'], ['models', 'Models', 'adv-models'], ['agents', 'Agents', 'agent'], ['machines', 'Machines', 'machines'], ['usage', 'Usage', 'usage'], ['settings', 'Settings', 'home-edit']];
@@ -17,7 +17,7 @@ export function navBar(page) {
   const now = page ? SECTION[page] : 'home', r = D() && (s.dev === -1 || s.snap.devices[s.dev]?.online) && run(); // an offline machine's last snapshot is not live
   const links = NAV.map(([k, label, to], i) => `<button data-nav="${to}" title="${label} (${i + 1})"${now === k ? ' aria-current="page"' : ''}>${label}</button>`).join('');
   const live = r?.phase === 'ready' ? `<button class="nlive" data-nav="home" aria-label="${esc(r.name)} is running. Go to Home"><i></i><span class="nm">${esc(r.name)}</span><em>${fmt(r.stats?.tps || 0)} tok/s</em></button>` : '';
-  return `<header class="nav"><button class="mark chip" data-nav="machines" aria-label="Machine: ${esc(here())}"><i></i><span class="who">${esc(here())}</span></button><nav class="nlinks" aria-label="Sections">${links}</nav><div class="nr">${live}${fsBtn()}</div></header>`;
+  return `<header class="nav"><button class="mark chip" data-nav="machines" aria-label="Machine: ${esc(here())}"><i></i>${remote()}<span class="who">${esc(here())}</span></button><nav class="nlinks" aria-label="Sections">${links}</nav><div class="nr">${live}${fsBtn()}</div></header>`;
 }
 
 // Home: a title, something in the middle, and the buttons on the right.
@@ -35,8 +35,9 @@ export function homeHtml(id) {
     const st = STATE[id]();
     inner = strip(esc(st.word), esc(st.line), `<div class="cprog">${st.bar ? bar(st.p * 100) : ''}${st.extra || ''}</div>`, st.btns || '');
   }
+  // The usage and GPU blocks sit in a row above the strip.
   const extras = s.snap && D() && !s.agentsOpen ? HOME().filter((k) => k === 'usage' || k === 'gpus') : [];
-  return `<div class="cfade"></div>${extras.length ? `<div class="cwid">${extras.map((k) => `<div class="widget">${BLOCKS[k]()}</div>`).join('')}</div>` : ''}<div class="cin">${inner}</div>`;
+  return `<div class="cfade"></div><div class="cbot">${extras.length ? `<div class="cwid">${extras.map((k) => `<div class="widget">${BLOCKS[k]()}</div>`).join('')}</div>` : ''}<div class="cin">${inner}</div></div>`;
 }
 
 // Models: the whole list on the left, the chosen one open beside it.

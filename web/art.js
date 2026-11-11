@@ -2,9 +2,9 @@
 import { s, send, store } from './state.js';
 
 const root = document.documentElement, frame = document.querySelector('#art'), picker = document.querySelector('#picker');
-// Where the light starts in each picture (the gap between the fingers; the crown of the cloud), where that point sits
+// Where the light starts in each picture (the gap between the fingers; the dove), where that point sits
 // in the panel, and where it sits on the desktop. The fresco is shown in the panel at a scale chosen for the hands.
-const PICS = { clouds: { url: '/clouds.webp', x: 1190, y: 500, w: 2000, h: 1611 }, fresco: { url: '/fresco.webp', x: 982, y: 566, w: 2000, h: 1015, k: 0.56 } };
+const PICS = { clouds: { url: '/clouds.webp', x: 1100, y: 760, w: 2000, h: 1611 }, fresco: { url: '/fresco.webp', x: 982, y: 566, w: 2000, h: 1015, k: 0.56 } };
 const FIRST = 'clouds', PANEL = { x: 130, y: 116, top: 368 }, DESK = [0.5, 0.36];
 let own = null, redraw = () => {};
 export const onChange = (fn) => { redraw = fn; };

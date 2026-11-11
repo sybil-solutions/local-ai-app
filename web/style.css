@@ -22,6 +22,8 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .chip { display: inline-flex; align-items: center; height: 30px; box-sizing: border-box; border-radius: 15px; background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .top .mark.chip, .nav .mark.chip { gap: 7px; height: 30px; padding: 0 12px 0 11px; font: 500 13px/1 var(--ui); color: var(--text); }
 /* The machine's name is blurred until you point at it or focus it, so it stays out of screenshots. */
+.where { color: var(--muted); font-weight: 400; flex: none; }
+.where::after { content: ' ·'; }
 .who { filter: blur(5px); transition: filter .15s; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A long machine name is cut short; the buttons beside it always fit. */
 .top .mark.chip { min-width: 0; flex: 0 1 auto; }
@@ -38,8 +40,7 @@ canvas.art { display: block; width: 260px; height: 128px; margin: 0 -14px; flex:
 .sp { flex: 1; }
 .frame .screen:has(canvas.art) .word, .frame .screen:has(canvas.art) .line { text-shadow: 0 1px 10px rgba(0,0,0,.65); }
 .home { display: flex; flex-direction: column; gap: 10px; }
-.scroll { scrollbar-width: none; overflow-x: hidden; flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; margin-right: -6px; padding-right: 6px; }
-.scroll::-webkit-scrollbar { display: none; }
+.scroll { scrollbar-width: thin; scrollbar-color: var(--line) transparent; overflow-x: hidden; flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; margin-right: -6px; padding-right: 6px; }
 .scroll.home { margin: 0 -14px; padding: 0 14px; }
 .scroll.home > * { flex: none; }
 .scroll > .label:first-child, .scroll > .head:first-child { margin-top: 0; }
@@ -53,6 +54,7 @@ canvas.art { display: block; width: 260px; height: 128px; margin: 0 -14px; flex:
 .btn.go:hover:not([disabled]) { background: var(--accent); filter: brightness(1.08); }
 .neg { box-shadow: inset 0 0 0 1px var(--red); }
 .btn[disabled] { color: var(--muted); cursor: default; }
+.btn.go[disabled] { background: var(--line); }
 .two { display: flex; gap: 8px; }
 .two .btn:first-child { flex: 1; }
 .two .btn:last-child { width: 44px; flex: none; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
@@ -61,7 +63,9 @@ a.btn { line-height: 40px; text-decoration: none; box-sizing: border-box; }
 .item { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; min-height: 44px; border-bottom: 1px solid var(--line); text-align: left; font: 400 14px var(--ui); position: relative; }
 .item small { color: var(--muted); font: 400 12px var(--ui); }
 .item[disabled] { color: var(--muted); cursor: default; }
-.item span b { display: block; font-weight: 500; }
+.item span b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.item > span:first-child { min-width: 0; }
+.item > small { flex: none; white-space: nowrap; }
 .item span small { display: block; margin-top: 1px; }
 .group { margin: 12px 0 4px; }
 .group:first-child { margin-top: 0; }
@@ -134,8 +138,6 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .gpu i u { display: block; height: 100%; background: var(--text); text-decoration: none; }
 .gpu span:last-child { text-align: right; }
 .gpu span { white-space: nowrap; }
-.busyrows { margin-top: 10px; }
-.cin .busyrows { width: 260px; }
 
 /* Models and their Hugging Face cards. */
 .arow { border-bottom: 1px solid var(--line); }
@@ -166,8 +168,9 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .vrow b { font-weight: 500; }
 .vrow .inst, .vact { flex: none; color: var(--accent); font: 500 12px var(--ui); white-space: nowrap; }
 .vact { min-height: 36px; padding: 0 2px; }
-.hrow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 52px; border-bottom: 1px solid var(--line); background: var(--bg); }
-.hrow.plain { grid-template-columns: minmax(0, 1fr) auto; border: 0; }
+/* A row you can drag is a box of its own (it covers the rows it passes), so it has room inside. A plain row is part of the page. */
+.hrow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 52px; padding: 0 12px 0 4px; box-sizing: border-box; border-bottom: 1px solid var(--line); background: var(--bg); }
+.hrow.plain { grid-template-columns: minmax(0, 1fr) auto; padding: 0; border: 0; background: none; }
 .hrow.dragging { box-shadow: 0 8px 24px rgba(0,0,0,.5); position: relative; z-index: 2; border-radius: 6px; }
 .hrow.hidden .hname { opacity: .5; }
 .grip { width: 28px; height: 40px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); cursor: grab; touch-action: none; }
@@ -259,10 +262,13 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 [data-bg=none] #art { display: none; }
 html:not([data-bg=none]) .frame .screen:has(canvas.art) { position: relative; isolation: isolate; }
 html:not([data-bg=none]) .frame .screen canvas.art { visibility: hidden; }
-html:not([data-bg=none]) .frame .screen:has(canvas.art)::before, html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: none, var(--pimg); background-position: 0 0, var(--ppos); background-size: auto, var(--psz); background-repeat: no-repeat; -webkit-mask-image: linear-gradient(#000 156px, transparent 281px); mask-image: linear-gradient(#000 156px, transparent 281px); }
+html:not([data-bg=none]) .frame .screen:has(canvas.art)::before, html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { content: ''; position: absolute; inset: var(--py, 0px) 0 0 0; z-index: -1; pointer-events: none; background-image: none, var(--pimg); background-position: 0 0, var(--ppos); background-size: auto, var(--psz); background-repeat: no-repeat; -webkit-mask-image: linear-gradient(#000 156px, transparent 281px); mask-image: linear-gradient(#000 156px, transparent 281px); }
 html:not([data-bg=none]) .frame .screen:has(canvas.art)::before { background-image: none, var(--pimg); filter: grayscale(1) brightness(.4) contrast(1.05); }
 html:not([data-bg=none]) .frame .screen:has(canvas.art)::after { filter: grayscale(1) brightness(.84) contrast(1.08); -webkit-mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); -webkit-mask-composite: source-in; mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(rgba(0,0,0,.5), #000 78px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-composite: intersect; }
 html[data-tone=color] .frame .screen:has(canvas.art)::after { filter: brightness(.9) contrast(1.04); }
+/* Under another block the picture starts at its own block and fades in, instead of reaching up behind what is above it. */
+html:not([data-bg=none]) .frame .screen.lowpic:has(canvas.art)::before { -webkit-mask-image: linear-gradient(transparent 52px, #000 100px, #000 156px, transparent 281px); mask-image: linear-gradient(transparent 52px, #000 100px, #000 156px, transparent 281px); }
+html:not([data-bg=none]) .frame .screen.lowpic:has(canvas.art)::after { -webkit-mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(transparent 52px, #000 100px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); mask-image: radial-gradient(circle at 130px 116px, #000 calc(var(--pr) * .72), transparent var(--pr)), linear-gradient(transparent 52px, #000 100px, #000 125px, rgba(0,0,0,.18) 198px, transparent 250px); }
 
 /* Desktop layout: the top bar, Home along the bottom, and pages. */
 #fs { display: none; }
@@ -274,7 +280,9 @@ html.wide #view { visibility: hidden; }
 .nname { font: 600 24px/1.2 var(--ui); letter-spacing: -.02em; }
 .nsub { margin-top: 4px; font: 400 13px var(--ui); color: var(--muted); }
 .cfade { position: absolute; left: 0; right: 0; bottom: 0; height: 56%; background: linear-gradient(to bottom, rgba(22,22,22,0), rgba(22,22,22,.86) 46%, var(--bg) 78%); pointer-events: none !important; }
-.cin { position: absolute; left: 56px; right: 56px; bottom: 40px; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 40px; row-gap: 18px; align-items: end; }
+/* Home's foot: the widgets in a row, then the strip. They stack, so a tall strip pushes the widgets up instead of running into them. */
+.cbot { position: absolute; left: 56px; right: 56px; bottom: 40px; display: flex; flex-direction: column; gap: 28px; }
+.cin { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 40px; row-gap: 18px; align-items: end; }
 .cin .ctitle { grid-column: 1 / -1; }
 .cpicks { display: flex; gap: 40px; min-width: 0; }
 .cpick { flex: 0 1 190px; min-width: 0; text-align: left; padding: 10px 0 0; border-top: 1px solid var(--line); color: var(--muted); font: 500 14px var(--ui); }
@@ -351,10 +359,14 @@ html.wide #view { visibility: hidden; }
 .smenu button.on { color: var(--text); background: var(--surface); }
 .apop { position: absolute; right: 0; bottom: calc(100% + 12px); width: 320px; max-height: min(460px, 60vh); overflow-y: auto; scrollbar-width: thin; padding: 4px 14px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.5); z-index: 5; }
 .apop .item:last-child { border-bottom: 0; }
-.cwid { position: absolute; right: 56px; bottom: 124px; display: flex; gap: 40px; }
-.cwid .widget { width: 260px; }
-@media (max-width: 1099px) { .nlive .nm { display: none; } .nlinks button { padding: 0 10px; } .cwid { display: none; } }
-@media (max-width: 899px) { .nav .mark span { display: none; } .nlive { display: none; } .msplit { gap: 24px; } .mright { padding-left: 24px; } .ssplit { grid-template-columns: 150px minmax(0, 1fr); gap: 24px; } .cpicks { gap: 16px; } .cpick { min-width: 0; } .cin .stats { gap: 24px; } .cin { left: 24px; right: 24px; } }
+/* The widgets wrap and shrink with the window, so switching one on always shows it. */
+.cwid { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-end; gap: 12px 16px; }
+.cwid .widget { flex: 0 1 288px; min-width: 200px; box-sizing: border-box; padding: 12px 14px 14px; border-radius: 10px; background: rgba(14,14,14,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+@media (max-width: 1099px) { .nlive .nm { display: none; } .nlinks button { padding: 0 10px; } }
+@media (max-width: 899px) { .nav .mark .who { display: none; } .where::after { content: ''; } .nlive { display: none; } .msplit { gap: 24px; } .mright { padding-left: 24px; } .ssplit { grid-template-columns: 150px minmax(0, 1fr); gap: 24px; } .cpicks { gap: 16px; } .cpick { min-width: 0; } .cin .stats { gap: 24px; } .cbot { left: 24px; right: 24px; } }
+
+/* A short window keeps the picture: the usage widget shows its total without the calendar. */
+@media (max-height: 640px) { .cwid .minical { display: none; } }
 
 /* For people who asked for less motion. */
 @media (prefers-reduced-motion: reduce) { .frame .screen { transition: none; } }

@@ -12,7 +12,7 @@ function rowOf(rows, name) {
 }
 export const forget = (r) => { delete usage.last[keyOf(r)]; dirty = true; };
 
-function parseMetrics(text) {
+export function parseMetrics(text) {
   const out = {};
   for (const line of text.split('\n')) {
     const m = /^(?:vllm|sglang|llamacpp)[:_]([a-z_0-9]+)(?:\{.*\})? ([-0-9.e+]+)$/.exec(line);

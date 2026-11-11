@@ -27,7 +27,7 @@ export async function peers() {
   const list = await Promise.all(mine.map(async (p) => {
     const ip = p.TailscaleIPs?.[0];
     const app = p.Online && await fetch(`http://${ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false);
-    return { name: p.HostName, ip, os: p.OS, online: !!p.Online, seen: p.LastSeen, app: !!app, linked: linked.has(ip) };
+    return { name: p.HostName, dns: (p.DNSName || '').replace(/\.$/, ''), ip, os: p.OS, online: !!p.Online, seen: p.LastSeen, app: !!app, linked: linked.has(ip) };
   }));
   // A machine that was set up twice appears twice; keep the one that is online, else the one seen last.
   list.sort((a, b) => b.online - a.online || String(b.seen).localeCompare(String(a.seen)));
@@ -41,6 +41,35 @@ export async function isMine(req) {
   const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, ''), me = await self();
   if (!me || ![me.ip, me.name, me.name.split('.')[0]].includes((req.headers.host || '').replace(/:\d+$/, ''))) return false;
   try { return JSON.parse((await run('tailscale', ['whois', '--json', ip], { timeout: 4000 })).stdout).Node.User === me.user; } catch { return false; }
+}
+
+// Installs Local AI on one of your own Tailscale machines, so nobody has to paste a command there. This computer signs
+// in over SSH the way you would: by the machine's name (which finds an entry in your SSH config), its tailnet name,
+// then its address. The machine fetches the installer from this computer, which serves it only to your own machines.
+// Only a machine Tailscale lists as yours is ever contacted, and the name is passed to ssh as a word, never to a shell.
+const SSH_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export async function install({ ip }) {
+  seen.at = 0;
+  const peer = (await peers()).find((p) => p.ip === ip) || fail(404, 'That is not one of your Tailscale machines');
+  if (!peer.online) fail(409, `${peer.name} is offline`);
+  if (!/linux/i.test(peer.os)) fail(409, `Open the Local AI app on ${peer.name}. Installing it from here works on Linux machines`);
+  const me = await self() || fail(503, 'Tailscale is not running on this computer');
+  const command = `curl -fsSL http://${me.ip}:${PORT}/install | bash`;
+  let last = '';
+  for (const host of [...new Set([peer.name, peer.dns, peer.ip])].filter((h) => SSH_NAME.test(h || ''))) {
+    const out = await run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '--', host, command], { timeout: 600000 });
+    if (!out.code) {
+      for (let i = 0; i < 40; i++) {
+        if (await fetch(`http://${peer.ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false)) { seen.at = 0; event('info', 'device.installed', { name: peer.name }); return { ok: true }; }
+        await new Promise((done) => setTimeout(done, 500));
+      }
+      fail(502, `Local AI was installed on ${peer.name}, but it is not answering on your Tailscale yet. Is Tailscale running there?`);
+    }
+    last = (out.stderr.trim() || out.stdout.trim()).split('\n').pop().slice(0, 200);
+    if (out.code !== 255) { event('warn', 'device.install', { name: peer.name, error: last }); fail(502, `The install on ${peer.name} stopped: ${last}`); } // it signed in; the installer itself failed
+  }
+  event('warn', 'device.install', { name: peer.name, error: last });
+  return fail(502, `This computer could not sign in to ${peer.name} over SSH, so it can’t install Local AI there for you`);
 }
 
 export const views = () => config.devices.map((d, i) => ({ i, name: d.name, url: d.url, ...(remote.get(d.url) || { online: false, error: 'Connecting', state: null }) }));
