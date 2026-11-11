@@ -141,6 +141,10 @@ try {
   const mine = (await state(PORT, 'here')).runs.find((r) => r.recipe === 'e2e/fast');
   check('the model starts and Home shows it running', mine?.phase === 'ready' && /Swift One/.test(await text('.cin .nname')));
   check('the top bar shows it live', /tok\/s/.test(await text('.nlive')));
+  // The picture behind Home is lit while a model runs: all of it at once, with no shape that grows or shrinks over it.
+  const light = () => page('(() => { const c = getComputedStyle(document.querySelector("#art .color")); return c.opacity + " " + c.maskImage; })()');
+  const lit = await until('the picture to light', async () => (await light()) === '1 none', 5000).then(() => true, () => false);
+  check('the picture is lit as a whole while a model runs', lit, await light());
   check('Home shows its live numbers', /Decode tok\/s/.test(await text('.cin .stats')));
 
   // 3. Open an agent on it. With no terminal to open, the app hands over the command, which names the exact model.
@@ -225,6 +229,9 @@ try {
   await press('[data-act=stop]');
   await until('the model to stop', async () => !(await state(PORT, 'here')).runs.some((r) => r.recipe === 'e2e/fast'), 60000);
   check('Stop stops the model and Home offers to start one again', /Swift One/.test(await shows('Home, ready to start', '.cin .nname', /./)) && (await page(`${seen('.cright [data-act=start]')}.length`)) === 1);
+
+  const dark = await until('the picture to go dark', async () => (await light()) === '0 none', 5000).then(() => true, () => false);
+  check('the picture is dark again once the model has stopped', dark, await light());
 
   // 10. Left alone, the page does no work: it draws when the machine changes, not on every frame of the display.
   const frames = await page('new Promise((done) => { const real = window.requestAnimationFrame; let n = 0; window.requestAnimationFrame = (f) => { n++; return real(f); }; setTimeout(() => { window.requestAnimationFrame = real; done(n); }, 1500); })');
