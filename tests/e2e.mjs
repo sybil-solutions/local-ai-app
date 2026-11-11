@@ -113,7 +113,11 @@ try {
   await api(OTHER, 'there', '/api/runs', { method: 'POST', body: { recipe: 'e2e/balanced' } });
 
   // The app.
-  launch(join(ROOT, 'node_modules', '.bin', 'electron'), ['.', `--user-data-dir=${join(WORK, 'window')}`, `--remote-debugging-port=${DEBUG}`, ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [])], world('here', PORT));
+  launch(join(ROOT, 'node_modules', '.bin', 'electron'), ['.', `--user-data-dir=${join(WORK, 'window')}`, `--remote-debugging-port=${DEBUG}`,
+    // The page does not redraw while its window is hidden, and a window covered by another counts as hidden. The
+    // test must not depend on what else is on the screen of the machine it runs on.
+    '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-features=CalculateNativeWinOcclusion',
+    ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [])], world('here', PORT));
   const target = await until('the app\'s window', async () => (await (await fetch(`http://127.0.0.1:${DEBUG}/json`)).json()).find((t) => t.type === 'page' && t.url.includes(`:${PORT}`)), 60000);
   ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((done, failed) => { ws.onopen = done; ws.onerror = failed; });
