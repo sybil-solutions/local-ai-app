@@ -47,9 +47,16 @@ function paint(force) {
   }
   drawnId = id;
 }
+// A window nobody can see is not redrawn every time the machine's numbers move: it is drawn once, when it is looked
+// at again.
+let unseen = false;
+document.addEventListener('visibilitychange', () => { if (!document.hidden && unseen) render(true); });
+
 // A screen whose data vanished (the model it was about stopped, say) closes instead of leaving the page blank. A
 // connected machine whose snapshot can't be drawn at all is left for this computer, with a line saying so.
 export function render(force) {
+  unseen = !!document.hidden;
+  if (unseen) return;
   try { paint(force); } catch (e) {
     if (!s.nav && s.dev === -1) throw e;
     if (!s.nav) { s.note = `${s.snap?.devices[s.dev]?.name || 'That machine'} sent something Local AI can’t show`; s.dev = -1; }
