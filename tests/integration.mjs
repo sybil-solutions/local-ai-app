@@ -162,6 +162,7 @@ try {
   check('a wrong key is refused', (await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { authorization: 'Bearer nope' } })).status === 401);
   const page = await raw('/');
   check('the page names its scripts, so the browser fetches them side by side', /<link rel="modulepreload" href="\/app\.js">/.test(page.body) && page.body.includes('href="/components/home.js"'));
+  // Every address the app answers on has a listener made the same way (listener() in server/index.js), this one included.
   check('a connection is kept open for five minutes, so the next request does not have to open one', /timeout=300\b/.test(page.headers['keep-alive'] || ''), page.headers['keep-alive']);
   const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`), tag = appJs.headers.get('etag');
   const unchanged = await fetch(`http://127.0.0.1:${PORT}/app.js`, { headers: { 'if-none-match': tag } });
