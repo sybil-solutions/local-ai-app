@@ -172,6 +172,10 @@ async function share() {
 
 export async function start() {
   const server = createServer(handle);
+  // A connection is kept for five minutes after its last request, not five seconds. Opening one to a machine far away
+  // takes a round trip before the request can even be sent (0.2 s across a continent, more when a packet is lost), so
+  // a press on a connected machine's page should find the connection it used a moment ago still open.
+  server.keepAliveTimeout = 300e3;
   await new Promise((done, reject) => { server.once('error', reject); server.listen(PORT, HOST, done); });
   if (!/^(127\.|0\.0\.0\.0$)/.test(HOST)) createServer(handle).once('error', (e) => event('warn', 'server.loopback', { error: e.message })).listen(PORT, '127.0.0.1');
   const every = (ms, fn) => setInterval(() => fn().catch?.((e) => event('error', 'loop.failed', { error: e.message })), ms);

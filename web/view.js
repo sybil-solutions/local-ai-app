@@ -1,5 +1,5 @@
 // Drawing: which screen is shown, in which layout, and the window that fits it.
-import { fitArt } from './art.js';
+import { drawArt, fitArt } from './art.js';
 import { Notice } from './components/layout.js';
 import { DeskHome, DeskPage, NavBar } from './desktop.js';
 import { html } from './html.js';
@@ -45,6 +45,7 @@ function paint(force) {
     panel.classList.toggle('lowpic', lower > 0);
     fitPanel();
   }
+  drawArt();
   drawnId = id;
 }
 // A window nobody can see is not redrawn every time the machine's numbers move: it is drawn once, when it is looked
