@@ -8,7 +8,7 @@ import { CapNames, Caps, EditForm, facts, meta, ModelCard, UseButton } from './c
 import { ctxOf, fmt } from './format.js';
 import { attrs, data, html } from './html.js';
 import { Elsewhere, SCREENS, STATE } from './screens.js';
-import { all, chosen, D, here, HOME, run, s, shown } from './state.js';
+import { all, chosen, D, here, HOME, model, others, run, s, sections, shown } from './state.js';
 
 // [section, label, the screen it opens]. Keys 1 to 6 follow this order.
 export const NAV = [['home', 'Home', 'home'], ['models', 'Models', 'adv-models'], ['agents', 'Agents', 'agent'], ['machines', 'Machines', 'machines'], ['usage', 'Usage', 'usage'], ['settings', 'Settings', 'home-edit']];
@@ -48,12 +48,12 @@ export function DeskHome(id) {
 
 // Models: the whole list on the left, the chosen one open beside it.
 function ModelsPage(page) {
-  const r = all().find((x) => x.id === s.modelOpen) || chosen();
+  const r = model(s.modelOpen) || chosen() || others()[0]; // a machine that can start nothing still lists what the registry has for it
   if (!r) return html`<div class="pwrap pg"><div class="ptitle">Models</div><div class="psub">None run on ${here()}</div>${Elsewhere()}</div>`;
-  const row = (x) => html`<button class="mitem${x.id === r.id ? ' sel' : ''}${x.id === chosen()?.id ? ' cur' : ''}"${data({ act: 'model', id: x.id, go: 'adv-models' })}><span class="at"><b data-tag="${run()?.recipe === x.id ? 'Running' : 'Selected'}">${x.name}</b><small>${meta(x)}</small></span><span class="ics">${Caps(x)}</span></button>`;
+  const row = (x) => html`<button class="mitem${x.id === r.id ? ' sel' : ''}${x.id === chosen()?.id ? ' cur' : ''}"${data({ act: 'model', id: x.id, go: 'adv-models' })}><span class="at"><b data-tag="${run()?.recipe === x.id ? 'Running' : 'Selected'}">${x.name}</b><small>${x.why || meta(x)}</small></span><span class="ics">${Caps(x)}</span></button>`;
   const right = page === 'edit' ? html`<div class="pg"><div class="screen">${EditForm()}</div></div><button class="pback" data-go="adv-models">Cancel</button>`
-    : html`<div><div class="ptitle">${r.name}</div><div class="psub" style="margin-bottom:0">${meta(r)}</div></div><div class="mcaps">${CapNames(r)}</div>${KeyValue(facts(r, true))}<div class="macts">${UseButton(r)}${!r.host && Button({ label: 'Edit', act: 'model', go: 'edit', data: { id: r.id } })}</div>${ModelCard(r)}`;
-  return html`<div class="msplit"><div class="mleft"><div class="ptitle">Models</div><div class="psub">${all().length} run on this machine, newest first</div><div class="mlist">${all().map(row)}</div></div><div class="mright">${right}</div></div>`;
+    : html`<div><div class="ptitle">${r.name}</div><div class="psub" style="margin-bottom:0">${meta(r)}</div>${r.why && html`<div class="psub why">${r.why}</div>`}</div><div class="mcaps">${CapNames(r)}</div>${KeyValue(facts(r, true))}<div class="macts">${UseButton(r)}${!r.host && Button({ label: 'Edit', act: 'model', go: 'edit', data: { id: r.id } })}</div>${ModelCard(r)}`;
+  return html`<div class="msplit"><div class="mleft"><div class="ptitle">Models</div><div class="psub">${all().length} this machine can start, largest setup first</div><div class="mlist">${sections().map((sec) => html`<div class="label group">${sec.label}</div>${sec.rows.map(row)}`)}</div></div><div class="mright">${right}</div></div>`;
 }
 
 // A screen as a page: Models and Settings have layouts of their own, the rest are the panel's screen in a column.

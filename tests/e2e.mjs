@@ -31,14 +31,17 @@ async function until(what, ask, ms = 20000) {
   }
 }
 
-// The registry: one card (the stand-in nvidia-smi's) and three models for it, so Home has its three picks.
+// The registry: one card (the stand-in nvidia-smi's) and three models for it, so Home has its three picks. A fourth
+// recipe for the card asks Docker for something the app gives no registry recipe; it comes with notes from its source.
 const image = (n) => `example/engine@sha256:${String(n).repeat(64)}`;
 const recipe = (model, tps, n) => ({ card: 'smoke-gpu', model, engine: 'vllm', proof: [{ tps }], launch: { image: image(n), port: 8000, cards: 1, seqs: 1, ctx: 8192, args: ['--model', model, '--max-num-seqs', '1'] } });
 const catalog = {
   cards: { 'smoke-gpu': { name: 'Smoke Test GPU', vram_gb: 24, backend: 'nvidia' } }, builds: {},
-  models: { 'swift-1': { name: 'Swift One', released: '2026-03-01', aa: { index: 30 } }, 'even-3': { name: 'Even Three', released: '2026-05-01', aa: { index: 45 } }, 'sage-2': { name: 'Sage Two', released: '2026-07-01', aa: { index: 60 } } },
+  models: { 'swift-1': { name: 'Swift One', released: '2026-03-01', aa: { index: 30 } }, 'even-3': { name: 'Even Three', released: '2026-05-01', aa: { index: 45 } }, 'sage-2': { name: 'Sage Two', released: '2026-07-01', aa: { index: 60 } }, 'held-4': { name: 'Held Four', released: '2026-08-01' } },
   recipes: { 'e2e/fast': recipe('swift-1', 90, 1), 'e2e/balanced': recipe('even-3', 60, 2), 'e2e/smart': recipe('sage-2', 30, 3) },
 };
+catalog.recipes['e2e/held'] = recipe('held-4', 20, 4);
+Object.assign(catalog.recipes['e2e/held'].launch, { flags: ['--privileged'], setup: 'Measured on the reference host, on four cards.', needs: { host_ram_gb: 1 } });
 const registry = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(catalog)); });
 await new Promise((done) => registry.listen(0, '127.0.0.1', done));
 
@@ -166,7 +169,14 @@ try {
 
   // 5. Models: the list, a model's page, and editing a recipe and putting it back.
   await press('[data-nav=adv-models]');
-  check('Models lists all three', (await page(`${seen('.mitem')}.length`)) === 3);
+  check('Models lists all three', (await page(`${seen('.mitem')}.length`)) === 4 && /3 this machine can start/.test(await text('.mleft .psub')));
+  // The list is headed by the setup its recipes are for. A recipe the registry has for this card that the app will
+  // not start is listed too, after the ones it can, with the reason.
+  const held = await text('.mitem[data-id="e2e/held"]');
+  check('a recipe the app will not start is listed with the reason, not left out', /Held Four/.test(held) && /Uses --privileged/.test(held) && (await text('.mlist .label')) === 'Smoke Test GPU' && (await page(`${seen('.mitem')}.at(-1).dataset.id`)) === 'e2e/held', held);
+  await press('.mitem[data-id="e2e/held"]');
+  const heldPage = await shows('its page', '.mright', /From the recipe/);
+  check('its page says why, shows the notes from its source and what it needs, and offers no start', /Uses --privileged/.test(await text('.mright .why')) && /Measured on the reference host/.test(heldPage) && /Needs 1 GB of memory beside the GPUs/.test(heldPage) && (await page('document.querySelector(".macts .btn").disabled')) === true, heldPage.slice(0, 300));
   await press('.mitem[data-id="e2e/smart"]');
   check('choosing one shows its numbers', /Sage Two/.test(await text('.mright .ptitle')) && /Requests at once 1/.test(await text('.mright .kv')));
   await press('.macts [data-go=edit]');

@@ -9,7 +9,7 @@ import { EditButton, EditForm, ListRow, meta, ModelCard, ModelDetail, UseButton 
 import { UsageBody } from './components/usage.js';
 import { ago, count, mins } from './format.js';
 import { data, html } from './html.js';
-import { all, D, here, homeCfg, newer, picks, run, s } from './state.js';
+import { all, D, here, homeCfg, model, newer, picks, run, s, sections } from './state.js';
 
 // Another machine that can run models, offered when this one can't.
 export function Elsewhere() {
@@ -108,13 +108,13 @@ export const SCREENS = {
   },
   addmachine: () => html`${CloseBar()}${Head('Add machine')}${typed('host', 'Address', 'http://100.90.62.80:18700')}${typed('mkey', 'Key', 'Not needed on your Tailscale')}${Spacer}${Button({ label: 'Add machine', act: 'connect', kind: 'go' })}`,
   usage: () => html`${CloseBar()}${Head('Usage')}${Scroll(UsageBody())}`,
-  'adv-models': () => html`${CloseBar()}${Head('Models')}${Label('Runs on this machine, newest first')}${Scroll(all().map(ListRow))}`,
+  'adv-models': () => html`${CloseBar()}${Head('Models')}${Label(`${all().length} this machine can start, largest setup first`)}${Scroll(sections().map((sec) => html`${Label(sec.label, { group: true })}${sec.rows.map(ListRow)}`))}`,
   'model-page': () => {
-    const r = all().find((x) => x.id === s.modelOpen);
+    const r = model(s.modelOpen);
     if (!r) return html`${CloseBar()}${Note('This model is no longer in the list')}`;
     // A recipe that can't be edited has one button, at full width; the rest have Edit beside it.
     const main = UseButton(r) || Button({ label: 'Running', disabled: true }), edit = EditButton(r, 'width:auto;flex:1');
-    return html`${CloseBar()}${Scroll(html`${Head(r.name)}${Note(meta(r))}${ModelDetail(r)}${ModelCard(r)}`)}${edit ? html`<div class="two">${main}${edit}</div>` : main}`;
+    return html`${CloseBar()}${Scroll(html`${Head(r.name)}${Note(meta(r))}${r.why && Note(r.why)}${ModelDetail(r)}${ModelCard(r)}`)}${edit ? html`<div class="two">${main}${edit}</div>` : main}`;
   },
   // Before a model that runs as a program on the machine is started for the first time, or after it changed.
   approve: () => {

@@ -4,7 +4,9 @@
 // Options the app sets itself. A recipe's own value for any of these is dropped.
 const OWNED = new Set(['--network', '--net', '--gpus', '--name', '--rm', '-d', '--detach', '-p', '--publish', '--label', '--entrypoint', '--restart']);
 // Options a registry recipe may add. Each takes exactly one value.
-const ALLOWED = new Set(['--ipc', '--network', '--net', '--gpus', '--shm-size', '--ulimit', '--workdir', '-w']);
+const ALLOWED = new Set(['--ipc', '--network', '--net', '--gpus', '--shm-size', '--ulimit', '--workdir', '-w', '--cap-add']);
+// The one capability a recipe may ask for: locking its memory, which engines that pin their caches need.
+const CAPS = /^IPC_LOCK$/;
 // Engines that only count tokens when asked to.
 const METRICS = [[/sglang/, '--enable-metrics'], [/llama-server/, '--metrics']];
 
@@ -19,9 +21,23 @@ export const flagsOf = (launch) => [].concat(launch.flags || []).map((flag) => {
 // argument, which would be one of the app's own or the image.
 export function flagProblem(launch) {
   // --ipc may share memory with the host or keep its own. Joining another container's (container:<name>) is not for a recipe to choose.
-  const bad = flagsOf(launch).find(([name, value]) => !ALLOWED.has(name) || value === null || !/^[^\s-]\S*$/.test(value) || (name === '--ipc' && !/^(host|private|shareable|none)$/.test(value)));
+  const bad = flagsOf(launch).find(([name, value]) => !ALLOWED.has(name) || value === null || !/^[^\s-]\S*$/.test(value) || (name === '--ipc' && !/^(host|private|shareable|none)$/.test(value)) || (name === '--cap-add' && !CAPS.test(value)));
   return bad ? (bad[0].trim() ? `Uses ${`${bad[0]} ${bad[1] ?? ''}`.trim().slice(0, 60)}` : 'Has an empty Docker option') : null;
 }
+
+// What a recipe asks of the host for its container, in the registry's typed form: a memory limit, memory it may lock.
+// Anything that is not one of these four, of the right type, is a problem (and the recipe is not started).
+const RESOURCES = { memoryBytes: 'number', memorySwapBytes: 'number', memlockUnlimited: 'boolean', ipcLock: 'boolean' };
+export function resourceProblem(launch) {
+  const r = launch.resources;
+  if (r === undefined || r === null) return null;
+  const bytes = (v) => Number.isSafeInteger(v) && v > 0;
+  const fine = typeof r === 'object' && !Array.isArray(r) && Object.entries(r).every(([k, v]) => typeof v === RESOURCES[k] && (typeof v === 'boolean' || bytes(v)))
+    && (r.memorySwapBytes === undefined || (bytes(r.memoryBytes) && r.memorySwapBytes >= r.memoryBytes));
+  return fine ? null : 'Asks the machine for something this app does not give';
+}
+const resourceArgs = (r) => (r ? [...(r.memoryBytes ? [`--memory=${r.memoryBytes}`] : []), ...(r.memorySwapBytes ? [`--memory-swap=${r.memorySwapBytes}`] : []),
+  ...(r.memlockUnlimited ? ['--ulimit=memlock=-1:-1'] : []), ...(r.ipcLock ? ['--cap-add=IPC_LOCK'] : [])] : []);
 
 // The arguments for `docker`. run: { id, recipe, gpus, since, reachable }. `bind` is the addresses the engine's port
 // is published on. `mounts` are the weights' -v arguments, `configFile` the recipe's config written to disk, and
@@ -35,7 +51,7 @@ export function dockerArgs({ run, launch, name, bind, mounts = [], configFile = 
   return ['run', '-d', `--name=${name}`,
     '--label=local-ai=1', `--label=local-ai.port=${run.id}`, `--label=local-ai.recipe=${run.recipe}`, `--label=local-ai.gpus=${run.gpus.join('+')}`, `--label=local-ai.since=${run.since}`, `--label=local-ai.reach=${+run.reachable}`,
     `--gpus="device=${run.gpus.join(',')}"`, ...bind.map((host) => `--publish=${host}:${run.id}:${launch.port}`),
-    ...(trusted ? [] : ['--security-opt=no-new-privileges']), ...(launch.shm ? [`--shm-size=${launch.shm}`] : []), ...kept,
+    ...(trusted ? [] : ['--security-opt=no-new-privileges']), ...(launch.shm ? [`--shm-size=${launch.shm}`] : []), ...kept, ...(resourceProblem(launch) ? [] : resourceArgs(launch.resources)),
     ...env.map(([k, v]) => `--env=${k}=${v}`), ...mounts, ...(configFile ? [`--volume=${configFile}:${launch.config.at}:ro`] : []),
     ...(entry[0] ? [`--entrypoint=${entry[0]}`] : []), '--', launch.image, ...entry.slice(1), ...[].concat(launch.args || []).map(String), ...(metrics ? [metrics] : [])];
 }
