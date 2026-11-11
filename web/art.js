@@ -29,9 +29,11 @@ export function applyBg() {
 }
 
 // Your own picture lives on the server; its centre plays the part of the fingertips.
+let asked = null; // the picture last asked for, so one that is loading or can't be had is not asked for again
 export async function loadOwn() {
   const at = s.snap.picture;
-  if (!at || own?.at === at) return;
+  if (!at || own?.at === at || asked === at) return;
+  asked = at;
   const res = await fetch('/api/background', { headers: { authorization: `Bearer ${s.key}` } });
   if (!res.ok) return;
   const url = URL.createObjectURL(await res.blob()), img = new Image();

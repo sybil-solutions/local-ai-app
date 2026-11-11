@@ -1,7 +1,7 @@
 {
   "name": "local-ai",
   "productName": "Local AI",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "description": "Start local models from registry recipes, watch them, and open your coding agents.",
   "type": "module",
   "main": "electron/main.js",
@@ -10,8 +10,9 @@
     "server": "node server/index.js",
     "dist": "electron-builder",
     "lint": "eslint .",
+    "screens": "node scripts/screens.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "check": "eslint . && node scripts/smoke.mjs"
+    "check": "eslint . && node scripts/screens.mjs && node scripts/smoke.mjs"
   },
   "build": {
     "appId": "ai.sybilsolutions.local",

@@ -25,6 +25,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npx eslint .
+      - name: Every screen draws, and nothing it is told becomes markup
+        run: node scripts/screens.mjs
       - name: install.sh
         run: shellcheck -S warning install.sh
   smoke-linux:

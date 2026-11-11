@@ -70,13 +70,18 @@ server/
 web/
   index.html    the page shell
   style.css     every style, in named sections
-  app.js        draws the current screen, loads what it needs, does what buttons ask
+  app.js        starts the page: listens for presses and typing, follows the snapshot, redraws
   state.js      the snapshot, what the page remembers, and resolve()
-  screens.js    every screen as a function that returns HTML
+  screens.js    every screen, as an arrangement of components
   desktop.js    the wide layout: top bar, Home, pages
-  ui.js         buttons, rows, icons and the other small pieces
-  usage.js      the Usage screen's numbers, chart and calendar
+  view.js       draws a screen into the page and fits the window to it
+  actions.js    what buttons do (ACTS) and what screens fetch (LOAD)
+  html.js       the `html` tag every piece of markup is written with; it escapes what is put into it
+  markdown.js   a model card's Markdown as the app's own few tags
+  format.js     how numbers, sizes and times are written
   art.js        the picture behind everything and the Background setting
+  components/   the reusable pieces: icons, controls (buttons, switches, fields), layout (bars, rows, tables),
+                home (title, stats, GPUs), models, agents, usage
 electron/main.js   a window onto the page; starts the server if none is running; fits the window to the panel when the page shows it (preload.cjs)
 install.sh         user service + Omarchy web app
 design/            the approved design and the developer handoff (reference only)
@@ -193,11 +198,12 @@ A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` wit
 
 ```
 npm ci --ignore-scripts && npm run lint    # mistakes that break at runtime: undefined names, leftovers
+npm run screens                            # every screen drawn for every state, with hostile text in every field
 npm run smoke                              # the real server end to end; on Apple silicon also a host run
 ```
 
-CI (`.github/workflows/`) runs both on every push and pull request: lint and the Linux smoke test always, the macOS smoke test when `server/` or `scripts/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit. There are no unit tests on purpose: `scripts/smoke.mjs` starts the server against a fixture registry and engines that answer like real ones, and checks what a user would notice.
+CI (`.github/workflows/`) runs both on every push and pull request: lint and the Linux smoke test always, the macOS smoke test when `server/` or `scripts/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit. There are no unit tests on purpose: `scripts/smoke.mjs` starts the server against a fixture registry and engines that answer like real ones, and checks what a user would notice. `scripts/screens.mjs` draws every screen in both layouts for every state the server can report (448 renders) and fails if one throws or if any text it was given comes out as markup.
 
-There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that returns HTML; a button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/app.js`). To add a route, add a line to `ROUTES`.
+There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that arranges components from `web/components/`; a component is a function that returns markup written with the `html` tag, which escapes everything put into it, so text the page is told can never become markup. A button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/actions.js`). To add a route, add a line to `ROUTES`.
 
 The design is final and lives in `design/`. `design/handoff/local-ai-build-map.html` maps every screen and how they connect.

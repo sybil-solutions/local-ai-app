@@ -184,7 +184,7 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .bg-own { background-image: var(--own, none); background-size: cover; background-position: center; }
 .bg-none { background: var(--bg); }
 .bg-clouds { background: url(/clouds.webp) 60% 30% / cover no-repeat; }
-.dove { height: 16px; width: auto; flex: none; margin-right: 7px; }
+.dove { display: block; height: 16px; width: 12px; flex: none; margin-right: 7px; }
 .mark.chip .dove { margin-right: 0; }
 .bgrow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgrow > span { min-width: 0; }
@@ -318,6 +318,8 @@ html.wide #view { visibility: hidden; }
 .nlive i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; }
 .nlive em { font-style: normal; color: var(--muted); font-weight: 400; margin-left: 6px; }
 #fs.paged #art { opacity: .13; }
+/* Home with its Picture block switched off. */
+#fs.nopic #art { opacity: 0; }
 #fs.paged #art .color { visibility: hidden; }
 #page, .mlist, .mright, .apop { scrollbar-color: var(--line) transparent; }
 #page { position: absolute; left: 0; right: 0; top: 52px; bottom: 0; z-index: 2; overflow-y: auto; scrollbar-width: thin; display: none; }
