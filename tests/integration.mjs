@@ -115,6 +115,7 @@ catalog.recipes[NOTED] = { ...docked({ setup: 'NEEDS: one card. Measured on the 
   resources: { ipcLock: true, memlockUnlimited: true, memoryBytes: 2 ** 33, memorySwapBytes: 2 ** 33 }, weights: [{ repo: 'org/kept', revision: REV, at: '/models' }] }), model: 'kept-1' };
 catalog.recipes[CHANGED] = { ...docked({ weights: [{ repo: 'org/changed', revision: REV, at: '/models' }] }), model: 'changed-1' };
 catalog.recipes[HUNGRY] = { ...docked({ needs: { host_ram_gb: 1e6 } }), model: 'hungry-1' };
+catalog.recipes[NOTED].proof = [{ tps: 50, gates: 'load chat reasoning tools context speed' }]; // the lab saw this one call a tool; nothing in its arguments says it can
 // Setups, as the registry names them: one card, the machine's two cards together, and two machines of the card.
 // One recipe needs both cards; another is one engine across two machines.
 const PAIR = 'smoke/gpu/pair.docker.2x', SPREAD = 'smoke/gpu/spread.docker.2x';
@@ -394,6 +395,8 @@ try {
   const hungry = refused.find((r) => r.id === HUNGRY);
   check('a recipe that needs more memory than this machine has says so and is not started', /Needs 1000000 GB of memory/.test(hungry?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: HUNGRY } })).status === 409, hungry?.why);
   check('notes from a recipe\'s source do not keep it from being offered', offered.includes(NOTED));
+  const shown = (id) => nv.groups.flatMap((g) => g.recipes).find((r) => r.id === id);
+  check('a recipe the lab saw call a tool is shown as able to, one with no such proof is not', shown(NOTED)?.tools === true && shown(DOCKED)?.tools === false);
   const noted = await api(`/api/card?id=${encodeURIComponent(NOTED)}`);
   check('they come with its card, with what it needs of the host, even when the model has no card', noted.status === 200 && /^NEEDS: one card/.test(noted.json?.notes || '') && noted.json.needs.ram === 1 && noted.json.needs.disk === 3 && noted.json.needs.nvme === true, JSON.stringify(noted.json));
   check('a recipe with no notes and no card still answers that it has none', (await api(`/api/card?id=${encodeURIComponent(DOCKED)}`)).status === 404);
