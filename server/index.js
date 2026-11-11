@@ -162,22 +162,24 @@ async function handle(req, res) {
 }
 
 // With Tailscale up, the app and its engines also answer on this machine's tailnet address, so your other machines can use them.
+// The app answers on up to three addresses (this machine's own, loopback beside it, the tailnet's), each with a
+// listener made here. A connection is kept for five minutes after its last request, not five seconds. Opening one to
+// a machine far away takes a round trip before the request can even be sent (0.2 s across a continent, more when a
+// packet is lost), so a press on a connected machine's page should find the connection it used a moment ago still open.
+const listener = () => Object.assign(createServer(handle), { keepAliveTimeout: 300e3 });
+
 async function share() {
   const me = !process.env.LOCAL_AI_HOST && process.env.LOCAL_AI_SHARE !== '0' && await machines.self();
   if (!me || shared === me.ip) return;
   shared = me.ip;
-  createServer(handle).once('error', (e) => { shared = null; event('warn', 'server.tailnet', { error: e.message }); })
+  listener().once('error', (e) => { shared = null; event('warn', 'server.tailnet', { error: e.message }); })
     .listen(PORT, me.ip, () => { engine.shareOn(me.ip, [me.name, me.name.split('.')[0]]); event('info', 'server.shared', { ip: me.ip }); });
 }
 
 export async function start() {
-  const server = createServer(handle);
-  // A connection is kept for five minutes after its last request, not five seconds. Opening one to a machine far away
-  // takes a round trip before the request can even be sent (0.2 s across a continent, more when a packet is lost), so
-  // a press on a connected machine's page should find the connection it used a moment ago still open.
-  server.keepAliveTimeout = 300e3;
+  const server = listener();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(PORT, HOST, done); });
-  if (!/^(127\.|0\.0\.0\.0$)/.test(HOST)) createServer(handle).once('error', (e) => event('warn', 'server.loopback', { error: e.message })).listen(PORT, '127.0.0.1');
+  if (!/^(127\.|0\.0\.0\.0$)/.test(HOST)) listener().once('error', (e) => event('warn', 'server.loopback', { error: e.message })).listen(PORT, '127.0.0.1');
   const every = (ms, fn) => setInterval(() => fn().catch?.((e) => event('error', 'loop.failed', { error: e.message })), ms);
   let queued = false;
   const soon = () => { if (!queued) { queued = true; setTimeout(() => { queued = false; publish().catch((e) => event('error', 'publish.failed', { error: e.message })); }, 150); } };
