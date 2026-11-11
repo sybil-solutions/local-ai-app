@@ -1,6 +1,6 @@
 // The one docker command that starts an engine, built from a recipe. Nothing here runs anything: it turns a recipe
 // and a run into a list of arguments. So what a recipe can and cannot make Docker do is decided in this file, and is
-// checked without Docker by scripts/fuzz.mjs.
+// checked without Docker by tests/fuzz.mjs.
 // Options the app sets itself. A recipe's own value for any of these is dropped.
 const OWNED = new Set(['--network', '--net', '--gpus', '--name', '--rm', '-d', '--detach', '-p', '--publish', '--label', '--entrypoint', '--restart']);
 // Options a registry recipe may add. Each takes exactly one value.

@@ -22,9 +22,17 @@ export async function self() {
   return me?.TailscaleIPs?.[0] ? { name: (me.DNSName || '').replace(/\.$/, ''), ip: me.TailscaleIPs[0], ips: me.TailscaleIPs, user: me.UserID, tagged: !!me.Tags?.length, magic: !!found.CurrentTailnet?.MagicDNSEnabled } : null;
 }
 
-// Your own computers on the tailnet, and whether each already answers as Local AI. Phones, VPN exit nodes and shared machines are left out.
-export async function peers() {
-  if (Date.now() - seen.at < 10000) return seen.list;
+// Your own computers on the tailnet, and whether each already answers as Local AI. Phones, VPN exit nodes and shared
+// machines are left out. Asking each one takes up to a second and a half, so a list that is already known is given
+// at once and looked up again behind it; `fresh` waits for the new one.
+let looking = null;
+export function peers({ fresh = false } = {}) {
+  if (Date.now() - seen.at >= 10000 || fresh) looking ||= look().finally(() => { looking = null; });
+  return seen.at && !fresh ? Promise.resolve(seen.list) : looking;
+}
+// Whether the list peers() just gave is older than ten seconds, and a newer one is on its way.
+export const peersAreStale = () => !!looking;
+async function look() {
   const linked = new Set(config.devices.map((d) => new URL(d.url).hostname)), found = await status(), names = new Set();
   const mine = found?.Self?.Tags?.length ? [] : Object.values(found?.Peer || {}).filter((p) => p.UserID === found.Self.UserID && !p.Tags?.length && !/ios|android|tvos/i.test(p.OS || ''));
   const list = await Promise.all(mine.map(async (p) => {
@@ -80,8 +88,7 @@ const ship = (host, mode) => new Promise((done) => {
 // `update` replaces a copy that is already running there (one this computer installed earlier). Without it, a machine
 // that turns out to run Local AI already is left as it is: this computer just can't reach it.
 export async function install({ ip, update = false }) {
-  seen.at = 0;
-  const peer = (await peers()).find((p) => p.ip === ip) || fail(404, 'That is not one of your Tailscale machines');
+  const peer = (await peers({ fresh: true })).find((p) => p.ip === ip) || fail(404, 'That is not one of your Tailscale machines');
   if (!peer.online) fail(409, `${peer.name} is offline`);
   if (!/linux/i.test(peer.os)) fail(409, `Open the Local AI app on ${peer.name}. Installing it from here works on Linux machines`);
   // A copy that updates itself (it was cloned from the repo) is left to do that: writing files into it would break it.
@@ -129,26 +136,53 @@ export function conform(sent) {
 export const settled = () => config.devices.every((d) => remote.has(d.url));
 export const views = () => config.devices.map((d, i) => ({ i, name: d.name, url: d.url, ...(remote.get(d.url) || { online: false, error: 'Connecting', state: null }) }));
 
-// A slow link (Tailscale relayed through DERP can take seconds a round trip) is not an offline machine: each machine
-// gets 15 s to answer, is asked again only once it has, and counts as offline after three misses in a row.
-const polling = new Set(), misses = new Map();
-export const poll = () => Promise.all(config.devices.map(async (device) => {
-  if (polling.has(device.url)) return;
-  polling.add(device.url);
-  try {
-    const res = await fetch(`${device.url}/api/state`, { headers: { authorization: `Bearer ${device.key}` }, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw Object.assign(new Error(res.status === 401 ? 'Wrong key' : `Answered ${res.status}`), { final: res.status === 401 });
-    remote.set(device.url, { online: true, error: null, state: conform(await jsonUpTo(res, MAX_SNAPSHOT)) });
-    misses.delete(device.url);
-  } catch (e) {
-    const was = remote.get(device.url), n = (misses.get(device.url) || 0) + 1;
-    misses.set(device.url, n);
-    if (was?.online && n < 3 && !e.final) return; // keep the last answer through a miss or two
-    // An offline machine's last snapshot is kept for its name and models, but nothing on it is shown as running.
-    remote.set(device.url, { online: false, error: e.name === 'TimeoutError' ? 'Not responding' : e.cause?.code || e.message, state: was?.state ? { ...was.state, runs: [] } : null });
-    if (was?.online !== false) event('warn', 'device.offline', { url: device.url, error: remote.get(device.url).error });
-  } finally { polling.delete(device.url); }
-}));
+// Each connected machine is followed the way its own page follows it: one request, which the machine answers the
+// moment its snapshot changes, or after twenty seconds when nothing did. So a change there is here at once, and a
+// machine with nothing to say is asked three times a minute and not twenty. Its answers come compressed.
+// A slow link (Tailscale relayed through DERP can take seconds a round trip) is not an offline machine: it counts as
+// offline after three misses in a row, and its last snapshot is kept for its name and models with nothing running.
+let notify = () => {};
+export const onChange = (fn) => { notify = fn; };
+const following = new Map(); // url → the way to stop following it
+async function track(device, stop) {
+  let v = -1, misses = 0;
+  while (!stop.aborted) {
+    try {
+      const res = await fetch(`${device.url}/api/state?v=${v}`, { headers: { authorization: `Bearer ${device.key}` }, signal: AbortSignal.any([stop, AbortSignal.timeout(35000)]) });
+      if (!res.ok) throw Object.assign(new Error(res.status === 401 ? 'Wrong key' : `Answered ${res.status}`), { final: res.status === 401 });
+      const sent = await jsonUpTo(res, MAX_SNAPSHOT);
+      remote.set(device.url, { online: true, error: null, state: conform(sent) });
+      v = Number.isInteger(sent.v) ? sent.v : -1;
+      misses = 0;
+      notify();
+    } catch (e) {
+      if (stop.aborted) return;
+      v = -1; // whatever comes next is taken whole: the machine may have restarted and be counting versions from the start
+      const was = remote.get(device.url);
+      if (!(was?.online && ++misses < 3 && !e.final)) { // a miss or two keeps the last answer
+        remote.set(device.url, { online: false, error: e.name === 'TimeoutError' ? 'Not responding' : e.cause?.code || e.message, state: was?.state ? { ...was.state, runs: [] } : null });
+        if (was?.online !== false) event('warn', 'device.offline', { url: device.url, error: remote.get(device.url).error });
+        notify();
+      }
+      await new Promise((done) => setTimeout(done, e.final ? 15000 : 3000));
+    }
+  }
+}
+// Starts following machines that were added and stops following ones that were removed.
+export function follow() {
+  for (const device of config.devices) {
+    if (following.has(device.url)) continue;
+    const stop = new AbortController();
+    following.set(device.url, stop);
+    track(device, stop.signal);
+  }
+  for (const [url, stop] of following) {
+    if (config.devices.some((d) => d.url === url)) continue;
+    stop.abort();
+    following.delete(url);
+    remote.delete(url);
+  }
+}
 
 // One of your own Tailscale machines hands over its key when asked; anything else needs it typed.
 export async function add({ url, key, name }) {
@@ -161,6 +195,7 @@ export async function add({ url, key, name }) {
   if (!res.ok) fail(res.status === 401 ? 401 : 502, res.status === 401 ? 'That key is wrong' : `It answered ${res.status}`);
   config.devices.push({ url: clean, key, name: words(name, 120).trim() || conform(await jsonUpTo(res, MAX_SNAPSHOT)).name });
   saveConfig();
+  follow();
   seen.at = 0;
   event('info', 'device.added', { url: clean });
   return { ok: true };
@@ -171,6 +206,7 @@ export function remove(index) {
   if (!config.devices[i]) fail(404, 'No such device');
   config.devices.splice(i, 1);
   saveConfig();
+  follow();
   return { ok: true };
 }
 

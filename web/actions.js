@@ -27,7 +27,13 @@ async function loadCard(id) {
 export const LOAD = {
   usage: () => load('usage', (u) => { s.usage = u; }),
   endpoints: () => { s.ends = null; return load('endpoints', (e) => { s.ends = e; }); },
-  machines: async () => { ({ peers: s.peers, install: s.install } = await api('tailscale').catch(() => ({ peers: [], install: null }))); render(); },
+  // The list comes at once from what the server already knew; when that was an old one, the new one is fetched as soon as it is ready.
+  machines: async () => {
+    const got = await api('tailscale').catch(() => ({ peers: [], install: null }));
+    ({ peers: s.peers, install: s.install } = got);
+    render();
+    if (got.stale) setTimeout(() => { if (s.nav === 'machines') LOAD.machines(); }, 1700);
+  },
   logs: () => { s.logText = 'Loading'; return load(`runs/${run().id}/logs?tail=60`, (out) => { s.logText = out.text.trim() || 'Nothing was printed'; }); },
   'adv-models': () => isFull() && loadCard(s.modelOpen || chosen()?.id),
   'model-page': () => loadCard(s.modelOpen),

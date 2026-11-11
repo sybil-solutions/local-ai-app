@@ -1,6 +1,6 @@
-# Every push and pull request: lint for mistakes that break at runtime, draw every screen, fuzz what decides what is
-# safe, then run the real server end to end on Linux.
-# No unit tests: scripts/smoke.mjs starts the server against a fixture registry and engines that answer like real ones.
+# Every push and pull request, on Linux: lint for mistakes that break at runtime and draw every screen; fuzz what
+# decides what is safe and run the real server against stand-in engines (integration); then run the real desktop app
+# and drive it through its window (end to end). There are no unit tests.
 name: CI
 on:
   push:
@@ -27,13 +27,13 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npx eslint .
       - name: Every screen draws, and nothing it is told becomes markup
-        run: node scripts/screens.mjs
-      - name: install.sh
-        run: shellcheck -S warning install.sh
-  smoke-linux:
+        run: node tests/screens.mjs
+      - name: install.sh and the release script
+        run: shellcheck -S warning install.sh scripts/release-mac.sh
+  integration:
     needs: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,7 +42,23 @@ jobs:
         with:
           node-version: 22
       - name: Hostile input against everything that decides what is safe
-        run: node scripts/fuzz.mjs
+        run: node tests/fuzz.mjs
         env:
           FUZZ_N: 20000
-      - run: node scripts/smoke.mjs
+      - name: The real server against stand-in engines, Docker and a second machine
+        run: node tests/integration.mjs
+  e2e:
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci # with its install scripts: Electron fetches its program in one
+      - name: The real desktop app, driven through its window
+        run: xvfb-run -a node tests/e2e.mjs

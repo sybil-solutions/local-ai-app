@@ -94,7 +94,7 @@ export function meter(inner, names = () => []) {
     if (counted) { counts.num_requests_running++; caller((req.socket.remoteAddress || '').replace(/^::ffff:/, '')); }
     let finished = false;
     const done = (ok, t) => { if (finished) return; finished = true; if (counted) { counts.num_requests_running--; t?.end(ok); } };
-    const up = request({ host: '127.0.0.1', port: inner, method: req.method, path: req.url, headers: req.headers, agent: false }, (answer) => {
+    const up = request({ host: '127.0.0.1', port: inner, method: req.method, path: req.url, headers: req.headers, agent: false }, (answer) => { // a connection of its own each time: one kept open can be closed by the engine just as a request is sent on it, and that request can't be sent again
       const t = counted ? tap(/event-stream/.test(answer.headers['content-type'] || ''), began) : null;
       res.writeHead(answer.statusCode, answer.headers);
       answer.on('data', (buf) => t?.add(buf.toString('utf8')));

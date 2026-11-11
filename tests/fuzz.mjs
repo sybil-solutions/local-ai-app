@@ -14,14 +14,14 @@
 //      every line that was the person's own is still there, in order, and taking the models out again gives the file back.
 //   9. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
 //      requests to the API must never crash it, hang it, or give anything away without the key.
-// Usage: node scripts/fuzz.mjs [seed]     exit code 0 when nothing was found. FUZZ_N sets how many random cases (default 40000).
+// Usage: node tests/fuzz.mjs [seed]     exit code 0 when nothing was found. FUZZ_N sets how many random cases (default 40000).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { Agent, createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseRun } from './docker-model.mjs';
+import { parseRun } from './stand-ins/docker-model.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = mkdtempSync(join(tmpdir(), 'local-ai-fuzz-'));

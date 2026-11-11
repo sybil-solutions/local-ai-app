@@ -1,7 +1,7 @@
 // How the page writes HTML. Everything is built with the `html` tag, which escapes whatever is put into a template
 // unless it is itself the result of `html` (or of `raw`, for markup this app wrote itself). So text the page is told,
 // such as a model's name, a machine's name or an error from another machine, can never become markup, whichever
-// component shows it. scripts/screens.mjs checks this for every screen.
+// component shows it. tests/screens.mjs checks this for every screen.
 class Markup {
   constructor(text) { this.text = text; }
   toString() { return this.text; }

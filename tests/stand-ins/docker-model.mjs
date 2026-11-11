@@ -1,5 +1,5 @@
 // How `docker run` reads its arguments, closely enough to say what a command line would really start. It is used by
-// the stand-in docker of the smoke test and by the fuzzer, which asks of every command the app can build: which image
+// the stand-in docker of the integration test and by the fuzzer, which asks of every command the app can build: which image
 // runs, with which options?
 // Options that take a value. Given as `--name value` they take the NEXT argument whatever it is, even one that looks
 // like an option, which is exactly how a recipe could once have slipped something in.
