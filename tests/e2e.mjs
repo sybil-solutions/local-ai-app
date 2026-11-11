@@ -5,7 +5,8 @@
 //
 // It starts a model and watches it come up, opens an agent on it, edits and resets a recipe, reads Usage, switches
 // Home's blocks, changes the background, reads the endpoints, connects the second machine and looks at its model,
-// goes to the panel and back, and stops the model. Any error the page logs on the way fails the run.
+// goes to the panel and back, and stops the model. Any error the page logs on the way fails the run, and so does a
+// page that keeps working when nothing is happening.
 //
 // Usage: node tests/e2e.mjs        (on Linux without a display: xvfb-run -a node tests/e2e.mjs)
 import { spawn } from 'node:child_process';
@@ -208,6 +209,14 @@ try {
   const gaps = await page('(() => { const p = document.querySelector(".frame .screen").getBoundingClientRect(); return [p.left, innerWidth - p.right, p.top, innerHeight - p.bottom].map(Math.round); })()');
   check('the panel fills its window exactly', gaps.every((g) => g === 0), gaps.join());
   check('the panel shows the running model', /Swift One/.test(await text('.frame .screen')));
+  // With no picture chosen the panel draws its two hands, once, when it is drawn.
+  await api(PORT, 'here', '/api/settings', { method: 'POST', body: { background: 'none' } });
+  await until('the picture to go', () => page('document.documentElement.dataset.bg === "none"'));
+  const painted = '(() => { const c = document.querySelector("canvas.art"); if (!c || !c.width) return 0; const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; })()';
+  const drawn = await until('the hands', async () => (await page(painted)) > 1000, 10000).then(() => true, () => false);
+  check('with no picture, the panel draws its hands', drawn, `${await page(painted)} pixels painted`);
+  await api(PORT, 'here', '/api/settings', { method: 'POST', body: { background: 'clouds' } });
+  await until('the picture to come back', () => page('document.documentElement.dataset.bg === "clouds"'));
   await press('[data-act=fs]');
   await until('the desktop layout again', () => page('document.documentElement.classList.contains("wide")'));
   await page('document.fullscreenElement ? document.exitFullscreen() : null');
@@ -216,6 +225,10 @@ try {
   await press('[data-act=stop]');
   await until('the model to stop', async () => !(await state(PORT, 'here')).runs.some((r) => r.recipe === 'e2e/fast'), 60000);
   check('Stop stops the model and Home offers to start one again', /Swift One/.test(await shows('Home, ready to start', '.cin .nname', /./)) && (await page(`${seen('.cright [data-act=start]')}.length`)) === 1);
+
+  // 10. Left alone, the page does no work: it draws when the machine changes, not on every frame of the display.
+  const frames = await page('new Promise((done) => { const real = window.requestAnimationFrame; let n = 0; window.requestAnimationFrame = (f) => { n++; return real(f); }; setTimeout(() => { window.requestAnimationFrame = real; done(n); }, 1500); })');
+  check('a page nobody touches asks for no animation frames', frames === 0, `${frames} in 1.5 s`);
 
   check('the page logged no errors', problems.length === 0, problems.slice(0, 4).join(' | '));
 } catch (e) {

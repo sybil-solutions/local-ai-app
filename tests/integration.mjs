@@ -131,7 +131,7 @@ async function api(path, { method = 'GET', body, auth = true } = {}) {
 const state = async () => (await api('/api/state')).json;
 // A raw request, so the Host header and the path go out exactly as written.
 const raw = (path, host) => new Promise((done, failed) => {
-  const req = request({ host: '127.0.0.1', port: PORT, path, headers: { host: host || `127.0.0.1:${PORT}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => done({ status: res.statusCode, body: b })); });
+  const req = request({ host: '127.0.0.1', port: PORT, path, headers: { host: host || `127.0.0.1:${PORT}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => done({ status: res.statusCode, body: b, headers: res.headers })); });
   req.on('error', failed);
   req.end();
 });
@@ -162,6 +162,7 @@ try {
   check('a wrong key is refused', (await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { authorization: 'Bearer nope' } })).status === 401);
   const page = await raw('/');
   check('the page names its scripts, so the browser fetches them side by side', /<link rel="modulepreload" href="\/app\.js">/.test(page.body) && page.body.includes('href="/components/home.js"'));
+  check('a connection is kept open for five minutes, so the next request does not have to open one', /timeout=300\b/.test(page.headers['keep-alive'] || ''), page.headers['keep-alive']);
   const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`), tag = appJs.headers.get('etag');
   const unchanged = await fetch(`http://127.0.0.1:${PORT}/app.js`, { headers: { 'if-none-match': tag } });
   check('a file of the page is not sent again to a browser that already has it', appJs.status === 200 && !!tag && unchanged.status === 304 && (await unchanged.text()) === '');

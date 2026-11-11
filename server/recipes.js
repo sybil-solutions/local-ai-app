@@ -271,13 +271,20 @@ export function reset(id) {
 export const registry = () => ({ ...feed, count: Object.keys(catalog.recipes).length, id: (catalog.sha256 || '').slice(0, 7) });
 
 // The model's page on Hugging Face: the repo the registry names. Only a model the registry gives no repo for is looked
-// up by name, since anyone can publish a repo with a matching name.
-const cards = new Map();
+// up by name, since anyone can publish a repo with a matching name. A card is kept for a day; a model that has none is
+// not asked about again for ten minutes.
+const cards = new Map(); // model → { at, card }, or { at, missing } with why there is none
 export async function card(id) {
   const recipe = find(id) || fail(404, 'No such recipe');
-  const model = own(catalog.models, recipe.model) || {};
   const hit = cards.get(recipe.model);
-  if (hit && Date.now() - hit.at < 864e5) return hit.card;
+  if (hit && Date.now() - hit.at < (hit.card ? 864e5 : 600e3)) return hit.card || fail(404, hit.missing);
+  try { return await fetchCard(recipe); } catch (e) {
+    if (e.status === 404) cards.set(recipe.model, { at: Date.now(), missing: e.message });
+    throw e;
+  }
+}
+async function fetchCard(recipe) {
+  const model = own(catalog.models, recipe.model) || {};
   const get = (url) => fetch(url, { signal: AbortSignal.timeout(12000) });
   let repo = REPO.test(model.hf || '') ? model.hf : null;
   if (!repo) {

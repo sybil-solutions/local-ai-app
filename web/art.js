@@ -14,7 +14,11 @@ const picture = () => (root.dataset.bg === 'own' ? own : PICS[root.dataset.bg] |
 // picture start in colour, the fresco in grey. Older versions saved one value,
 // 'gray' or 'color', meaning the fresco in that tone; an own picture was always in colour.
 const LEGACY = { gray: ['fresco', 'gray'], color: ['fresco', 'color'] };
+let applied = null; // what the picture was last set from: a snapshot that changes none of it sets nothing again
 export function applyBg() {
+  const from = `${s.snap?.background} ${s.snap?.tone} ${own?.url}`;
+  if (from === applied) return;
+  applied = from;
   const saved = s.snap?.background || store('la-bg') || FIRST;
   const [choice, tone] = LEGACY[saved] || [saved, saved === 'fresco' ? 'gray' : 'color'];
   root.dataset.bg = choice === 'own' && !own ? FIRST : choice;
@@ -26,6 +30,7 @@ export function applyBg() {
   root.style.setProperty('--pimg', `url("${pic.url}")`);
   root.style.setProperty('--psz', `${pic.w * k}px ${pic.h * k}px`);
   root.style.setProperty('--ppos', `${PANEL.x - pic.x * k}px ${PANEL.y - pic.y * k}px`);
+  drawArt();
 }
 
 // Your own picture lives on the server; its centre plays the part of the fingertips.
@@ -77,10 +82,12 @@ export function fitArt(glow) {
   frame.style.setProperty('--r', `${glow * Math.hypot(W, H) * 1.15}px`);
 }
 
-// With no picture chosen, the panel draws the two cut-out hands instead.
-const adam = Object.assign(new Image(), { src: '/adam.webp' }), god = Object.assign(new Image(), { src: '/god.webp' });
-function drawHands(c, t) {
-  const CW = SIZE.w, CH = 128, { pose } = c.dataset, g = c.getContext('2d');
+// With no picture chosen, the panel draws the two cut-out hands instead. They are drawn when a screen is drawn, when
+// the choice changes and when the hands themselves arrive. Nothing runs in between: a page that is only being looked
+// at does no work.
+let hands = null;
+function drawHands(c) {
+  const CW = SIZE.w, CH = 128, { pose } = c.dataset, g = c.getContext('2d'), [adam, god] = hands;
   if (c.width !== CW * 2) { c.width = CW * 2; c.height = CH * 2; }
   g.setTransform(2, 0, 0, 2, 0, 0);
   g.clearRect(0, 0, CW, CH);
@@ -90,7 +97,8 @@ function drawHands(c, t) {
   if (god.complete) g.drawImage(god, CW / 2 + apart * 46, y, w, h);
   g.filter = 'none';
 }
-(function loop(t) {
-  if (root.dataset.bg === 'none') document.querySelectorAll('canvas.art').forEach((c) => drawHands(c, t));
-  requestAnimationFrame(loop);
-})(0);
+export function drawArt() {
+  if (root.dataset.bg !== 'none') return;
+  hands ||= ['/adam.webp', '/god.webp'].map((src) => Object.assign(new Image(), { onload: drawArt, src })); // fetched only once they are wanted
+  document.querySelectorAll('canvas.art').forEach(drawHands);
+}
