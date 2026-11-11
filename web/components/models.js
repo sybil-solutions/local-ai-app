@@ -20,7 +20,7 @@ export const CapNames = (r) => capsOf(r).map(([k, name, v]) => html`<span class=
 
 // A model's numbers. The desktop page has room for two more rows; the panel names the engine instead.
 export const facts = (r, wide) => [
-  ['Intelligence', r.smart === null ? '—' : Math.round(r.smart)], ['C1 speed', r.speed.c1 ? `${Math.round(r.speed.c1)} tok/s` : '—'], ['Context', ctxOf(r.ctx)],
+  ['Intelligence', r.smart === null ? '—' : Math.round(r.smart)], ['C1 speed', r.speed.c1 ? `${Math.round(r.speed.c1)} tok/s${r.speed.legacy ? ', from an older test' : ''}` : '—'], ['Context', ctxOf(r.ctx)],
   ...(wide ? [['Requests at once', r.seqs], ['GPUs', r.cards]] : [['Engine', r.engine]]), ['KV cache', r.kv || '—'], ['Download', r.sizeGb ? `${Math.round(r.sizeGb)} GB` : '—'],
 ];
 export const ModelDetail = (r) => html`<div class="mdetail"><div class="ics">${Caps(r)}</div>${KeyValue(facts(r), { small: true })}</div>`;

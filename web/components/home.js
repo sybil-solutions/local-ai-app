@@ -48,4 +48,4 @@ export const HomeBlocks = (phase) => { const on = HOME(); return homeCfg().order
 // A block on its own, for the desktop layout's widgets.
 export const Widget = (k) => html`<div class="widget">${BLOCKS[k]()}</div>`;
 // One of the desktop's picks along the bottom of Home.
-export const DeskPick = (r) => html`<button class="cpick${r.id === chosen().id ? ' on' : ''}"${data({ act: 'pick', id: r.id })}><span>${r.name}</span><small>${[r.tier, r.speed.c1 && `${Math.round(r.speed.c1)}/s`].filter(Boolean).join(' · ')}</small></button>`;
+export const DeskPick = (r) => html`<button class="cpick${r.id === chosen().id ? ' on' : ''}"${data({ act: 'pick', id: r.id })}><span>${r.name}</span><small>${[r.tier, r.speed.c1 && !r.speed.legacy && `${Math.round(r.speed.c1)}/s`].filter(Boolean).join(' · ')}</small></button>`;
