@@ -1,4 +1,5 @@
-# Every push and pull request: lint for mistakes that break at runtime, then run the real server end to end on Linux.
+# Every push and pull request: lint for mistakes that break at runtime, draw every screen, fuzz what decides what is
+# safe, then run the real server end to end on Linux.
 # No unit tests: scripts/smoke.mjs starts the server against a fixture registry and engines that answer like real ones.
 name: CI
 on:
@@ -40,4 +41,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - name: Hostile input against everything that decides what is safe
+        run: node scripts/fuzz.mjs
+        env:
+          FUZZ_N: 20000
       - run: node scripts/smoke.mjs

@@ -1,8 +1,8 @@
 {
   "name": "local-ai",
   "productName": "Local AI",
-  "version": "0.5.0",
-  "description": "Start local models from registry recipes, watch them, and open your coding agents.",
+  "version": "0.6.0",
+  "description": "Start a local model with one click, watch it run, and open your coding agent on it.",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -12,19 +12,70 @@
     "lint": "eslint .",
     "screens": "node scripts/screens.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "check": "eslint . && node scripts/screens.mjs && node scripts/smoke.mjs"
+    "fuzz": "node scripts/fuzz.mjs",
+    "release:mac": "scripts/release-mac.sh",
+    "check": "eslint . && node scripts/screens.mjs && node scripts/fuzz.mjs && node scripts/smoke.mjs"
   },
   "build": {
     "appId": "ai.sybilsolutions.local",
+    "productName": "Local AI",
+    "copyright": "Copyright \u00a9 2026 Sybil Solutions",
     "icon": "electron/icon.png",
     "files": [
       "electron/**",
+      "!electron/before-pack.cjs",
+      "!electron/entitlements.mac.plist",
       "server/**",
-      "web/**"
+      "web/**",
+      "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "build/payload",
+        "to": "payload"
+      }
+    ],
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
     "mac": {
-      "target": "dmg",
-      "category": "public.app-category.developer-tools"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist",
+      "notarize": true,
+      "minimumSystemVersion": "12.0",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "Local AI connects to your other machines and to the models running on them.",
+        "LSApplicationCategoryType": "public.app-category.developer-tools"
+      }
+    },
+    "dmg": {
+      "sign": true,
+      "title": "Local AI ${version}",
+      "artifactName": "Local-AI-${version}-${arch}.dmg"
     },
     "win": {
       "target": "nsis"
@@ -32,7 +83,8 @@
     "linux": {
       "target": "AppImage",
       "category": "Development"
-    }
+    },
+    "beforePack": "electron/before-pack.cjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -40,5 +92,7 @@
     "electron-builder": "26.18.0",
     "eslint": "10.13.0",
     "globals": "17.13.0"
-  }
+  },
+  "author": "Sybil Solutions",
+  "homepage": "https://github.com/sybil-solutions/local-ai-app"
 }

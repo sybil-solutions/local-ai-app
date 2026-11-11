@@ -27,14 +27,14 @@ document.addEventListener('click', async (e) => {
   if (!el || el.disabled) return;
   const d = el.dataset, light = LIGHT.has(d.act);
   if (s.busy && !light) return;
-  let keep = false;
+  let keep = false, stay = false;
   if (d.act) {
     if (!light) s.busy = true;
     s.note = '';
-    try { keep = (await ACTS[d.act](d, el)) === 'keep'; } catch (err) { if (!light) s.busy = false; say(err); return; }
+    try { const did = await ACTS[d.act](d, el); keep = did === 'keep'; stay = did === 'stay'; } catch (err) { if (!light) s.busy = false; say(err); return; }
     if (!light) s.busy = false;
   }
-  if (d.nav) jump(d.nav); else if (d.go) go(d.go);
+  if (stay) { /* the action opened a screen itself */ } else if (d.nav) jump(d.nav); else if (d.go) go(d.go);
   if (!keep) render(true);
 });
 // Typing. A field keeps what is typed under its data-f name; Edit's slider and arguments go to the draft.
@@ -84,7 +84,7 @@ addEventListener('keydown', (e) => {
   if (/^[1-6]$/.test(e.key)) jump(NAV[+e.key - 1][2]);
   else if (e.key === 'Escape') { if (s.agentsOpen) s.agentsOpen = false; else go(s.nav === 'edit' ? 'back' : 'home'); }
   else if (home && /^Arrow(Left|Right)$/.test(e.key)) { const list = shown(), i = list.findIndex((r) => r.id === chosen().id); s.sel = list[(i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length].id; }
-  else if (home && hasRoom() && e.key === 'Enter' && e.target === document.body) ACTS.start().catch(say);
+  else if (home && hasRoom() && e.key === 'Enter' && e.target === document.body) Promise.resolve().then(ACTS.start).catch(say);
   else return;
   render(true);
 });

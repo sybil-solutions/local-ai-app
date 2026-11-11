@@ -12,13 +12,17 @@ There is no gateway. Each engine serves its own OpenAI-compatible API on its own
 
 ## Run it
 
+On a Mac, open `Local-AI-<version>-arm64.dmg` from the repository's Releases and drag Local AI to Applications. It is signed with a Developer ID and notarized by Apple, and brings its own Node.js. On Linux:
+
 ```
 ./install.sh                # a user service that keeps the server running; on Omarchy, also an app-menu entry
 node server/index.js        # or just the server: open http://127.0.0.1:18700
-npm install && npm start    # or the same page in an Electron window
+npm install && npm start    # or the same page in an Electron window, from source
 ```
 
-The server needs Node 20 or newer. Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the Electron app.
+The server needs Node 20 or newer (the Mac app and `install.sh` bring it). Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the app.
+
+A page opened in a browser asks for the machine's key once (the app's own window, and the Omarchy app-menu entry, are handed it). The key is under Settings › API endpoints, and in `~/.local-ai/config.json`.
 
 A machine that already runs Local AI installs it on another Linux machine on your tailnet: under Machines, choose Set up. It signs in over SSH and sends the app's files over that connection, so the other machine never has to reach this one; where it can't sign in, it shows the one-line command instead. The installer brings its own Node.js when the machine has none.
 
@@ -47,7 +51,7 @@ flowchart LR
 
 - **One snapshot.** Every two seconds the server looks at the GPUs (`nvidia-smi`), its containers (`docker ps`), and each engine (`/v1/models`, `/metrics`). The result is one JSON snapshot. The app long-polls it and redraws; nothing else is pushed, and the app keeps no state of its own about the machine.
 - **Docker is the record.** A run is a container labelled `local-ai=1` with its recipe, port and GPUs in labels. Restart the server and it adopts whatever is still running.
-- **Apple silicon.** The chip is one GPU whose memory is the unified RAM, and it only runs recipes made for exactly that chip (`backend: metal`). Such a recipe is `kind: host`: a Python `command`, `pip` packages each pinned with `==`, its script in `config` with a `sha256` that must match, and weights pinned to a commit. Each recipe's packages get their own venv in `envs/`, shared by recipes that pin the same ones and deleted after 30 unused days. The engine runs in `runs/<port>/` on an inner port (the app's port + 100 and up); the server listens on the run's own port in front of it and counts the tokens each answer reports (`meter.js`), since such engines have no `/metrics`. The engine outlives the app like a container does: `hosts.json` remembers it, and a restarted app adopts it again only if the process still runs in that folder and started when it did. Quitting the app closes the front port until the app is back.
+- **Apple silicon.** The chip is one GPU whose memory is the unified RAM, and it only runs recipes made for exactly that chip (`backend: metal`). Such a recipe is `kind: host`: a `command` that is Python and the recipe's own script (never `-c`, `-m` or another file), `pip` packages each pinned with `==`, the script in `config` with a `sha256` that must match, and weights pinned to a commit. Because it runs as you rather than in a container, the app shows what it will run and waits for Allow the first time, and again whenever the recipe changes. The engine is given a short environment (`PATH`, `HOME`, the locale, what the recipe sets), not the app's. Each recipe's packages get their own venv in `envs/`, shared by recipes that pin the same ones and deleted after 30 unused days. The engine runs in `runs/<port>/` on an inner port (the app's port + 100 and up); the server listens on the run's own port in front of it and counts the tokens each answer reports (`meter.js`), since such engines have no `/metrics`. The engine outlives the app like a container does: `hosts.json` remembers it, and a restarted app adopts it again only if the process still runs in that folder and started when it did. Quitting the app closes the front port until the app is back.
 - **Models it didn't start.** Every 30 seconds it asks each listening port above 1024, over loopback, for `/v1/models`. Whatever answers with one model, or with several and engine counters on `/metrics` (vLLM, SGLang, llama.cpp), is shown as running too, with its stats and its address, and is never stopped. A proxy that lists several models and has no engine counters (a gateway to cloud APIs) is not. The same model id on several ports (an engine and a proxy in front of it) is shown once.
 - **Which screen.** The app shows the first screen its rules match for the snapshot (`resolve()` in `web/state.js`): can't connect, needs a key, Docker off, no GPU, downloading, starting, running, failed, and so on. Settings, Models and the rest are ordinary screens opened on top.
 - **Your machines.** Machines signed in to your Tailscale account trust each other: one click connects them, and the page opens on any of them without typing the key. Anything else needs the key.
@@ -58,6 +62,8 @@ flowchart LR
 server/
   index.js      HTTP: the web app's files, the route table, the snapshot, start()
   engine.js     runs: start, stop, adopt, watch, find models started elsewhere
+  docker.js     the one `docker run` a recipe becomes, and which of its options are allowed
+  gpus.js       the GPUs: nvidia-smi, the Apple chip, a GPU that shares the system's memory
   weights.js    Hugging Face downloads and the mounts that put them in a container
   meter.js      the front port of a host run: passes requests to the engine and counts their tokens
   usage.js      tokens served, from each engine's own counters; who is calling
@@ -83,7 +89,10 @@ web/
   components/   the reusable pieces: icons, controls (buttons, switches, fields), layout (bars, rows, tables),
                 home (title, stats, GPUs), models, agents, usage
 electron/main.js   a window onto the page; starts the server if none is running; fits the window to the panel when the page shows it (preload.cjs)
+electron/          also the Mac build's entitlements and before-pack.cjs, which puts a readable copy of the app in the bundle for installing on other machines
 install.sh         user service + Omarchy web app
+scripts/           screens.mjs (every screen drawn), smoke.mjs (the real server end to end), fuzz.mjs (hostile input),
+                   release-mac.sh (the signed, notarized DMG), and the stand-ins they use (fake_engine.py, fakebin/)
 design/            the approved design and the developer handoff (reference only)
 ```
 
@@ -96,7 +105,7 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 | Route | Does | Handled by |
 |---|---|---|
 | `GET /api/state?v=` | The snapshot. With the version you already have, waits up to 20 s for a change. | `index.js` `publish` |
-| `POST /api/runs` `{ recipe, gpus? }` | Start a recipe: download, pull the engine, run it. | `engine.start` |
+| `POST /api/runs` `{ recipe, gpus?, approve? }` | Start a recipe: download, pull the engine, run it. A host recipe not yet allowed answers 409 until `approve` is the fingerprint in its `approve` field. | `recipes.allowed`, `engine.start` |
 | `DELETE /api/runs/:port` | Stop a run, or cancel one that is starting. | `engine.remove` |
 | `GET /api/runs/:port/logs?tail=` | The engine's last lines. | `engine.logs` |
 | `POST /api/runs/:port/measure` | Measure speed again. | `engine.measureNow` |
@@ -112,13 +121,13 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 | `POST /api/settings` `{ folder?, agent?, terminal?, home?, background?, picture?, autoUpdate?, hfToken? }` | Save settings. | `index.js` `saveSettings` |
 | `GET /api/background` | Your own background picture. | `index.js` |
 | `GET /api/tailscale` | Your other Tailscale computers and the command that installs Local AI on one. | `machines.peers` |
-| `POST /api/tailscale/install` `{ ip }` | Install Local AI on one of your Tailscale machines, over SSH from this one. | `machines.install` |
+| `POST /api/tailscale/install` `{ ip, update? }` | Install Local AI on one of your Tailscale machines, over SSH from this one. A copy that updates itself is never touched, and one already running is replaced only with `update`. | `machines.install` |
 | `POST /api/devices` `{ url, key? }` | Connect a machine. No key needed for your own Tailscale machines. | `machines.add` |
 | `DELETE /api/devices?i=` | Forget a machine. | `machines.remove` |
 | `ANY /api/devices/:i/*` | Any route above, run on a connected machine. | `machines.forward` |
 | `POST /api/docker/start` | Start Docker. | `engine.startDocker` |
 | `POST /api/app/check`, `POST /api/app/update` | Look for a newer version; install it and restart. | `update.js` |
-| `GET /api/health` | `{ ok, app }`. Open to anyone who can reach the port. | |
+| `GET /api/health?nonce=` | `{ ok, app }`. Open to anyone who can reach the port. With a hex nonce also `proof`, an HMAC of it under the key: how the desktop app knows a server already on the port is this user's before using it. | |
 | `POST /api/pair` | This machine's key. Only for your own Tailscale machines. | `machines.isMine` |
 | `GET /install`, `GET /install.tgz` | An installer for another machine. Only for your own Tailscale machines. | `machines.isMine` |
 
@@ -142,7 +151,8 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
   app: { version, started, latest, notes, phase, error, can, auto },
   hfToken }                                                    // the saved token's last four characters, or null
 
-Recipe = { id, name, local, host, card, cards, engine, ctx, seqs, vision, think, tools, kv, tps, smart, sizeGb, released, loadS, ready,
+Recipe = { id, name, local, host, approve,                    // approve: what to send to allow a host recipe, or null when there is nothing to allow
+           card, cards, engine, ctx, seqs, vision, think, tools, kv, tps, smart, sizeGb, released, loadS, ready,
            speed: { c1, c4, c8, measured, exact, ttft, at } }
 Run    = { id,            // the port it serves on
            host,          // true when it runs as a program on this machine, not in a container
@@ -159,7 +169,7 @@ Run    = { id,            // the port it serves on
 
 | File | Holds |
 |---|---|
-| `config.json` | The key, connected machines, default agent and folder, Home layout, background, last recipe. |
+| `config.json` | The key, connected machines, default agent and folder, Home layout, background, last recipe, the host recipes you allowed. |
 | `catalog.json` | The registry as last fetched. |
 | `recipes.json` | Your own recipes, by id. They override the registry's. |
 | `usage.json` | Tokens per day and per hour, by model. |
@@ -172,7 +182,7 @@ Run    = { id,            // the port it serves on
 
 | It talks to | For |
 |---|---|
-| `docker` | `run`, `stop`, `rm`, `ps`, `logs`, `pull`, `image inspect`. Containers carry `local-ai=1` and `local-ai.port`, `.recipe`, `.gpus`, `.since`. |
+| `docker` | `run`, `stop`, `rm`, `ps`, `logs`, `pull`, `image inspect`. Containers carry `local-ai=1` and `local-ai.port`, `.recipe`, `.gpus`, `.since`, `.reach`. Every option of `docker run` is written as one word (`--name=…`), so no value can pass for another option. |
 | `nvidia-smi` | GPUs and their memory. On Apple silicon `sysctl` and `vm_stat` instead. A GPU that shares the system's memory (DGX Spark) reports none, so its memory is read from `/proc/meminfo` and it is marked `shared`. |
 | `python3`, `pip` | On Apple silicon: a venv per host recipe and its pinned packages. `ps` and `lsof` check a remembered engine before it is adopted. |
 | An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time the engine says that took: vLLM's histograms, llama.cpp's own gauge, or the `timings` a host engine reports in its answers. Where the engine reports no such timing the number is an estimate, shown as "Prefill tok/s (est.)": for a host engine (mlx_lm.server), uncached prompt tokens over the wait for the first streamed token, which also holds queueing and the first decode step; for the rest, prompt tokens that missed the cache over the window. The two are never mixed. Prefills under 1,000 tokens are left out, since they time the engine's overhead more than its speed, and the number shown is the average over the last five minutes of prefills, so it stays between prompts. Until the app has seen a prefill it shows the engine's lifetime average, never 0. Prompt tokens served from the prefix cache are not prefill. |
@@ -190,9 +200,17 @@ A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` wit
 
 ## Who can reach what
 
-- The key in `config.json` guards the API. The page gets it written in when opened on the machine itself, or from another machine signed in to your Tailscale account (Tailscale says who is asking, and the request must be addressed to this machine's own tailnet name).
-- Engines have no key of their own. Anything that can reach an engine's port can use the model, so keep the server on loopback or a private network such as Tailscale.
-- Model cards are other people's Markdown: their tags are stripped, the text is escaped, and only the app's own tags are written, in one pass.
+What the app defends, and against whom:
+
+- **The key.** The key in `config.json` (readable only by you) guards the whole API, and holding it means being able to start models. It is never given to a caller just for being on this machine: another user's program, or anything that forwards connections here, asks from loopback too. The desktop app reads the file and hands the key to its own window in the address (`#key=…`, removed at once); the installer does the same for the app-menu entry; a browser asks for it once. A server already on the port must prove it holds your key (an HMAC of a random nonce) before the app shows it or hands it anything.
+- **Your machines.** Another machine signed in to your Tailscale account as you is given the key without typing it: Tailscale says who is asking, and the request must be addressed to this machine's own tailnet name or address, so a rebound DNS name can't borrow that. Tagged machines (which all share one stand-in owner) and this machine's own tailnet address don't count.
+- **Other websites.** Everything is served with a content policy that runs only the app's own scripts and can't be framed. A page on another site can't read the API (no CORS), and can't use a model either: a host run's port answers only to this machine's own address, and refuses a request that says it comes from another site's page.
+- **The registry.** A registry recipe is data from the network. A container recipe runs only when its image and weights are pinned by hash, and it can add only a short list of Docker options, each with one plain value; the container can't gain privileges, publishes one port, and mounts only the app's own folders, read-only. A host recipe runs as you, so it must be its own hashed script, pinned, and it waits for you to allow it (above). Your own recipes are trusted as written.
+- **Connected machines.** What another machine sends is held to the shape the app reads and cut to size before it is kept; none of it can become markup (`web/html.js` escapes everything), and a machine that sends something unreadable is left for this one.
+- **Model cards** are other people's Markdown: their tags are dropped, the text is escaped, and only the app's own few tags are written, in one pass that stays fast on any input.
+- **The desktop app** is sandboxed with context isolation, navigates nowhere but its own page, opens only web links (in your browser), grants no permission but fullscreen and copying, and can't be started as plain Node or with a debugger attached (Electron fuses).
+
+What it does not defend: an engine in a container has no key and no such door, so anything that can reach its port can use the model (keep the server on loopback or a private network such as Tailscale); any program of yours that answers like an OpenAI server on loopback is shown as a model; updates and the registry are fetched over HTTPS, not signed.
 
 ## Working on it
 
@@ -200,9 +218,13 @@ A recipe is the registry's schema: `card`, `model`, `engine`, and a `launch` wit
 npm ci --ignore-scripts && npm run lint    # mistakes that break at runtime: undefined names, leftovers
 npm run screens                            # every screen drawn for every state, with hostile text in every field
 npm run smoke                              # the real server end to end; on Apple silicon also a host run
+npm run fuzz                               # hostile input against everything that decides what is safe
+npm run release:mac                        # the signed, notarized DMG (needs a Developer ID and a notarytool profile)
 ```
 
-CI (`.github/workflows/`) runs both on every push and pull request: lint and the Linux smoke test always, the macOS smoke test when `server/` or `scripts/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit. There are no unit tests on purpose: `scripts/smoke.mjs` starts the server against a fixture registry and engines that answer like real ones, and checks what a user would notice. `scripts/screens.mjs` draws every screen in both layouts for every state the server can report (448 renders) and fails if one throws or if any text it was given comes out as markup.
+CI (`.github/workflows/`) runs these on every push and pull request: lint, the screens, the fuzzer and the Linux smoke test always, the macOS smoke test when `server/` or `scripts/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit. There are no unit tests on purpose: `scripts/smoke.mjs` starts the server against a fixture registry and engines that answer like real ones, and checks what a user would notice. `scripts/screens.mjs` draws every screen in both layouts for every state the server can report (460 renders) and fails if one throws or if any text it was given comes out as markup. `scripts/fuzz.mjs` goes after the parts that decide what is safe: every short string of troublemaking characters against the Docker option grammar (exhaustively), random hostile recipes whose `docker run` is read back the way Docker reads it, file names in a download listing, model cards (for markup and for time), what a connected machine may send, the door on a model's port, host recipes, and the running server's paths and API. It is seeded, so a finding can be repeated: `node scripts/fuzz.mjs <seed>`.
+
+`npm run release:mac` builds `dist/Local-AI-<version>-arm64.dmg`: the app is signed with the Developer ID in the keychain under the hardened runtime, notarized, and stapled; then the DMG itself is signed, notarized and stapled, and Gatekeeper is asked whether it would open both. Set `APPLE_KEYCHAIN_PROFILE` to a profile saved with `xcrun notarytool store-credentials`.
 
 There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that arranges components from `web/components/`; a component is a function that returns markup written with the `html` tag, which escapes everything put into it, so text the page is told can never become markup. A button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/actions.js`). To add a route, add a line to `ROUTES`.
 

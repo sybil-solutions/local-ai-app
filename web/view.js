@@ -47,10 +47,12 @@ function paint(force) {
   }
   drawnId = id;
 }
-// A screen whose data vanished (the model it was about stopped, say) closes instead of leaving the page blank.
+// A screen whose data vanished (the model it was about stopped, say) closes instead of leaving the page blank. A
+// connected machine whose snapshot can't be drawn at all is left for this computer, with a line saying so.
 export function render(force) {
   try { paint(force); } catch (e) {
-    if (!s.nav) throw e;
+    if (!s.nav && s.dev === -1) throw e;
+    if (!s.nav) { s.note = `${s.snap?.devices[s.dev]?.name || 'That machine'} sent something Local AI can’t show`; s.dev = -1; }
     s.nav = null; s.trail.length = 0;
     paint(true);
   }

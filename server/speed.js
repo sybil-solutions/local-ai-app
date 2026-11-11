@@ -1,17 +1,17 @@
-import { at, event, readJson, together, writeJson } from './util.js';
+import { at, event, own, readJson, together, writeJson } from './util.js';
 
 const speedsFile = at('speeds.json');
 const loadsFile = at('loads.json');
-const speeds = readJson(speedsFile, {});
-const loads = readJson(loadsFile, {});
+const speeds = Object.assign(Object.create(null), readJson(speedsFile, {}));
+const loads = Object.assign(Object.create(null), readJson(loadsFile, {}));
 const LEVELS = [1, 4, 8];
 const TOKENS = 256;
 const WAVES = 2;
 
-export const speedOf = (id) => speeds[id] || null;
-export const loadSeconds = (id) => loads[id] || null;
+export const speedOf = (id) => own(speeds, id) || null;
+export const loadSeconds = (id) => own(loads, id) || null;
 export function saveLoad(id, seconds) { loads[id] = seconds; writeJson(loadsFile, loads); }
-export function forget(id) { if (speeds[id]) { delete speeds[id]; writeJson(speedsFile, speeds); } }
+export function forget(id) { if (own(speeds, id)) { delete speeds[id]; writeJson(speedsFile, speeds); } }
 
 const median = (list) => [...list].sort((a, b) => a - b)[Math.floor(list.length / 2)];
 

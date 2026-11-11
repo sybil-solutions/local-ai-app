@@ -5,6 +5,15 @@ set -e
 [ "$(uname -s)" = Linux ] || { echo "This installer sets up a Linux user service. On a Mac, use the Local AI app."; exit 1; }
 SRC="$(cd "$(dirname "$0")" && pwd)"
 DEST="${LOCAL_AI_DIR:-$HOME/.local/share/local-ai}"
+UNIT="$HOME/.config/systemd/user/local-ai.service"
+# Sent here by another machine (LOCAL_AI_SHIPPED says whether to install or to update). That machine may only think
+# there is no Local AI here because it can't reach it, so before anything is touched: a copy that updates itself from
+# its repo is left alone, and one that is already running is replaced only by an update.
+if [ -n "${LOCAL_AI_SHIPPED:-}" ]; then
+  if [ -e "$DEST/.git" ]; then echo "Local AI on this machine updates itself, so nothing was changed"; exit 3; fi
+  WAS="$(sed -n 's/.*LOCAL_AI_PORT=\([0-9]*\).*/\1/p' "$UNIT" 2>/dev/null | head -1)"
+  if [ "$LOCAL_AI_SHIPPED" != update ] && curl -s -m 2 "http://127.0.0.1:${WAS:-18700}/api/health" 2>/dev/null | grep -q '"app":"local-ai"'; then echo "Local AI is already running on this machine, so nothing was changed"; exit 4; fi
+fi
 node_ok() { [ -n "$1" ] && "$1" -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' 2>/dev/null; }
 NODE="$(command -v node || true)"
 # Omarchy manages Node with mise; use that when there is no Node 20 yet.
@@ -28,7 +37,6 @@ fi
 mkdir -p "$DEST" "$HOME/.config/systemd/user"
 # server/ and web/ are replaced whole, so a file a newer version removed does not linger and get loaded.
 if [ "$SRC" != "$DEST" ]; then rm -rf "$DEST/server" "$DEST/web" && cp -r "$SRC/server" "$SRC/web" "$SRC/package.json" "$SRC/install.sh" "$DEST/"; fi
-UNIT="$HOME/.config/systemd/user/local-ai.service"
 # A value as systemd reads it inside double quotes.
 quoted() { printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/%/%%/g'; }
 # Settings given now stay with the service; ones given at an earlier install are kept.
@@ -60,7 +68,14 @@ PORT="$(echo "$SETTINGS" | sed -n 's/.*LOCAL_AI_PORT=\([0-9]*\).*/\1/p')"
 URL="http://127.0.0.1:${PORT:-18700}"
 for _ in $(seq 1 40); do curl -s -m 1 "$URL/api/health" >/dev/null && break; sleep 0.25; done
 curl -s -m 2 "$URL/api/health" >/dev/null || { echo "The server did not start. See: journalctl --user -u local-ai -n 40"; exit 1; }
+# The page needs this machine's key. It is not handed to whoever asks from this machine; it goes in the address the
+# app-menu entry opens, read from the config file only this user can read.
+STATE="$(echo "$SETTINGS" | sed -n 's/.*LOCAL_AI_HOME=\([^"]*\).*/\1/p')"
+KEY="$("$NODE" -e 'try { process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).key || "") } catch {}' "${STATE:-$HOME/.local-ai}/config.json")"
 if command -v omarchy-webapp-install >/dev/null; then
-  timeout 30 omarchy-webapp-install "Local AI" "$URL" "$URL/icon.png" </dev/null >/dev/null 2>&1 && echo "Added Local AI to the app menu." || echo "Could not add the app-menu entry. Add it from the Omarchy menu: Install > Web App, with $URL"
+  timeout 30 omarchy-webapp-install "Local AI" "$URL/#key=$KEY" "$URL/icon.png" </dev/null >/dev/null 2>&1 && echo "Added Local AI to the app menu." || echo "Could not add the app-menu entry. Add it from the Omarchy menu: Install > Web App, with the address below"
+  grep -ls "$URL/#key=" "$HOME/.local/share/applications/"*.desktop 2>/dev/null | while read -r entry; do chmod 600 "$entry"; done
 fi
 echo "Local AI is running at $URL"
+# Shown only to a person at a terminal, never into a log: the address that opens the page with its key.
+if [ -t 1 ] && [ -n "$KEY" ]; then echo "Open it with: $URL/#key=$KEY"; fi

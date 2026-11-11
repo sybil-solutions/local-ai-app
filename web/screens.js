@@ -79,7 +79,7 @@ export const SCREENS = {
   opened: () => html`${HomeBar()}${Scroll(HomeBlocks('opened'), { home: true })}${OpenButtons()}${StopButton()}`,
   chooser: () => html`${CloseBar()}${Head('Open with')}${Scroll(AgentList('open'))}`,
   runthis: () => html`${CloseBar()}${Head('Run this')}${Box(s.command, { mono: true })}${Spacer}${Button({ label: 'Copy', act: 'copy', kind: 'go' })}`,
-  key: () => html`${BareBar}${Head('Enter the key', 'margin-top:24px')}${Note('It’s under Settings › Advanced › API endpoints on the machine running Local AI')}${typed('key', 'Key', 'Key')}${Spacer}${Button({ label: 'Connect', act: 'key', kind: 'go' })}`,
+  key: () => html`${BareBar}${Head('Enter the key', 'margin-top:24px')}${Note('It’s under Settings › API endpoints in the Local AI app on that machine, or in its file ~/.local-ai/config.json')}${typed('key', 'Key', 'Key')}${Spacer}${Button({ label: 'Connect', act: 'key', kind: 'go' })}`,
   settings: () => html`${CloseBar('home')}${SettingsTabs('settings')}${NavRow('Home screen', 'home-edit')}${NavRow('Background', 'background')}${NavRow('Agents and folder', 'agent')}${NavRow('Machines', 'machines')}${NavRow('Usage', 'usage')}${Spacer}${VersionFoot()}`,
   advanced: () => html`${CloseBar('home')}${SettingsTabs('advanced')}${NavRow('Models', 'adv-models')}${NavRow('API endpoints', 'endpoints')}${NavRow('Registry', 'registry')}${NavRow('Hugging Face token', 'hf-token')}${Spacer}${VersionFoot()}`,
   'home-edit': () => {
@@ -115,6 +115,17 @@ export const SCREENS = {
     // A recipe that can't be edited has one button, at full width; the rest have Edit beside it.
     const main = UseButton(r) || Button({ label: 'Running', disabled: true }), edit = EditButton(r, 'width:auto;flex:1');
     return html`${CloseBar()}${Scroll(html`${Head(r.name)}${Note(meta(r))}${ModelDetail(r)}${ModelCard(r)}`)}${edit ? html`<div class="two">${main}${edit}</div>` : main}`;
+  },
+  // Before a model that runs as a program on the machine is started for the first time, or after it changed.
+  approve: () => {
+    const r = all().find((x) => x.id === s.asking), L = s.look?.id === s.asking && s.look.launch, list = (v) => [].concat(v || []);
+    if (!r) return html`${CloseBar()}${Note('This model is no longer in the list')}`;
+    const pre = { mono: true, pre: true };
+    return html`${CloseBar()}${Head(`Run ${r.name}?`)}${Note(`It runs as a program on ${here()}, not in a container, so it can do what you can. Here is what it runs. You are asked again only if this changes.`)}${Scroll(!L ? Note('Loading') : html`
+      ${Label('Command')}${Box(list(L.command).join(' '), pre)}
+      ${list(L.pip).length > 0 && html`${Label('Installs from PyPI')}${Box(list(L.pip).join('\n'), pre)}`}
+      ${list(L.weights).length > 0 && html`${Label('Downloads from Hugging Face')}${Box(list(L.weights).map((w) => `${w.repo} @ ${String(w.revision).slice(0, 7)}`).join('\n'), pre)}`}
+      ${L.config && html`${Label(`Its script, ${L.config.at}`)}${Box(L.config.text, { mono: true, pre: true, clip: true })}`}`)}${Button({ label: 'Allow and run', act: 'approve', kind: 'go', disabled: !L })}${Button({ label: 'Cancel', go: 'back' })}`;
   },
   edit: () => html`${CloseBar()}${EditForm()}`,
   endpoints: () => {
