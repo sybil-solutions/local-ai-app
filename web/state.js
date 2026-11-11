@@ -53,8 +53,11 @@ export const agentName = () => s.snap.agents.find((a) => a.id === s.snap.agent &
 export const outdated = () => s.snap.agents.filter((a) => a.installed && a.version && a.latest && newer(a.latest, a.version) && a.job?.phase !== 'running');
 export const homeCfg = () => s.snap.home || { order: ['hands', 'models', 'stats', 'usage', 'gpus'], on: ['hands', 'models', 'stats'] };
 export const HOME = () => homeCfg().order.filter((k) => homeCfg().on.includes(k));
-export const canFull = () => innerWidth >= 640;
-export const isFull = () => s.full && canFull();
+// The desktop app's window fits itself to the layout (electron/preload.cjs); a browser's can't be resized from here.
+export const shellWindow = window.localAiWindow || null;
+const roomy = () => innerWidth >= 640;
+export const canFull = () => roomy() || !!shellWindow; // whether the layout can be switched at all
+export const isFull = () => s.full && roomy();
 
 // Which screen the snapshot calls for. The first rule that matches wins.
 export function resolve() {

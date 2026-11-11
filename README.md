@@ -77,7 +77,7 @@ web/
   ui.js         buttons, rows, icons and the other small pieces
   usage.js      the Usage screen's numbers, chart and calendar
   art.js        the painting and the Background setting
-electron/main.js   a window onto the page; starts the server if none is running
+electron/main.js   a window onto the page; starts the server if none is running; fits the window to the panel when the page shows it (preload.cjs)
 install.sh         user service + Omarchy web app
 design/            the approved design and the developer handoff (reference only)
 ```
