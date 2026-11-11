@@ -76,7 +76,7 @@ web/
   desktop.js    the wide layout: top bar, Home, pages
   ui.js         buttons, rows, icons and the other small pieces
   usage.js      the Usage screen's numbers, chart and calendar
-  art.js        the painting and the Background setting
+  art.js        the picture behind everything and the Background setting
 electron/main.js   a window onto the page; starts the server if none is running; fits the window to the panel when the page shows it (preload.cjs)
 install.sh         user service + Omarchy web app
 design/            the approved design and the developer handoff (reference only)
@@ -132,7 +132,7 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
   devices: [{ i, name, url, online, error, state }],           // state is that machine's own snapshot
   agents: [{ id, name, needs, installed, version, latest, canInstall, canUpdate, app, job }], agent, folder,
   terminals: [{ id, name }], terminal,                         // terminals installed here, and the one Open uses
-  home: { order, on } | null, background, tone, picture,       // background: fresco · own · none; tone: gray · color, or null for the default
+  home: { order, on } | null, background, tone, picture,       // background: clouds · fresco · own · none; tone: gray · color, or null for the default
   app: { version, started, latest, notes, phase, error, can, auto },
   hfToken }                                                    // the saved token's last four characters, or null
 

@@ -1,6 +1,6 @@
 // Every screen, as a function that returns its HTML. The panel shows one at a time; the desktop layout shows the same ones as pages.
 import { agentName, all, cardKey, chosen, D, group, here, HOME, homeCfg, newer, outdated, picks, run, s, shown } from './state.js';
-import { a, ago, art, b, bar, caps, close, ctxOf, esc, facts, fmt, grip, icon, item, kv, left, menu, meta, mins, running, status, toggle, vfoot } from './ui.js';
+import { a, ago, art, b, bar, caps, close, ctxOf, esc, facts, fmt, grip, icon, item, kv, left, menu, meta, mins, running, status, toggle, vfoot, wordmark } from './ui.js';
 import { miniUsage, usageBody } from './usage.js';
 
 // Home: the blocks you chose, in your order.
@@ -100,7 +100,7 @@ export function editBody() {
     + `${a('Save', 'saveedit', 'go')}${d.local ? a('Reset', 'resetedit') : ''}`;
 }
 
-const BGS = [['fresco', 'The Creation of Adam', 'Michelangelo'], ['own', 'Your own picture', 'Choose a file'], ['none', 'None', 'Plain dark']];
+const BGS = [['clouds', 'Clouds', 'Sky'], ['fresco', 'The Creation of Adam', 'Michelangelo'], ['own', 'Your own picture', 'Choose a file'], ['none', 'None', 'Plain dark']];
 const BLOCK_NAMES = { hands: ['Picture', 'The painting and its light'], models: ['Model picks', 'Fast, balanced and smart'], stats: ['Live stats', 'Speed and tokens, live'], usage: ['Usage', 'Tokens served, by day'], gpus: ['GPUs', 'Memory on each GPU'] };
 const addr = (text, show) => `<button class="addr" data-act="copy" data-copy="${esc(text)}"><span>${esc(show ?? text)}</span><small>Copy</small></button>`;
 const yes = (apis, k) => (apis ? (apis.includes(k) ? 'Yes' : 'No') : '—');
@@ -154,7 +154,7 @@ export const SCREENS = {
   opened: () => `${menu()}${home('opened')}${openBtns()}${stopBtn()}`,
   chooser: () => `${close()}<div class="head">Open with</div><div class="scroll">${agentList('open')}</div>`,
   runthis: () => `${close()}<div class="head">Run this</div><div class="box mono">${esc(s.command)}</div><div class="sp"></div>${a('Copy', 'copy', 'go')}`,
-  key: () => `<div class="top"><span class="mark">Local AI</span></div><div class="head" style="margin-top:24px">Enter the key</div>${left('It’s under Settings › Advanced › API endpoints on the machine running Local AI')}${field('key', 'Key', 'Key')}<div class="sp"></div>${a('Connect', 'key', 'go')}`,
+  key: () => `<div class="top">${wordmark}</div><div class="head" style="margin-top:24px">Enter the key</div>${left('It’s under Settings › Advanced › API endpoints on the machine running Local AI')}${field('key', 'Key', 'Key')}<div class="sp"></div>${a('Connect', 'key', 'go')}`,
   settings: () => `${close('home')}${tabs('settings')}${item('Home screen', 'home-edit')}${item('Background', 'background')}${item('Agents and folder', 'agent')}${item('Machines', 'machines')}${item('Usage', 'usage')}<div class="sp"></div>${vfoot()}`,
   advanced: () => `${close('home')}${tabs('advanced')}${item('Models', 'adv-models')}${item('API endpoints', 'endpoints')}${item('Registry', 'registry')}${item('Hugging Face token', 'hf-token')}<div class="sp"></div>${vfoot()}`,
   'home-edit': () => {
