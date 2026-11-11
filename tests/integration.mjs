@@ -14,7 +14,7 @@
 // Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -227,6 +227,38 @@ try {
     const kept = sent('update', clone), running = sent('install', plain);
     check('an install sent from another machine leaves a copy that updates itself alone', kept.status === 3 && readdirSync(clone).join() === '.git', `status ${kept.status} ${kept.stdout}`);
     check('and leaves a copy that is already running alone unless it is an update', running.status === 4 && !readdirSync(plain).length, `status ${running.status} ${running.stdout}`);
+    // An update, run to its end. Everything the installer reaches outside its own folder is a stand-in here: curl
+    // (which also stands in for nodejs.org), systemctl and loginctl. There is no node on its PATH, as on a machine
+    // that got its Node from this installer.
+    const tools = join(HOME, 'installer-tools'), asked = join(HOME, 'installer-asked');
+    mkdirSync(tools);
+    for (const name of ['bash', 'uname', 'dirname', 'sed', 'head', 'grep', 'mktemp', 'rm', 'mkdir', 'cp', 'mv', 'cat', 'id', 'seq', 'sleep', 'timeout', 'chmod', 'tar', 'sha256sum']) symlinkSync(execFileSync('which', [name], { encoding: 'utf8' }).trim(), join(tools, name));
+    const standIn = (dir, name, does) => writeFileSync(join(dir, name), `#!/bin/bash\necho "${name} $*" >> "${asked}"\n${does}\n`, { mode: 0o755 });
+    standIn(tools, 'curl', 'case "$*" in *nodejs.org*) for a in "$@"; do out="$a"; done; echo not-node > "$out" ;; *) echo \'{"app":"local-ai"}\' ;; esac');
+    standIn(tools, 'systemctl', 'exit 0');
+    standIn(tools, 'loginctl', 'exit 0');
+    const update = (dest, path) => spawnSync('bash', [join(ROOT, 'install.sh')], { env: { PATH: path, HOME: home, LOCAL_AI_SHIPPED: 'update', LOCAL_AI_DIR: dest }, encoding: 'utf8', timeout: 60000 });
+    const fetched = () => { try { return readFileSync(asked, 'utf8').includes('nodejs.org'); } catch { return false; } };
+    // 1. The machine already has the Node this installer fetched before: it is used, and nothing is downloaded.
+    const own = join(HOME, 'own');
+    mkdirSync(join(own, 'node', 'bin'), { recursive: true });
+    symlinkSync(process.execPath, join(own, 'node', 'bin', 'node'));
+    const reused = update(own, tools);
+    check('an update uses the Node an earlier install fetched, and downloads nothing', reused.status === 0 && !fetched() && existsSync(join(own, 'server', 'index.js')) && !existsSync(join(own, '.new'))
+      && readFileSync(join(unit, 'local-ai.service'), 'utf8').includes(`ExecStart="${join(own, 'node', 'bin', 'node')}"`), `status ${reused.status} ${reused.stdout} ${reused.stderr}`);
+    // 2. The Node here does not run, so one is fetched, but it cannot be unpacked (as on a full disk). What was
+    // there stays exactly as it was: nothing is removed for something that is not here yet.
+    const full = join(HOME, 'installer-tools-full'), broken = join(HOME, 'broken-node');
+    mkdirSync(full);
+    standIn(full, 'sha256sum', 'exit 0');
+    standIn(full, 'tar', 'echo "tar: Cannot write: No space left on device" >&2; exit 2');
+    mkdirSync(join(broken, 'node', 'bin'), { recursive: true });
+    mkdirSync(join(broken, 'server'));
+    writeFileSync(join(broken, 'node', 'bin', 'node'), '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+    writeFileSync(join(broken, 'server', 'index.js'), '// the version that was here\n');
+    const stopped = update(broken, `${full}:${tools}`);
+    check('an update that cannot unpack what it fetched changes nothing, and says so', stopped.status === 1 && fetched() && /Nothing was changed/.test(stopped.stdout) && readFileSync(join(broken, 'node', 'bin', 'node'), 'utf8').includes('exit 1')
+      && readFileSync(join(broken, 'server', 'index.js'), 'utf8').includes('was here') && !existsSync(join(broken, 'node.new')) && !existsSync(join(broken, '.new')), `status ${stopped.status} ${stopped.stdout} ${stopped.stderr}`);
   }
   check('settings reject an unknown background', (await api('/api/settings', { method: 'POST', body: { background: '../x' } })).status === 200 && (await state()).background !== '../x');
 

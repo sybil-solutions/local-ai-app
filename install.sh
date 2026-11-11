@@ -14,8 +14,11 @@ if [ -n "${LOCAL_AI_SHIPPED:-}" ]; then
   WAS="$(sed -n 's/.*LOCAL_AI_PORT=\([0-9]*\).*/\1/p' "$UNIT" 2>/dev/null | head -1)"
   if [ "$LOCAL_AI_SHIPPED" != update ] && curl -s -m 2 "http://127.0.0.1:${WAS:-18700}/api/health" 2>/dev/null | grep -q '"app":"local-ai"'; then echo "Local AI is already running on this machine, so nothing was changed"; exit 4; fi
 fi
+mkdir -p "$DEST" "$HOME/.config/systemd/user"
 node_ok() { [ -n "$1" ] && "$1" -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' 2>/dev/null; }
 NODE="$(command -v node || true)"
+# The Node this installer fetched at an earlier install is used again: an update downloads nothing and replaces nothing.
+if ! node_ok "$NODE" && node_ok "$DEST/node/bin/node"; then NODE="$DEST/node/bin/node"; fi
 # Omarchy manages Node with mise; use that when there is no Node 20 yet.
 if ! node_ok "$NODE" && command -v mise >/dev/null; then mise use -g node@lts >/dev/null 2>&1 && NODE="$(mise which node)"; fi
 # Still none: fetch the official build for this machine, check it against the hash pinned here, and keep it beside the app.
@@ -27,16 +30,29 @@ if ! node_ok "$NODE"; then
     *) echo "Local AI needs Node.js 20 or newer. Install it, then run this again."; exit 1 ;;
   esac
   NODE_F="$(mktemp)"
+  NODE_NEW="$DEST/node.new"
+  trap 'rm -rf "$NODE_F" "$NODE_NEW"' EXIT
   curl -fsSL "https://nodejs.org/dist/v$NODE_V/node-v$NODE_V-linux-$NODE_A.tar.xz" -o "$NODE_F" || { echo "Local AI needs Node.js 20 or newer, and could not download it. Install it, then run this again."; exit 1; }
-  echo "$NODE_SUM  $NODE_F" | sha256sum -c - >/dev/null 2>&1 || { rm -f "$NODE_F"; echo "The Node.js download did not match its checksum, so it was not used."; exit 1; }
-  rm -rf "$DEST/node" && mkdir -p "$DEST/node" && tar -xJf "$NODE_F" -C "$DEST/node" --strip-components=1
-  rm -f "$NODE_F"
+  echo "$NODE_SUM  $NODE_F" | sha256sum -c - >/dev/null 2>&1 || { echo "The Node.js download did not match its checksum, so it was not used."; exit 1; }
+  # Unpacked beside whatever is there and put in its place only once it runs. A full disk or a cut download leaves
+  # the machine as it was: nothing that works is removed for something that is not here yet.
+  { rm -rf "$NODE_NEW" && mkdir -p "$NODE_NEW" && tar -xJf "$NODE_F" -C "$NODE_NEW" --strip-components=1 && node_ok "$NODE_NEW/bin/node"; } || { echo "Node.js could not be unpacked here (is the disk full?). Nothing was changed."; exit 1; }
+  rm -rf "$DEST/node.old"
+  if [ -e "$DEST/node" ]; then mv "$DEST/node" "$DEST/node.old"; fi
+  mv "$NODE_NEW" "$DEST/node"
+  rm -rf "$DEST/node.old" "$NODE_F"
+  trap - EXIT
   NODE="$DEST/node/bin/node"
-  node_ok "$NODE" || { echo "The downloaded Node.js does not run on this machine."; exit 1; }
 fi
-mkdir -p "$DEST" "$HOME/.config/systemd/user"
-# server/ and web/ are replaced whole, so a file a newer version removed does not linger and get loaded.
-if [ "$SRC" != "$DEST" ]; then rm -rf "$DEST/server" "$DEST/web" && cp -r "$SRC/server" "$SRC/web" "$SRC/package.json" "$SRC/install.sh" "$DEST/"; fi
+# server/ and web/ are replaced whole, so a file a newer version removed does not linger and get loaded. The new
+# files are copied in beside the old ones and then swapped, so a copy that fails (a full disk) changes nothing.
+if [ "$SRC" != "$DEST" ]; then
+  NEW="$DEST/.new"
+  { rm -rf "$NEW" && mkdir -p "$NEW" && cp -r "$SRC/server" "$SRC/web" "$SRC/package.json" "$SRC/install.sh" "$NEW/"; } || { rm -rf "$NEW"; echo "The new version could not be copied here (is the disk full?). Nothing was changed."; exit 1; }
+  rm -rf "$DEST/server" "$DEST/web"
+  mv "$NEW/server" "$NEW/web" "$NEW/package.json" "$NEW/install.sh" "$DEST/"
+  rm -rf "$NEW"
+fi
 # A value as systemd reads it inside double quotes.
 quoted() { printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/%/%%/g'; }
 # Settings given now stay with the service; ones given at an earlier install are kept.
