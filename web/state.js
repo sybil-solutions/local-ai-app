@@ -51,11 +51,23 @@ export const cardKey = (id) => `${s.dev} ${id}`; // a recipe id can mean a diffe
 export const newer = (a, b) => a.localeCompare(b, 'en', { numeric: true }) > 0;
 export const agentName = () => s.snap.agents.find((a) => a.id === s.snap.agent && a.installed)?.name;
 export const outdated = () => s.snap.agents.filter((a) => a.installed && a.version && a.latest && newer(a.latest, a.version) && a.job?.phase !== 'running');
+// Whether the machine has the free GPUs the chosen model needs. When it has not, Home says so and shows the GPUs.
+export function hasRoom(c = chosen()) {
+  const d = D(), g = c && d.groups.find((x) => x.recipes.some((r) => r.id === c.id));
+  return !!g && g.gpus.filter((i) => d.free.includes(i)).length >= c.cards;
+}
 export const homeCfg = () => s.snap.home || { order: ['hands', 'models', 'stats', 'usage', 'gpus'], on: ['hands', 'models', 'stats'] };
-export const HOME = () => homeCfg().order.filter((k) => homeCfg().on.includes(k));
+// The blocks Home shows, in order. The GPUs join them while they are the reason nothing can start.
+export function HOME() {
+  const { order, on } = homeCfg(), list = order.filter((k) => on.includes(k));
+  return !list.includes('gpus') && !run() && chosen() && !hasRoom() ? [...list, 'gpus'] : list;
+}
 // The desktop app's window fits itself to the layout (electron/preload.cjs); a browser's can't be resized from here.
 export const shellWindow = window.localAiWindow || null;
 const roomy = () => innerWidth >= 640;
+// The panel's width and least height, in its own units. The stylesheet is where they are set.
+const size = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+export const PANEL = { w: size('--pw') || 312, h: size('--ph') || 432 };
 export const canFull = () => roomy() || !!shellWindow; // whether the layout can be switched at all
 export const isFull = () => s.full && roomy();
 
@@ -75,6 +87,5 @@ export function resolve() {
   if (!d.gpus.length) return 'nogpu';
   const c = chosen();
   if (!c) return d.catalog.count ? 'nothing' : 'nocatalog';
-  const cards = d.groups.find((g) => g.recipes.some((r2) => r2.id === c.id)).gpus;
-  return cards.filter((i) => d.free.includes(i)).length < c.cards ? 'busy' : 'off';
+  return 'off';
 }

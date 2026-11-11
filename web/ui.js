@@ -52,11 +52,13 @@ export const art = (pose, p = 0) => `<canvas class="art" data-pose="${pose}" dat
 export const status = (pose, word, line = '', p = 0) => `${art(pose, p)}<div class="word">${esc(word)}</div><div class="line">${esc(line)}</div>`;
 
 export const fsBtn = () => (canFull() ? `<button data-act="fs" aria-label="${s.full ? 'Exit fullscreen' : 'Fullscreen'}" title="${s.full ? 'Exit fullscreen' : 'Fullscreen'}">${icon(s.full ? 'shrink' : 'grow')}</button>` : '');
+// Shown before the machine's name while the page shows another machine than the one it is open on. The name itself is blurred.
+export const remote = () => (s.dev === -1 ? '' : '<span class="where">Remote</span>');
 // The name with its dove, wherever the app shows its own name.
 export const wordmark = '<span class="mark"><img class="dove" src="/dove.svg" alt="">Local AI</span>';
 const bare = `<div class="top">${wordmark}</div>`;
 export const menu = () => (s.snap
-  ? `<div class="top"><button class="mark chip" data-go="machines" aria-label="Machine: ${esc(here())}"><i></i><span class="who">${esc(here())}</span></button><span class="topr chip">${fsBtn()}<button data-go="settings" aria-label="Settings" title="Settings">${icon('menu')}</button></span></div>`
+  ? `<div class="top"><button class="mark chip" data-go="machines" aria-label="Machine: ${esc(here())}"><i></i>${remote()}<span class="who">${esc(here())}</span></button><span class="topr chip">${fsBtn()}<button data-go="settings" aria-label="Settings" title="Settings">${icon('menu')}</button></span></div>`
   : bare);
 export const close = (go = 'back') => `<div class="top">${wordmark}<button class="x" data-go="${go}" aria-label="Close">${icon('close')}</button></div>`;
 export const notice = () => (s.note ? `<button class="notice" data-act="dismiss" title="Dismiss">${esc(s.note)}</button>` : '');

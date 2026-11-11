@@ -8,23 +8,27 @@ const URL_ = `http://127.0.0.1:${PORT}`;
 // An already-running server (a service, another install) is reused instead of fought over.
 const existing = () => fetch(`${URL_}/api/health`, { signal: AbortSignal.timeout(1000) }).then((r) => r.json()).then((j) => j.app === 'local-ai').catch(() => false);
 
-// The panel is drawn 260 by 480 and shown at up to one and a half times that. When the page shows the panel, the
-// window takes exactly that shape, so there is nothing around it, and keeps the shape while it is resized. When the
-// page goes back to the desktop layout the window gets back the size it had.
-const PANEL = { w: 260, h: 480, most: 1.5 }, ROOMY = { w: 640, h: 500 }; // the desktop layout needs 640; narrower than that the page would show the panel with room around it
+// The panel is drawn in units of its own: the page says how wide and how tall (taller when Home shows more), and it
+// is shown at up to one and a half times that.
+// When the page shows the panel, the window takes exactly that shape, so there is nothing around it and nothing cut
+// off, and keeps the shape while it is resized. When the page goes back to the desktop layout the window gets back the
+// size it had.
+const PANEL = { w: 312, h: 432, widest: 600, tallest: 1400, most: 1.5 }, ROOMY = { w: 640, h: 500 }; // the desktop layout needs 640; narrower than that the page would show the panel with room around it
 let before = null;
-function fit(win, compact, tries = 0) {
+function fit(win, compact, height = 0, width = 0, tries = 0) {
   if (win.isDestroyed()) return;
-  if (win.isFullScreen()) { if (compact && tries < 20) setTimeout(() => fit(win, compact, tries + 1), 150); return; } // still leaving fullscreen
+  if (win.isFullScreen()) { if (compact && tries < 20) setTimeout(() => fit(win, compact, height, width, tries + 1), 150); return; } // still leaving fullscreen
+  const h = Math.min(PANEL.tallest, Math.max(200, Math.round(height) || PANEL.h)), w = Math.min(PANEL.widest, Math.max(200, Math.round(width) || PANEL.w));
   const [ow, oh] = win.getSize(), [cw, ch] = win.getContentSize(), dw = ow - cw, dh = oh - ch; // the window's own edges and title bar
   if (compact) {
     const room = screen.getDisplayMatching(win.getBounds()).workAreaSize;
-    const k = Math.max(1, Math.min(PANEL.most, (room.height - dh) / PANEL.h, (room.width - dw) / PANEL.w));
+    const k = Math.max(0.75, Math.min(PANEL.most, (room.height - dh) / h, (room.width - dw) / w));
     before ||= win.getBounds();
-    win.setMinimumSize(PANEL.w + dw, PANEL.h + dh);
-    win.setMaximumSize(Math.round(PANEL.w * k) + dw, Math.round(PANEL.h * k) + dh);
-    win.setAspectRatio(PANEL.w / PANEL.h, { width: dw, height: dh });
-    win.setContentSize(Math.round(PANEL.w * k), Math.round(PANEL.h * k));
+    win.setAspectRatio(0);
+    win.setMinimumSize(Math.round(w * Math.min(1, k)) + dw, Math.round(h * Math.min(1, k)) + dh);
+    win.setMaximumSize(Math.round(w * k) + dw, Math.round(h * k) + dh);
+    win.setAspectRatio(w / h, { width: dw, height: dh });
+    win.setContentSize(Math.round(w * k), Math.round(h * k));
   } else if (before) {
     win.setAspectRatio(0);
     win.setMaximumSize(10000, 10000);
@@ -33,7 +37,7 @@ function fit(win, compact, tries = 0) {
     before = null;
   }
 }
-ipcMain.handle('compact', (e, on) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) fit(win, on === true); });
+ipcMain.handle('compact', (e, on, height, width) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) fit(win, on === true, +height || 0, +width || 0); });
 
 const ICON = join(dirname(fileURLToPath(import.meta.url)), 'icon.png');
 

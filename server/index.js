@@ -73,7 +73,7 @@ async function openAgent({ b }) {
   const all = await sized(), target = all.find((t) => String(t.deviceIndex) === String(b.device) && t.id === b.port) || fail(404, 'That model is not ready');
   agents.syncPi(all);
   if (target.deviceIndex === 'self') engine.cancelMeasure(target.id);
-  return agents.open(b.agent, target, b.folder || config.folder);
+  return agents.open(b.agent, target, b.folder || config.folder, all);
 }
 
 async function endpoints() {
@@ -122,6 +122,7 @@ const ROUTES = compile({
     res.end(readFileSync(at('background')));
   },
   'GET /api/tailscale': async () => { const me = await machines.self(); return { peers: await machines.peers(), install: me ? `curl -fsSL http://${me.ip}:${PORT}/install | bash` : null }; },
+  'POST /api/tailscale/install': ({ b }) => (typeof b.ip === 'string' ? machines.install(b) : fail(400, 'Choose a machine')),
   'POST /api/devices': ({ b }) => machines.add(b),
   'DELETE /api/devices': ({ q }) => machines.remove(q.get('i')),
   'ANY /api/devices/:i/:rest': async ({ req, res, p, q, b }) => { const out = await machines.forward(+p.i, req.method, `${p.rest}${q.size ? `?${q}` : ''}`, b); res.writeHead(out.status, { 'content-type': out.type }); res.end(out.body); },
