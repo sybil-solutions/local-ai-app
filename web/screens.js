@@ -1,10 +1,10 @@
 // Every screen, as a function that returns its HTML. The panel shows one at a time; the desktop layout shows the same ones as pages.
-import { agentName, all, cardKey, chosen, D, group, here, HOME, homeCfg, newer, outdated, picks, run, s, shown } from './state.js';
+import { agentName, all, cardKey, chosen, D, group, hasRoom, here, HOME, homeCfg, newer, outdated, picks, run, s, shown } from './state.js';
 import { a, ago, art, b, bar, caps, close, ctxOf, esc, facts, fmt, grip, icon, item, kv, left, menu, meta, mins, running, status, toggle, vfoot, wordmark } from './ui.js';
 import { miniUsage, usageBody } from './usage.js';
 
 // Home: the blocks you chose, in your order.
-export const offLine = (c) => (!c.ready ? `${c.sizeGb ? `${Math.round(c.sizeGb)} GB` : 'Model'} to download`
+export const offLine = (c) => (!hasRoom(c) ? 'The GPUs are in use by another program' : !c.ready ? `${c.sizeGb ? `${Math.round(c.sizeGb)} GB` : 'Model'} to download`
   : group()?.untested ? `Made for ${esc(group().untested)} · untested here` : c.loadS ? `Starts in about ${mins(c.loadS)} min` : 'Ready to start');
 const detail = (r) => `<div class="mdetail"><div class="ics">${caps(r)}</div><div class="kv small">${kv(facts(r))}</div></div>`;
 // Recipes that run outside Docker (MLX on a Mac) can't be edited on the Edit screen, so they get no Edit button.
@@ -23,7 +23,7 @@ export const BLOCKS = {
   gpus: gpuRows,
 };
 const home = (ph) => `<div class="scroll home">${HOME().map((k) => BLOCKS[k](ph)).join('')}</div>`;
-export const startBtn = () => a(chosen().ready ? 'Run' : 'Download', 'start', 'go');
+export const startBtn = () => a(chosen().ready ? 'Run' : 'Download', 'start', 'go', hasRoom() ? '' : 'disabled');
 export const openBtns = () => `<div class="two">${agentName() ? a(`Open ${esc(agentName())}`, 'open', 'go') : b('Choose an agent', 'chooser', 'go')}${b(icon('down'), 'chooser', '', 'aria-label="Choose an agent"')}</div>`;
 export const stopBtn = () => (run().external ? '' : a('Stop', 'stop', 'neg'));
 
@@ -126,20 +126,22 @@ export const STATE = {
     const first = f.word === 'Ran out of room' && fast && fast.id !== r.recipe ? a('Try Fast', 'tryfast', 'go') : f.word === 'Locked model' ? b('Add token', 'hf-token', 'go') : a('Try again', 'retry', 'go');
     return { pose: 'broken', word: f.word, line: f.line, extra: '<button class="link" data-go="logs">Engine output</button>', btns: `${first}${a('Back', 'stop')}` };
   },
-  noreply: () => ({ pose: 'broken', word: 'No reply', line: run().view.line, btns: `${a('Restart', 'retry', 'go')}${a('Stop', 'stop', 'neg')}` }),
+  // A model started outside Local AI can't be restarted or stopped from here, so it gets no buttons.
+  noreply: () => ({ pose: 'broken', word: 'No reply', line: run().view.line, btns: run().external ? '' : `${a('Restart', 'retry', 'go')}${a('Stop', 'stop', 'neg')}` }),
   needsdocker: () => ({ pose: 'apart', word: 'Needs Docker', line: 'One free install', btns: '<a class="btn go" href="https://docs.docker.com/engine/install/" target="_blank" rel="noopener">Install Docker</a>' }),
   dockeroff: () => ({ pose: 'apart', word: 'Docker is off', line: 'Turn it on to start models', btns: a('Turn on', 'docker', 'go') }),
   nogpu: () => ({ pose: 'apart', word: 'No GPU here', line: 'This computer can’t run models', btns: elsewhere() }),
   nothing: () => ({ pose: 'apart', word: 'Nothing fits', line: `No tested models for ${D().groups[0]?.name || 'this GPU'}`, btns: elsewhere() }),
   nocatalog: () => ({ pose: 'apart', word: 'No models yet', line: D().catalog.error ? 'Can’t reach the model list' : 'Getting the model list', btns: a('Try again', 'refresh', 'go') }),
-  busy: () => ({ pose: 'apart', word: 'GPUs in use', line: 'Another program is using them', extra: `<div class="busyrows">${gpuRows()}</div>`, btns: b('More models', 'adv-models') }),
   'm-connect': () => ({ pose: 'reach', p: 0.5, word: 'Connecting', line: s.link.name, btns: b('Cancel', 'machines', 'neg') }),
   'm-linked': () => ({ pose: 'touch', p: 1, word: 'Connected', line: s.link.name, btns: `${a('Use this machine', 'uselinked', 'go')}${b('Back', 'machines')}` }),
   'm-fail': () => ({ pose: 'broken', word: 'Can’t reach it', line: s.link.error, btns: `${b('Try again', 'addmachine', 'go')}${b('Back', 'machines')}` }),
+  'm-setup': () => ({ pose: 'reach', p: 0.5, word: 'Setting up', line: `Installing Local AI on ${s.link.name}`, extra: '<div class="line">This can take a minute</div>', btns: b('Back', 'machines') }),
+  // Reached only when this computer could not install it there itself: why, and the command that does it by hand.
   'm-install': () => ({
-    pose: 'apart', word: 'Not set up', line: `Run this on ${s.link.name}, then come back`,
-    extra: `<div class="box mono" style="margin-top:8px">${esc(s.install || 'Install Local AI there first')}</div>`,
-    btns: `${s.install ? a('Copy', 'copy', 'go', `data-copy="${esc(s.install)}"`) : ''}${b('Back', 'machines')}`,
+    pose: 'apart', word: 'Not set up', line: s.link.error || `Run this on ${s.link.name}, then come back`,
+    extra: s.link.manual === false ? '' : `<div class="box mono" style="margin-top:8px">${esc(s.install || 'Install Local AI there first')}</div>`,
+    btns: `${s.install && s.link.manual !== false ? a('Copy', 'copy', 'go', `data-copy="${esc(s.install)}"`) : ''}${b('Back', 'machines')}`,
   }),
 };
 const plain = (id) => { const st = STATE[id](); return `${menu()}${status(st.pose, st.word, st.line, st.p)}${st.bar ? bar(st.p * 100) : ''}${st.extra || ''}<div class="sp"></div>${st.btns || ''}`; };
@@ -176,7 +178,7 @@ export const SCREENS = {
     const mine = [{ i: -1, name: s.snap.name, sub: gpus(s.snap) }, ...s.snap.devices.map((d) => ({ i: d.i, name: d.name, sub: d.online ? gpus(d.state) : d.error || 'Offline' }))];
     const who = (p) => `<span><b>${esc(p.name)}</b><small>${esc(p.os.replace(/^[a-z]/, (c) => c.toUpperCase()))}</small></span>`;
     const others = (s.peers || []).filter((p) => !p.linked).map((p) => (p.online
-      ? `<button class="item" data-act="peer" data-ip="${p.ip}" data-name="${esc(p.name)}" data-app="${p.app ? 1 : ''}">${who(p)}<small>${p.app ? 'Connect' : 'Not set up'}</small></button>`
+      ? `<button class="item" data-act="peer" data-ip="${esc(p.ip)}" data-name="${esc(p.name)}" data-os="${esc(p.os)}" data-app="${p.app ? 1 : ''}">${who(p)}<small>${p.app ? 'Connect' : 'Set up'}</small></button>`
       : `<div class="item busy">${who(p)}<small>Seen ${ago(p.seen)}</small></div>`)).join('');
     return `${close()}<div class="head">Machines</div><div class="scroll"><div class="label group">Connected</div>`
       + mine.map((m) => `<button class="item" data-act="use" data-dev="${m.i}"><span><b>${esc(m.name)}</b><small>${esc(m.sub)}</small></span><small>${m.i === s.dev ? 'In use' : ''}</small></button>`).join('')
