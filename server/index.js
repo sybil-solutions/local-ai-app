@@ -1,10 +1,11 @@
 // The server. One port serves the web app, the API in ROUTES below, and a long-polled snapshot of everything on this machine.
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import * as agents from './agents.js';
 import * as engine from './engine.js';
 import * as machines from './machines.js';
@@ -24,10 +25,12 @@ const GUARD = {
 };
 const TYPES = { svg: 'image/svg+xml', png: 'image/png', html: 'text/html', js: 'text/javascript', css: 'text/css', webp: 'image/webp', woff2: 'font/woff2' };
 const JSON_TYPE = { 'content-type': 'application/json' };
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
 let shared = null; // this machine's tailnet address, once the app is also listening there
 
 // The snapshot: what GET /api/state returns. Clients long-poll it and redraw from it; nothing else pushes.
-let snapshot = '{}', signature = '', version = 0, waiters = [];
+// `zipped` is the same snapshot compressed, made the first time another machine asks for this version.
+let snapshot = '{}', zipped = null, signature = '', version = 0, waiters = [];
 async function publish() {
   const groups = recipes.groups(engine.status.gpus), list = await agents.list(), term = await agents.terminalChoice();
   for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(recipes.find(r.id).launch);
@@ -41,7 +44,8 @@ async function publish() {
   const text = JSON.stringify(state);
   if (text === signature) return;
   signature = text;
-  snapshot = JSON.stringify({ ...state, v: ++version });
+  snapshot = `{"v":${++version},${text.slice(1)}`; // the same text with its version in front, not written out a second time
+  zipped = null;
   [...waiters].forEach((wake) => wake());
 }
 const changed = (ms) => new Promise((done) => {
@@ -113,7 +117,13 @@ async function saveSettings({ b }) {
 
 // A handler gets { q: query, b: JSON body, p: path parameters, req, res }. What it returns is sent as JSON; returning nothing means it answered itself.
 const ROUTES = compile({
-  'GET /api/state': async ({ q, res }) => { if (+q.get('v') === version || !version) await changed(20000); res.writeHead(200, JSON_TYPE); res.end(snapshot); },
+  'GET /api/state': async ({ q, req, res }) => {
+    if (+q.get('v') === version || !version) await changed(20000);
+    // Another machine gets it compressed (a seventh of the size). A page on this machine does not: nothing is saved by it.
+    const plain = LOOPBACK.test(req.socket.remoteAddress || '') || !/\bgzip\b/.test(req.headers['accept-encoding'] || '');
+    res.writeHead(200, plain ? JSON_TYPE : { ...JSON_TYPE, 'content-encoding': 'gzip', vary: 'accept-encoding' });
+    res.end(plain ? snapshot : zipped ||= gzipSync(snapshot));
+  },
   'POST /api/runs': ({ b }) => (typeof b.recipe === 'string' ? engine.start(recipes.allowed(b.recipe, b.approve), b.gpus) : fail(400, 'Choose a recipe')),
   'DELETE /api/runs/:id': ({ p }) => engine.remove(p.id),
   'GET /api/runs/:id/logs': ({ p, q }) => engine.logs(p.id, q.get('tail')),
@@ -133,7 +143,7 @@ const ROUTES = compile({
     res.writeHead(200, { 'content-type': config.picture.type, 'cache-control': 'no-store' });
     res.end(readFileSync(at('background')));
   },
-  'GET /api/tailscale': async () => { const me = await machines.self(); return { peers: await machines.peers(), install: me ? `curl -fsSL http://${me.ip}:${PORT}/install | bash` : null }; },
+  'GET /api/tailscale': async () => { const me = await machines.self(), peers = await machines.peers(); return { peers, stale: machines.peersAreStale(), install: me ? `curl -fsSL http://${me.ip}:${PORT}/install | bash` : null }; },
   'POST /api/tailscale/install': ({ b }) => (typeof b.ip === 'string' ? machines.install({ ip: b.ip, update: b.update === true }) : fail(400, 'Choose a machine')),
   'POST /api/devices': ({ b }) => machines.add(b),
   'DELETE /api/devices': ({ q }) => machines.remove(q.get('i')),
@@ -180,19 +190,43 @@ const body = (req) => new Promise((done, reject) => {
   });
 });
 
+// A file of the page, kept in memory with a compressed copy and a tag that names this version of it. It is read
+// again only when the file on disk changed.
+const SQUASHED = new Set(['html', 'js', 'css', 'svg']), files = new Map();
+function fileOf(name) {
+  let stat;
+  try { stat = statSync(join(WEB, name)); } catch { return null; }
+  const hit = files.get(name);
+  if (hit?.changed === stat.mtimeMs) return hit;
+  const data = readFileSync(join(WEB, name)), kind = name.split('.').pop();
+  const file = { changed: stat.mtimeMs, data, zipped: SQUASHED.has(kind) ? gzipSync(data) : null, tag: `"${stat.size.toString(36)}-${Math.round(stat.mtimeMs).toString(36)}"` };
+  files.set(name, file);
+  return file;
+}
+// Every script of the page, named in its head, so the browser fetches them side by side and not one after another
+// as each one asks for the next.
+const scripts = (dir) => readdirSync(join(WEB, dir)).filter((f) => f.endsWith('.js')).map((f) => `<link rel="modulepreload" href="/${dir}${dir ? '/' : ''}${f}">`);
+const PRELOAD = [...scripts(''), ...scripts('components')].join('');
+
 // The web app's files. The page gets the key written in only for another of your own Tailscale machines, which
 // Tailscale vouches for. Being asked from this machine proves nothing: another user's program, or anything that
 // forwards connections here, asks from loopback too. On this machine the key comes with the address instead
 // (#key=…), which the desktop app and the installer take from the config file only this user can read.
 async function sendStatic(req, res, path) {
-  const file = path === '/' ? 'index.html' : path.slice(1), type = TYPES[file.split('.').pop()];
-  if (!type || !/^[\w-]+(\/[\w-]+)?\.\w+$/.test(file) || !existsSync(join(WEB, file))) fail(404, 'Not found');
-  let data = readFileSync(join(WEB, file));
-  if (file === 'index.html') {
-    data = String(data).replace('__KEY__', (await machines.isMine(req)) ? config.key : '');
+  const name = path === '/' ? 'index.html' : path.slice(1), type = TYPES[name.split('.').pop()];
+  const file = type && /^[\w-]+(\/[\w-]+)?\.\w+$/.test(name) ? fileOf(name) : null;
+  if (!file) fail(404, 'Not found');
+  if (name === 'index.html') {
+    // The page itself is written for whoever asks (the key, or not), so it is never kept by a browser.
+    res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+    return res.end(String(file.data).replace('__KEY__', (await machines.isMine(req)) ? config.key : '').replace('</head>', `${PRELOAD}</head>`));
   }
-  res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
-  res.end(data);
+  // Everything else is kept by the browser and checked each time it is used: unchanged, it is not sent again.
+  const headers = { 'content-type': type, 'cache-control': 'no-cache', etag: file.tag };
+  if (req.headers['if-none-match'] === file.tag) { res.writeHead(304, headers); return res.end(); }
+  const squash = file.zipped && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  res.writeHead(200, { ...headers, ...(squash ? { 'content-encoding': 'gzip', vary: 'accept-encoding' } : {}) });
+  return res.end(squash ? file.zipped : file.data);
 }
 
 // Whether a request carries this machine's key. Compared in the same time whatever was sent, so how long a wrong
@@ -215,7 +249,7 @@ async function handle(req, res) {
     if (result === undefined) return undefined;
     res.writeHead(200, JSON_TYPE);
     res.end(JSON.stringify(result));
-    if (!open) publish().catch((e) => event('error', 'publish.failed', { error: e.message }));
+    if (!open && req.method !== 'GET') publish().catch((e) => event('error', 'publish.failed', { error: e.message })); // something was changed: say so at once
     return undefined;
   } catch (e) {
     const status = e.status || 500;
@@ -241,14 +275,15 @@ export async function start() {
   const every = (ms, fn) => setInterval(() => fn().catch?.((e) => event('error', 'loop.failed', { error: e.message })), ms);
   let queued = false;
   const soon = () => { if (!queued) { queued = true; setTimeout(() => { queued = false; publish().catch((e) => event('error', 'publish.failed', { error: e.message })); }, 150); } };
-  for (const part of [engine, agents, update]) part.onChange(soon);
+  for (const part of [engine, agents, update, machines]) part.onChange(soon);
+  machines.follow();
   recipes.refresh();
   update.check();
   await share();
   await engine.tick();
   await publish();
   every(2000, async () => { await engine.tick(); await publish(); });
-  every(3000, async () => { await machines.poll(); agents.syncPi(await sized()); });
+  every(3000, async () => agents.syncPi(await sized()));
   every(30000, async () => { usage.flush(); await share(); });
   every(3600e3, recipes.refresh);
   every(6 * 3600e3, update.check);

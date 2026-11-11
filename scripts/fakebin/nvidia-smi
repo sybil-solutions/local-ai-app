@@ -1,4 +1,11 @@
 #!/bin/sh
-# A stand-in for nvidia-smi, for the smoke test: two idle 24 GB cards.
-echo "0, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
-echo "1, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
+# A stand-in for nvidia-smi, for the tests: two idle 24 GB cards. With -l it keeps printing them, as the real one does,
+# until whoever reads it goes away.
+cards() {
+  echo "0, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
+  echo "1, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
+}
+cards
+case " $* " in
+  *" -l "*) while sleep 2; do cards 2>/dev/null || exit 0; done ;;
+esac

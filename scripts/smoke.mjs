@@ -133,7 +133,7 @@ const raw = (path, host) => new Promise((done, failed) => {
   req.end();
 });
 const chat = (port, stream, content = 'hi') => fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(30000),
-  body: JSON.stringify({ model: 'x', max_tokens: 16, stream, ...(stream ? { stream_options: { include_usage: true } } : {}), messages: [{ role: 'user', content }] }) }).then((r) => r.text());
+  body: JSON.stringify({ model: 'x', stream, ...(stream ? { stream_options: { include_usage: true } } : {}), messages: [{ role: 'user', content }] }) }).then((r) => r.text());
 
 let hostPid = null;
 const watchdog = setTimeout(() => { console.log('FAIL the smoke test took longer than 10 minutes'); cleanup().then(() => process.exit(1)); }, 600e3);

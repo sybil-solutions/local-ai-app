@@ -24,10 +24,19 @@ export async function probe(r) {
   return false;
 }
 
+// Whether the engine is up. One that is ready and keeps answering for its counters is not also asked for its models
+// every time: reading the counters is the check, and its models are asked for every fifth tick, or at once when the
+// counters stop answering. That is one request a tick to a working engine instead of two.
+export async function pulse(r, now) {
+  const lean = r.phase === 'ready' && r.apis && !r.misses && (r.beats = (r.beats || 0) + 1) % 5 !== 0;
+  return (lean && await usage.scrape(r, now)) || probe(r);
+}
+
+// The engine's first answer. The question is short and the answer is left to end by itself: no limit is put on it.
 async function testReply(r) {
   try {
     const res = await fetch(`${r.url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer local' }, signal: AbortSignal.timeout(90000),
-      body: JSON.stringify({ model: r.served, max_tokens: 4, messages: [{ role: 'user', content: 'Say OK.' }] }) });
+      body: JSON.stringify({ model: r.served, messages: [{ role: 'user', content: 'Say OK.' }] }) });
     return res.ok && !!(await res.json()).choices?.length;
   } catch { return false; }
 }
@@ -64,9 +73,8 @@ export async function probeApis(r) {
 
 // Whether the engine answers, its first reply, then speed and usage once it is ready. Containers and host runs alike.
 export async function health(r) {
-  const id = r.id;
-  const up = await probe(r);
-  const now = Date.now();
+  const id = r.id, now = Date.now();
+  const up = await pulse(r, now);
   if (runs.get(id) !== r || r.phase === 'stopping') return; // stopped while we were asking
   if (up && r.phase !== 'ready' && !r.replying) {
     update(r, { phase: 'testing', detail: 'Asking it one question', replying: true });

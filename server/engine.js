@@ -13,6 +13,8 @@ import * as usage from './usage.js';
 import { config, ENGINE_HOST, event, fail, HOST, PORT, run, saveConfig } from './util.js';
 import * as weights from './weights.js';
 
+import { health } from './health.js';
+
 export { cancelMeasure, measureNow } from './health.js';
 export { freeGpus, onChange, shareOn, status } from './runs.js';
 
@@ -85,9 +87,20 @@ export async function logs(rawId, tail) {
   return { text: r.container ? await containerLogs(r, lines) : r.error || r.detail || '' };
 }
 
+// Docker is asked what it is running on every tick while a container is on its way up or down or has stopped
+// answering, and every fifth tick otherwise. A machine whose runs are never containers (Apple silicon) is not asked
+// at all, and one with no Docker installed is asked twice a minute.
+let sweeps = 0;
+function dockerIsDue() {
+  const containers = [...runs.values()].filter((r) => r.container || (!r.host && !r.external));
+  if (!containers.length && status.gpus.length && status.gpus.every((g) => g.unified)) return false;
+  const every = /not installed/.test(status.docker.error || '') ? 15 : containers.some((r) => r.busy || r.misses || !['ready', 'failed'].includes(r.phase)) || !status.docker.ok ? 1 : 5;
+  return sweeps++ % every === 0;
+}
+
 export async function startDocker() {
   const tries = process.platform === 'darwin' ? [['open', ['-a', 'Docker']]] : [['systemctl', ['start', 'docker']], ['systemctl', ['--user', 'start', 'docker']]];
-  for (const [cmd, args] of tries) if (!(await run(cmd, args, { timeout: 20000 })).code) { await tick(); return { ok: true }; }
+  for (const [cmd, args] of tries) if (!(await run(cmd, args, { timeout: 20000 })).code) { sweeps = 0; await tick(); return { ok: true }; }
   return fail(500, 'Could not start Docker. Start it yourself, then come back');
 }
 
@@ -101,7 +114,9 @@ export async function tick() {
     const listedAt = Date.now();
     await adoptHosts();
     await Promise.all([...runs.values()].filter((r) => r.host).map(checkHost));
-    await sweepContainers(listedAt);
+    // Every running engine is asked how it is on every tick. Docker itself is asked less often (see dockerIsDue).
+    if (dockerIsDue()) await sweepContainers(listedAt);
+    else await Promise.all([...runs.values()].filter((r) => r.container && !r.busy && !['stopping', 'failed'].includes(r.phase)).map(health));
     await discover(listedAt);
   } catch (e) {
     event('error', 'tick.failed', { error: e.message });

@@ -1,5 +1,5 @@
 // Models someone else started on this machine, found by asking every listening port. They are shown, never stopped.
-import { probe, probeApis } from './health.js';
+import { probeApis, pulse } from './health.js';
 import { innerPorts } from './hosts.js';
 import * as machines from './machines.js';
 import { changed, runs, update } from './runs.js';
@@ -39,6 +39,8 @@ async function forwards(here, model) {
 }
 
 // Models someone else started: anything on this machine that answers like an OpenAI server. They are shown, never stopped.
+// A port that answered and is not a model is not asked again for five minutes, unless another program takes it.
+const DULL_MS = 300e3, dull = new Map(); // "port by program" → when it last said it is not a model
 let scanned = 0;
 const booted = Date.now();
 export async function discover(now) {
@@ -46,7 +48,7 @@ export async function discover(now) {
   // is only slow (an engine under load answers late) stays, shown as not replying, so Home does not lose it and find it again.
   for (const r of runs.values()) {
     if (!r.external) continue;
-    const up = await probe(r);
+    const up = await pulse(r, now);
     if (!up && (r.closed >= 3 || r.misses >= 150)) { runs.delete(r.id); event('info', 'run.gone', { id: r.id }); changed(); continue; }
     if (!up && r.misses >= 15 && r.phase === 'ready') { update(r, { phase: 'unresponsive', heard: now - r.misses * 2000 }); event('warn', 'run.unresponsive', { id: r.id }); }
     if (!up) continue;
@@ -62,16 +64,26 @@ export async function discover(now) {
     const to = r.external && r.phase === 'ready' && await forwards(r.url, r.served);
     if (to) { runs.delete(r.id); usage.forget(r); event('info', 'run.forwarded', { id: r.id, model: r.served, to }); changed(); }
   }
-  const text = (process.platform === 'darwin' ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnH'])).stdout;
+  const mac = process.platform === 'darwin', text = (mac ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnpH'])).stdout;
   // Each listening port with the address to ask it on: loopback, unless it listens on one address only (a server bound
-  // to the tailnet address alone does not answer on loopback).
+  // to the tailnet address alone does not answer on loopback). `who` is the program listening, where the system says.
   const open = new Map();
-  for (const [, where, port] of text.matchAll(/(\S+):(\d+)\s/g)) {
+  for (const line of text.split('\n')) {
+    const [, where, port] = /(\S+):(\d+)\s/.exec(`${line} `) || [];
+    if (!port) continue;
     const ip = where.replace(/%.*$/, ''), only = /^\d+\.\d+\.\d+\.\d+$/.test(ip) && ip !== '0.0.0.0' && !ip.startsWith('127.') ? ip : null;
-    if (!open.has(+port) || !only) open.set(+port, { host: only || '127.0.0.1', outside: !/^(127\.|\[::1\])/.test(where) });
+    const who = mac ? line.trim().split(/\s+/)[1] : /pid=(\d+)/.exec(line)?.[1];
+    if (!open.has(+port) || !only) open.set(+port, { host: only || '127.0.0.1', outside: !/^(127\.|\[::1\])/.test(where), who: `${port} by ${who || '?'}` });
   }
-  const found = await Promise.all([...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p) && !innerPorts().has(p)).sort((a, b) => a - b).map(async (port) => {
-    try { const res = await fetch(`http://${open.get(port).host}:${port}/v1/models`, { signal: AbortSignal.timeout(800) }); return [port, res.ok && (await isEngine(`http://${open.get(port).host}:${port}`, (await res.json()).data))]; } catch { return [port, null]; }
+  for (const [who, at] of dull) if (now - at > DULL_MS) dull.delete(who);
+  const ask = [...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p) && !innerPorts().has(p) && !dull.has(open.get(p).who)).sort((a, b) => a - b);
+  const found = await Promise.all(ask.map(async (port) => {
+    const url = `http://${open.get(port).host}:${port}`;
+    try {
+      const res = await fetch(`${url}/v1/models`, { signal: AbortSignal.timeout(800) }), model = res.ok && (await isEngine(url, (await res.json()).data));
+      if (!model) dull.set(open.get(port).who, now);
+      return [port, model];
+    } catch { dull.set(open.get(port).who, now); return [port, null]; }
   }));
   const known = new Set([...runs.values()].map((r) => r.served));
   for (const [port, model] of found) {

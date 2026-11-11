@@ -65,7 +65,7 @@ async function inShell(command, timeout) {
 }
 
 const installed = once(async () => {
-  if (Date.now() - cached.at < 30000) return cached.found;
+  if (Date.now() - cached.at < 120000) return cached.found; // agents come and go rarely, and looking starts a shell
   const names = Object.keys(HARNESSES);
   const r = WIN ? await run('where', names) : await inShell(names.map((n) => `command -v ${n}`).join(';'), 8000);
   const found = new Set(names.filter((n) => new RegExp(`(^|[/\\\\])${n}(\\.\\w+)?\\s*$`, 'm').test(r.stdout) || HARNESSES[n].paths?.some((p) => existsSync(p))));
