@@ -1,4 +1,0 @@
-#!/bin/sh
-# A stand-in for nvidia-smi, for the smoke test: two idle 24 GB cards.
-echo "0, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
-echo "1, Smoke Test GPU, 24576, 300, 0, 20.5, 35"

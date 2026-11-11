@@ -38,6 +38,8 @@ A machine that already runs Local AI installs it on another Linux machine on you
 | `LOCAL_AI_HOME` | `~/.local-ai` | Config, your recipes, usage, events. |
 | `LOCAL_AI_MODELS` | `~/.local-ai/models` | Downloaded weights. A recipe that asks for the Hugging Face cache layout uses `HF_HOME/hub` instead. |
 | `LOCAL_AI_REGISTRY` | the registry's `dist/catalog.json` | Where recipes come from. |
+| `LOCAL_AI_DISCOVER` | on | `0` shows only the models this app started, and stops it looking for ones started elsewhere. |
+| `LOCAL_AI_TERMINAL` | the first one installed | `none` opens no terminal: Open always gives the command to paste (a machine nobody sits at). |
 
 ## How it works
 
@@ -47,13 +49,22 @@ flowchart LR
   subgraph machine[Your machine]
     app[web app] <-->|GET /api/state, long-polled<br>one request per button| server[server :18700]
     server -->|docker run / stop / ps / logs| engine[engine :18701…]
-    server -->|/v1/models, /metrics every 2 s| engine
+    server -->|/metrics every 2 s, /v1/models every 10 s| engine
     agent[coding agent] -->|OpenAI or Anthropic API| engine
   end
-  server <-->|/api/devices/n/* proxied, with that machine's key| other[Local AI on another machine]
+  server <-->|its /api/state, long-polled<br>/api/devices/n/* proxied, with that machine's key| other[Local AI on another machine]
 ```
 
-- **One snapshot.** Every two seconds the server looks at the GPUs (`nvidia-smi`), its containers (`docker ps`), and each engine (`/v1/models`, `/metrics`). The result is one JSON snapshot. The app long-polls it and redraws; nothing else is pushed, and the app keeps no state of its own about the machine.
+- **One snapshot.** Every two seconds the server looks at the GPUs, its engines and its containers. The result is one JSON snapshot. The app long-polls it and redraws; nothing else is pushed, and the app keeps no state of its own about the machine.
+- **What a look costs.** Looking every two seconds must cost next to nothing, because the machine is there to run models. So nothing is started that can be left running, and nothing is asked twice:
+  - `nvidia-smi` is started once and left printing every two seconds (`gpus.js`); started afresh for each reading it was most of the CPU the app used. On Apple silicon, memory is read every six seconds.
+  - A working engine gets one request a look: its counters (`/metrics`), which also show it is up. Its model list is asked for every fifth look, or at once when the counters stop answering.
+  - Docker is asked what it is running every fifth look, and on every look while a container is on its way up or down or has stopped answering. On Apple silicon, where no run is a container, it is not asked at all.
+  - A port that answered and is not a model is not asked again for five minutes.
+  - The snapshot is written out once per change, and compressed once per change for other machines (a seventh of the size). A request that changes nothing (any `GET`) does not rebuild it.
+  - A connected machine is followed the way its own page follows it: one long-polled request it answers when something changes, so a change there shows here at once and an idle machine costs one request every 20 s.
+  - The page's files are kept in memory, compressed, and sent again only when they changed (`ETag`); its scripts are named in the page's head so they are fetched side by side. The page does not redraw while its window is hidden.
+  - A speed measurement and the first test question put no limit on the answer's length; the engine ends them itself.
 - **Docker is the record.** A run is a container labelled `local-ai=1` with its recipe, port and GPUs in labels. Restart the server and it adopts whatever is still running.
 - **Apple silicon.** The chip is one GPU whose memory is the unified RAM, and it only runs recipes made for exactly that chip (`backend: metal`). Such a recipe is `kind: host`: a `command` that is Python and the recipe's own script (never `-c`, `-m` or another file), `pip` packages each pinned with `==`, the script in `config` with a `sha256` that must match, and weights pinned to a commit. Because it runs as you rather than in a container, the app shows what it will run and waits for Allow the first time, and again whenever the recipe changes. The engine is given a short environment (`PATH`, `HOME`, the locale, what the recipe sets), not the app's. Each recipe's packages get their own venv in `envs/`, shared by recipes that pin the same ones and deleted after 30 unused days. The engine runs in `runs/<port>/` on an inner port (the app's port + 100 and up); the server listens on the run's own port in front of it and counts the tokens each answer reports (`meter.js`), since such engines have no `/metrics`. The engine outlives the app like a container does: `hosts.json` remembers it, and a restarted app adopts it again only if the process still runs in that folder and started when it did. Quitting the app closes the front port until the app is back.
 - **Models it didn't start.** Every 30 seconds it asks each listening port above 1024, over loopback, for `/v1/models`. Whatever answers with one model, or with several and engine counters on `/metrics` (vLLM, SGLang, llama.cpp), is shown as running too, with its stats and its address, and is never stopped. A proxy that lists several models and has no engine counters (a gateway to cloud APIs) is not. The same model id on several ports (an engine and a proxy in front of it) is shown once.
@@ -64,18 +75,29 @@ flowchart LR
 
 ```
 server/
-  index.js      HTTP: the web app's files, the route table, the snapshot, start()
-  engine.js     runs: start, stop, adopt, watch, find models started elsewhere
+  index.js      HTTP: the route table, who holds the key, settings, start()
+  snapshot.js   the snapshot: built on a change, long-polled, compressed for other machines; what agents can be pointed at
+  static.js     the page's files: kept in memory, compressed, sent again only when changed
+  engine.js     runs: start, stop, logs, and the look every two seconds
+  runs.js       the runs themselves and what the others share: status, changes, failures, free GPUs
+  health.js     whether an engine answers, its first reply, its APIs, when to measure it
+  containers.js a run as a Docker container: launch, stop, logs, adopt what is already running
+  hosts.js      a run as a program on this machine (Apple silicon): venv, launch, stop, adopt
+  discovery.js  models started elsewhere on this machine, found by asking listening ports
   docker.js     the one `docker run` a recipe becomes, and which of its options are allowed
-  gpus.js       the GPUs: nvidia-smi, the Apple chip, a GPU that shares the system's memory
+  gpus.js       the GPUs: nvidia-smi left running, the Apple chip, a GPU that shares the system's memory
   weights.js    Hugging Face downloads and the mounts that put them in a container
   meter.js      the front port of a host run: passes requests to the engine and counts their tokens
   usage.js      tokens served, from each engine's own counters; who is calling
   recipes.js    the registry catalog, your own recipes, the three picks per GPU, model cards
   speed.js      measured tokens per second and load times
-  agents.js     coding agents and the terminal they open in: find, open on a model, install, update
+  agents.js     coding agents: find, open on a model, install, update
+  shell.js      the person's own shell: its PATH, running a command in it, launch scripts
+  terminals.js  the terminals installed here and opening one on a script
+  pi.js         Pi and Oh My Pi: the extension that registers each running model as a provider
+  apps.js       desktop apps that are opened, not run in a terminal: T3 Code, DeepSeek Harness
   dsh.js        DeepSeek Harness: writes the running models into its settings, as text
-  machines.js   connected machines, your Tailscale machines, key-less pairing
+  machines.js   connected machines (each followed by long-poll), your Tailscale machines, key-less pairing, installing on one
   update.js     the app updating itself from the repo it was cloned from
   util.js       paths, config, events, running commands
 web/
@@ -97,8 +119,10 @@ electron/main.js   a window onto the page; starts the server if none is running;
 electron/          also the Mac build's entitlements and before-pack.cjs, which puts a readable copy of the app in the bundle for installing on other machines
 install.sh         user service + Omarchy web app
 ios/               the iPhone app (Swift); its own README
-scripts/           screens.mjs (every screen drawn), smoke.mjs (the real server end to end), fuzz.mjs (hostile input),
-                   release-mac.sh (the signed, notarized DMG), and the stand-ins they use (fake_engine.py, fakebin/)
+tests/             e2e.mjs (the real desktop app, driven through its window), integration.mjs (the real server against
+                   stand-in engines, Docker and a second machine), screens.mjs (every screen drawn), fuzz.mjs (hostile
+                   input), and stand-ins/ (an engine, a Docker and an nvidia-smi that answer like real ones)
+scripts/           release-mac.sh (the signed, notarized DMG)
 design/            the approved design and the developer handoff (reference only)
 ```
 
@@ -110,7 +134,7 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 
 | Route | Does | Handled by |
 |---|---|---|
-| `GET /api/state?v=` | The snapshot. With the version you already have, waits up to 20 s for a change. | `index.js` `publish` |
+| `GET /api/state?v=` | The snapshot. With the version you already have, waits up to 20 s for a change. Compressed for a caller on another machine that accepts gzip. | `snapshot.js` `answer` |
 | `POST /api/runs` `{ recipe, gpus?, approve? }` | Start a recipe: download, pull the engine, run it. A host recipe not yet allowed answers 409 until `approve` is the fingerprint in its `approve` field. | `recipes.allowed`, `engine.start` |
 | `DELETE /api/runs/:port` | Stop a run, or cancel one that is starting. | `engine.remove` |
 | `GET /api/runs/:port/logs?tail=` | The engine's last lines. | `engine.logs` |
@@ -189,9 +213,9 @@ Run    = { id,            // the port it serves on
 | It talks to | For |
 |---|---|
 | `docker` | `run`, `stop`, `rm`, `ps`, `logs`, `pull`, `image inspect`. Containers carry `local-ai=1` and `local-ai.port`, `.recipe`, `.gpus`, `.since`, `.reach`. Every option of `docker run` is written as one word (`--name=…`), so no value can pass for another option. |
-| `nvidia-smi` | GPUs and their memory. On Apple silicon `sysctl` and `vm_stat` instead. A GPU that shares the system's memory (DGX Spark) reports none, so its memory is read from `/proc/meminfo` and it is marked `shared`. |
+| `nvidia-smi` | GPUs and their memory, from one `nvidia-smi -l 2` left running. On Apple silicon `sysctl` and `vm_stat` instead. A GPU that shares the system's memory (DGX Spark) reports none, so its memory is read from `/proc/meminfo` and it is marked `shared`. |
 | `python3`, `pip` | On Apple silicon: a venv per host recipe and its pinned packages. `ps` and `lsof` check a remembered engine before it is adopted. |
-| An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time the engine says that took: vLLM's histograms, llama.cpp's own gauge, or the `timings` a host engine reports in its answers. Where the engine reports no such timing the number is an estimate, shown as "Prefill tok/s (est.)": for a host engine (mlx_lm.server), uncached prompt tokens over the wait for the first streamed token, which also holds queueing and the first decode step; for the rest, prompt tokens that missed the cache over the window. The two are never mixed. Prefills under 1,000 tokens are left out, since they time the engine's overhead more than its speed, and the number shown is the average over the last five minutes of prefills, so it stays between prompts. Until the app has seen a prefill it shows the engine's lifetime average, never 0. Prompt tokens served from the prefix cache are not prefill. |
+| An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed; neither with a limit on the answer), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time the engine says that took: vLLM's histograms, llama.cpp's own gauge, or the `timings` a host engine reports in its answers. Where the engine reports no such timing the number is an estimate, shown as "Prefill tok/s (est.)": for a host engine (mlx_lm.server), uncached prompt tokens over the wait for the first streamed token, which also holds queueing and the first decode step; for the rest, prompt tokens that missed the cache over the window. The two are never mixed. Prefills under 1,000 tokens are left out, since they time the engine's overhead more than its speed, and the number shown is the average over the last five minutes of prefills, so it stays between prompts. Until the app has seen a prefill it shows the engine's lifetime average, never 0. Prompt tokens served from the prefix cache are not prefill. |
 | `ss` or `lsof` | Listening ports, to find models started elsewhere. |
 | `tailscale` | `status --json` (this machine and yours), `whois --json` (who is asking). |
 | Hugging Face | Weights, and model cards. The token is read from `HF_TOKEN` or the HF cache's `token` file. |
@@ -221,14 +245,23 @@ What it does not defend: an engine in a container has no key and no such door, s
 ## Working on it
 
 ```
-npm ci --ignore-scripts && npm run lint    # mistakes that break at runtime: undefined names, leftovers
+npm ci && npm run check                    # everything below, in order
+npm run lint                               # mistakes that break at runtime: undefined names, leftovers
 npm run screens                            # every screen drawn for every state, with hostile text in every field
-npm run smoke                              # the real server end to end; on Apple silicon also a host run
 npm run fuzz                               # hostile input against everything that decides what is safe
+npm run test:integration                   # the real server against stand-in engines, Docker and a second machine
+npm run test:e2e                           # the real desktop app, driven through its window
 npm run release:mac                        # the signed, notarized DMG (needs a Developer ID and a notarytool profile)
 ```
 
-CI (`.github/workflows/`) runs these on every push and pull request: lint, the screens, the fuzzer and the Linux smoke test always, the macOS smoke test when `server/` or `scripts/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit. There are no unit tests on purpose: `scripts/smoke.mjs` starts the server against a fixture registry and engines that answer like real ones, and checks what a user would notice. `scripts/screens.mjs` draws every screen in both layouts for every state the server can report (460 renders) and fails if one throws or if any text it was given comes out as markup. `scripts/fuzz.mjs` goes after the parts that decide what is safe: every short string of troublemaking characters against the Docker option grammar (exhaustively), random hostile recipes whose `docker run` is read back the way Docker reads it, file names in a download listing, model cards (for markup and for time), what a connected machine may send, the door on a model's port, host recipes, and the running server's paths and API. It is seeded, so a finding can be repeated: `node scripts/fuzz.mjs <seed>`.
+**Tests.** There are no unit tests, on purpose: a function that passes alone says little about an app whose work is other programs. Two kinds of test run the real thing and check what a user would notice.
+
+- **Integration** (`tests/integration.mjs`) starts the real server against a fixture registry and stand-ins that answer like the real ones: an engine (`fake_engine.py`), a `docker` and an `nvidia-smi` on `PATH`, and a second Local AI as another machine. It starts, stops and adopts models, reads usage and speed, pairs and follows the second machine, and checks the costs above (how often Docker is asked, that `nvidia-smi` is started once, that an unchanged file is not sent twice). On Apple silicon it also starts a pinned host recipe in its own venv.
+- **End to end** (`tests/e2e.mjs`) starts the desktop app itself (Electron, with its own data folder) and drives its window over the Chrome DevTools Protocol, as a person would: pick a model, start it, open an agent on it, read usage, edit a recipe, rearrange Home, change the background, connect a second machine, stop. It fails on any error the page logs.
+
+Beside them, `tests/screens.mjs` draws every screen in both layouts for every state the server can report (460 renders) and fails if one throws or if any text it was given comes out as markup. `tests/fuzz.mjs` goes after the parts that decide what is safe: every short string of troublemaking characters against the Docker option grammar (exhaustively), random hostile recipes whose `docker run` is read back the way Docker reads it, file names in a download listing, model cards (for markup and for time), what a connected machine may send, the door on a model's port, host recipes, DeepSeek Harness settings, and the running server's paths and API. It is seeded, so a finding can be repeated: `node tests/fuzz.mjs <seed>`.
+
+CI (`.github/workflows/`) runs all of it on Linux on every push and pull request (the end-to-end test under `xvfb`), the integration and end-to-end tests on macOS when `server/`, `electron/` or `tests/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit.
 
 `npm run release:mac` builds `dist/Local-AI-<version>-arm64.dmg`: the app is signed with the Developer ID in the keychain under the hardened runtime, notarized, and stapled; then the DMG itself is signed, notarized and stapled, and Gatekeeper is asked whether it would open both. Set `APPLE_KEYCHAIN_PROFILE` to a profile saved with `xcrun notarytool store-credentials`.
 

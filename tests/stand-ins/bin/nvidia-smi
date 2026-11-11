@@ -1,0 +1,12 @@
+#!/bin/sh
+# A stand-in for nvidia-smi, for the tests: two idle 24 GB cards. With -l it keeps printing them, as the real one does,
+# until whoever reads it goes away. Each start is tallied, so a test can see how often it was started.
+cards() {
+  echo "0, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
+  echo "1, Smoke Test GPU, 24576, 300, 0, 20.5, 35"
+}
+tally() { [ -n "$FAKE_DOCKER_DIR" ] && mkdir -p "$FAKE_DOCKER_DIR" && echo "$1" >> "$FAKE_DOCKER_DIR/nvidia-smi.calls"; }
+case " $* " in
+  *" -l "*) tally kept; cards; while sleep 2; do cards 2>/dev/null || exit 0; done ;;
+  *) tally once; cards ;;
+esac

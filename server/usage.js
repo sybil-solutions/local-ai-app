@@ -54,15 +54,17 @@ function prefillSpeed(r, m, seconds, now) {
 }
 
 // Reads one engine's counters, adds what changed to the totals, and leaves its live numbers on the run.
+// Returns whether the counters were read. Asked twice in one tick, it reads once.
 export async function scrape(r, now) {
+  if (r.scraped === now) return true;
   let m;
   if (r.meter) m = { ...r.meter.counts }; // a host run has no /metrics; the app counts what passes through its port instead
   else {
     try {
       const res = await fetch(`${r.url}/metrics`, { signal: AbortSignal.timeout(2000) });
-      if (!res.ok) return;
+      if (!res.ok) return false;
       m = parseMetrics(await res.text());
-    } catch { return; }
+    } catch { return false; }
   }
   const cur = { in: m.prompt_tokens_total || 0, out: m.generation_tokens_total || m.tokens_predicted_total || 0, req: m.request_success_total || 0 };
   const last = usage.last[keyOf(r)] || cur;
@@ -83,6 +85,7 @@ export async function scrape(r, now) {
   const prefill = prefillSpeed(r, m, seconds, now);
   r.stats = { tps: seconds ? Math.round((delta.out / seconds) * 10) / 10 : 0, pps: Math.round(prefill?.pps ?? 0), ppsEst: !!prefill?.est, used: r.used.in + r.used.out, active: m.num_requests_running ?? m.num_running_reqs ?? m.requests_processing ?? 0 };
   r.scraped = now;
+  return true;
 }
 
 export function flush() {

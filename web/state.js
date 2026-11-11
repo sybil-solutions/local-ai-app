@@ -34,7 +34,14 @@ export const scoped = (path) => (s.dev === -1 ? path : `devices/${s.dev}/${path}
 
 export const D = () => (s.dev === -1 ? s.snap : s.snap.devices[s.dev]?.state);
 export const here = () => (s.dev === -1 ? s.snap.name : s.snap.devices[s.dev]?.name || s.snap.name);
-export const all = () => D().groups.flatMap((g) => g.recipes).sort((a, b) => (b.released || '').localeCompare(a.released || ''));
+// The models of the machine being shown, newest first. Every part of a screen asks for this, so it is worked out
+// once for each snapshot.
+let listed = { of: null, list: [] };
+export function all() {
+  const d = D();
+  if (listed.of !== d) listed = { of: d, list: d.groups.flatMap((g) => g.recipes).sort((a, b) => (b.released || '').localeCompare(a.released || '')) };
+  return listed.list;
+}
 export const group = () => [...D().groups].sort((a, b) => b.recipes.length - a.recipes.length)[0];
 const TIERS = [['fastest', 'Fast'], ['balanced', 'Balanced'], ['smartest', 'Smart']];
 export function picks() {

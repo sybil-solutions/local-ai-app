@@ -71,7 +71,7 @@ function sysctlNow(key) {
 
 // Why a recipe may not be started, or null. Your own recipes (`trusted`) are yours to write; a registry recipe must be
 // pinned and need nothing beyond one docker run, or one pinned host run. Nothing here reads anything but the recipe,
-// so scripts/fuzz.mjs can ask it about recipes no registry would ever hold.
+// so tests/fuzz.mjs can ask it about recipes no registry would ever hold.
 export function problemWith(recipe, { trusted = false } = {}) {
   const launch = recipe?.launch;
   if (!launch || typeof launch !== 'object') return 'Has no launch';
@@ -285,8 +285,10 @@ export async function card(id) {
     const found = await get(`https://huggingface.co/api/models?search=${encodeURIComponent(name)}&sort=downloads&limit=20`).then((r) => r.json()).catch(() => []);
     repo = (Array.isArray(found) ? found : []).map((m) => String(m?.id || '')).find((hit) => REPO.test(hit) && hit.split('/').pop().toLowerCase().replace(/-it$/, '') === name.toLowerCase()) || fail(404, 'This model has no card on Hugging Face');
   }
-  const meta = await get(`https://huggingface.co/api/models/${repo}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-  const readme = await get(`https://huggingface.co/${repo}/raw/main/README.md`).catch(() => null);
+  const [meta, readme] = await Promise.all([ // side by side: neither waits for the other
+    get(`https://huggingface.co/api/models/${repo}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+    get(`https://huggingface.co/${repo}/raw/main/README.md`).catch(() => null),
+  ]);
   if (!readme?.ok) fail(404, 'This model has no card on Hugging Face');
   const text = (await bytesUpTo(readme, 4e6).catch(() => fail(404, 'This model’s card is too long to show'))).toString('utf8');
   const card_ = { repo, license: typeof meta?.cardData?.license === 'string' ? meta.cardData.license.slice(0, 60) : null, downloads: amount(meta?.downloads), md: text.replace(/^---\n[\s\S]*?\n---\n/, '').slice(0, 14000) };

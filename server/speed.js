@@ -5,7 +5,6 @@ const loadsFile = at('loads.json');
 const speeds = Object.assign(Object.create(null), readJson(speedsFile, {}));
 const loads = Object.assign(Object.create(null), readJson(loadsFile, {}));
 const LEVELS = [1, 4, 8];
-const TOKENS = 256;
 const WAVES = 2;
 
 export const speedOf = (id) => own(speeds, id) || null;
@@ -15,13 +14,14 @@ export function forget(id) { if (own(speeds, id)) { delete speeds[id]; writeJson
 
 const median = (list) => [...list].sort((a, b) => a - b)[Math.floor(list.length / 2)];
 
-// One streamed answer: when its first and last token arrived, and how many the engine says it wrote.
+// One streamed answer: when its first and last token arrived, and how many the engine says it wrote. The request
+// asks for a short story and lets the model end it by itself: no limit is put on the answer's length.
 async function answer(url, model, signal) {
   const started = performance.now();
   const res = await fetch(`${url}/v1/chat/completions`, {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer local' }, signal: AbortSignal.any([signal, AbortSignal.timeout(180000)]),
-    body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, max_tokens: TOKENS, ignore_eos: true, temperature: 0.7,
-      messages: [{ role: 'user', content: `[${Math.random().toString(36).slice(2)}] Write a long, detailed story about a lighthouse keeper.` }] }),
+    body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, temperature: 0.7,
+      messages: [{ role: 'user', content: `[${Math.random().toString(36).slice(2)}] Write a story of about 200 words about a lighthouse keeper.` }] }),
   });
   if (!res.ok) throw new Error(`engine answered ${res.status}`);
   let first = 0, last = 0, chunks = 0, reported = null, tail = '';

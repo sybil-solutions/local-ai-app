@@ -1,7 +1,7 @@
 {
   "name": "local-ai",
   "productName": "Local AI",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "Start a local model with one click, watch it run, and open your coding agent on it.",
   "type": "module",
   "main": "electron/main.js",
@@ -10,11 +10,12 @@
     "server": "node server/index.js",
     "dist": "electron-builder",
     "lint": "eslint .",
-    "screens": "node scripts/screens.mjs",
-    "smoke": "node scripts/smoke.mjs",
-    "fuzz": "node scripts/fuzz.mjs",
+    "test:integration": "node tests/integration.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "screens": "node tests/screens.mjs",
+    "fuzz": "node tests/fuzz.mjs",
     "release:mac": "scripts/release-mac.sh",
-    "check": "eslint . && node scripts/screens.mjs && node scripts/fuzz.mjs && node scripts/smoke.mjs"
+    "check": "eslint . && node tests/screens.mjs && node tests/fuzz.mjs && node tests/integration.mjs && node tests/e2e.mjs"
   },
   "build": {
     "appId": "ai.sybilsolutions.local",

@@ -4,8 +4,8 @@
 //   2. Nothing the page is told becomes markup. Every piece of text in the fixture carries an HTML payload; if any of
 //      it reaches the output unescaped, a model name, a machine name or an error from another machine could run
 //      script in the page that holds the key.
-// Usage: node scripts/screens.mjs            exit code 0 when every check passed
-//        node scripts/screens.mjs --dump f   also writes every screen's HTML to f (to compare two versions of web/)
+// Usage: node tests/screens.mjs            exit code 0 when every check passed
+//        node tests/screens.mjs --dump f   also writes every screen's HTML to f (to compare two versions of web/)
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

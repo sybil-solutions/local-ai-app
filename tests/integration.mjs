@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// Runs the real server the way a user does and checks what matters end to end. No mocks inside the app: it gets a
-// registry served from here and engines that answer like real ones.
-//   Everywhere: it starts and answers, the key guards the API, the page never hands the key to a caller on this machine, files outside
-//   web/ can't be read, pairing and the installer refuse strangers, a model someone else started is found, and its
-//   tokens and prefill speed are counted from its /metrics.
+// The integration test. Runs the real server the way a user does and checks what a user would notice. No mocks
+// inside the app: it gets a registry served from here, engines that answer like real ones, a stand-in docker and
+// nvidia-smi on PATH, and a second Local AI as another machine.
+//   Everywhere: it starts and answers, the key guards the API, the page never hands the key to a caller on this
+//   machine, files outside web/ can't be read and an unchanged one is not sent twice, pairing and the installer
+//   refuse strangers, a model someone else started is found and its tokens and prefill speed are counted from its
+//   /metrics, a container recipe starts, is adopted and stops, a second machine is connected and followed, and a look
+//   costs what the README says it does (Docker asked every fifth one, nvidia-smi started once).
 //   On Apple silicon also: a pinned host recipe is offered (a tampered one is not), starts in its own venv, answers
 //   through the app's port, counts its tokens, survives an app restart, and is gone after Stop.
-// Usage: node scripts/smoke.mjs   (exit code 0 when every check passed)
+// Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const HOME = mkdtempSync(join(tmpdir(), 'local-ai-smoke-'));
+const HOME = mkdtempSync(join(tmpdir(), 'local-ai-integration-'));
 const PORT = 28700 + Math.floor(Math.random() * 400) * 2; // run ports are PORT+1..99, host engines PORT+100..199
 const APPLE = process.platform === 'darwin' && process.arch === 'arm64';
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -63,7 +66,7 @@ const outside = await serve((req, body) => {
 });
 
 // The registry: on Apple silicon, a card that is exactly this chip with one good host recipe and one tampered one.
-const script = readFileSync(join(ROOT, 'scripts', 'fake_engine.py'), 'utf8');
+const script = readFileSync(join(ROOT, 'tests', 'stand-ins', 'fake_engine.py'), 'utf8');
 const catalog = { cards: {}, models: {}, builds: {},
   recipes: { 'smoke/none/docker': { card: 'no-such-card', model: 'dock-1', engine: 'vllm', launch: { image: `example/engine@sha256:${'0'.repeat(64)}`, port: 8000, args: [] } } } };
 // For the Docker path: a card the stand-in nvidia-smi reports, one good recipe for it, and recipes that each break
@@ -108,7 +111,7 @@ const FAKE_DOCKER = join(HOME, 'docker');
 function startServer({ nvidia = false } = {}) {
   server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', HF_HOME: join(HOME, 'hf'),
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
-    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'scripts', 'fakebin')}:${process.env.PATH}` } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (b) => { log += b; });
   server.stderr.on('data', (b) => { log += b; });
   return until('the server to answer', async () => (await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
@@ -133,10 +136,10 @@ const raw = (path, host) => new Promise((done, failed) => {
   req.end();
 });
 const chat = (port, stream, content = 'hi') => fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(30000),
-  body: JSON.stringify({ model: 'x', max_tokens: 16, stream, ...(stream ? { stream_options: { include_usage: true } } : {}), messages: [{ role: 'user', content }] }) }).then((r) => r.text());
+  body: JSON.stringify({ model: 'x', stream, ...(stream ? { stream_options: { include_usage: true } } : {}), messages: [{ role: 'user', content }] }) }).then((r) => r.text());
 
 let hostPid = null;
-const watchdog = setTimeout(() => { console.log('FAIL the smoke test took longer than 10 minutes'); cleanup().then(() => process.exit(1)); }, 600e3);
+const watchdog = setTimeout(() => { console.log('FAIL the integration test took longer than 10 minutes'); cleanup().then(() => process.exit(1)); }, 600e3);
 async function cleanup() {
   clearTimeout(watchdog);
   await stopServer();
@@ -158,6 +161,10 @@ try {
   check('the API needs the key', (await api('/api/state', { auth: false })).status === 401);
   check('a wrong key is refused', (await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { authorization: 'Bearer nope' } })).status === 401);
   const page = await raw('/');
+  check('the page names its scripts, so the browser fetches them side by side', /<link rel="modulepreload" href="\/app\.js">/.test(page.body) && page.body.includes('href="/components/home.js"'));
+  const appJs = await fetch(`http://127.0.0.1:${PORT}/app.js`), tag = appJs.headers.get('etag');
+  const unchanged = await fetch(`http://127.0.0.1:${PORT}/app.js`, { headers: { 'if-none-match': tag } });
+  check('a file of the page is not sent again to a browser that already has it', appJs.status === 200 && !!tag && unchanged.status === 304 && (await unchanged.text()) === '');
   check('the page does not hand the key to whoever asks from this machine', page.status === 200 && !page.body.includes(key()) && !page.body.includes('__KEY__'));
   const nonce = 'ab'.repeat(16), health = await (await fetch(`http://127.0.0.1:${PORT}/api/health?nonce=${nonce}`)).json();
   check('the server proves it holds the key without showing it', health.proof === createHmac('sha256', key()).update(nonce).digest('hex') && !JSON.stringify(health).includes(key()));
@@ -214,6 +221,30 @@ try {
   const after = await until('the short request to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2300 && r; }, 15000);
   check('a short prefill does not drag the prefill speed down', after.stats.pps === 2000, `pps ${after.stats.pps}`);
   check('stopping a model the app did not start is refused', (await api(`/api/runs/${port}`, { method: 'DELETE' })).status === 409);
+
+  // A second Local AI, connected to this one. It is followed, not asked again and again: what changes there is here
+  // at once.
+  const THERE = PORT + 400, thereHome = join(HOME, 'second');
+  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_DISCOVER: '0', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json` } });
+  try {
+    await until('the second machine to answer', async () => (await fetch(`http://127.0.0.1:${THERE}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
+    const thereKey = JSON.parse(readFileSync(join(thereHome, 'config.json'), 'utf8')).key;
+    const tell = (body) => fetch(`http://127.0.0.1:${THERE}/api/settings`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${thereKey}` }, body: JSON.stringify(body) });
+    check('a machine is not connected on a wrong key', (await api('/api/devices', { method: 'POST', body: { url: `http://127.0.0.1:${THERE}`, key: 'wrong' } })).status === 401);
+    check('a machine is connected by its address and key', (await api('/api/devices', { method: 'POST', body: { url: `http://127.0.0.1:${THERE}`, key: thereKey } })).status === 200);
+    const linked = await until('the machine to be followed', async () => (await state()).devices.find((d) => d.online && d.state), 10000);
+    check('a connected machine is shown with what it says about itself', Array.isArray(linked.state.groups) && Array.isArray(linked.state.runs) && linked.state.devices.length === 0);
+    await tell({ tone: 'gray' });
+    const told = Date.now();
+    let arrived = 0;
+    while (!arrived && Date.now() - told < 5000) { if ((await state()).devices[0]?.state?.tone === 'gray') arrived = Date.now() - told; else await sleep(40); }
+    check('a change on a connected machine is here in under a second', arrived > 0 && arrived < 1000, `${arrived} ms`);
+    check('a call is run on the connected machine through this one', (await api('/api/devices/0/usage')).status === 200 && (await api('/api/devices/0/endpoints')).json?.key === thereKey);
+    there.kill('SIGKILL');
+    await until('the machine to be seen as gone', async () => (await state()).devices[0]?.online === false, 30000);
+    check('a machine that is gone is shown offline, with its last models and nothing running', (await state()).devices[0].state.runs.length === 0);
+    check('a machine is forgotten when removed', (await api('/api/devices?i=0', { method: 'DELETE' })).status === 200 && (await state()).devices.length === 0);
+  } finally { there.kill('SIGKILL'); }
 
   if (APPLE) {
     const s = await state();
@@ -302,6 +333,14 @@ try {
   const spent = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === cid); return r?.stats?.used > 0 && r; }, 30000);
   check('counts the container run\'s tokens from its /metrics', spent.stats.used >= 2016, `used ${spent.stats.used}`);
   check('shows the container log', /fake engine log line/.test((await api(`/api/runs/${cid}/logs`)).json?.text || ''));
+  // A container that is up and answering is still read every tick, but Docker itself is asked what it is running
+  // only every fifth tick, and nvidia-smi is left running instead of being started for every reading.
+  const tally = (file, word) => { try { return readFileSync(join(FAKE_DOCKER, file), 'utf8').split('\n').filter((l) => l === word).length; } catch { return 0; } };
+  const asked = tally('docker.calls', 'ps'), read = tally('nvidia-smi.calls', 'once');
+  await sleep(12000);
+  check('Docker is asked what it runs every fifth tick while nothing is changing', tally('docker.calls', 'ps') - asked >= 1 && tally('docker.calls', 'ps') - asked <= 2, `${tally('docker.calls', 'ps') - asked} listings in 12 s`);
+  check('nvidia-smi is left running, not started for every reading', tally('nvidia-smi.calls', 'kept') === 1 && tally('nvidia-smi.calls', 'once') === read, `${tally('nvidia-smi.calls', 'once') - read} starts in 12 s`);
+  check('the running container is still read every tick', (await state()).runs.find((x) => x.id === cid)?.phase === 'ready' && (await state()).gpus.length === 2);
   // The app restarts; the container is still there and is taken back.
   await stopServer();
   check('the container keeps running when the app quits', alive(made.pid));
@@ -318,7 +357,7 @@ try {
   check('a container that dies is shown as failed, with why', dead.view.word === 'Stopped' && /Engine stopped/.test(dead.error), JSON.stringify(dead.view));
   check('a failed run can be cleared', (await api(`/api/runs/${second}`, { method: 'DELETE' })).status === 200 && !(await state()).runs.some((x) => x.id === second));
 } catch (e) {
-  check('the smoke test ran to the end', false, e.message);
+  check('the integration test ran to the end', false, e.message);
 }
 await cleanup();
 console.log(failures.length ? `\n${failures.length} check(s) failed` : '\nall checks passed');
