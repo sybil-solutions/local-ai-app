@@ -2,10 +2,10 @@
 import { PANEL as SIZE, s, send, store } from './state.js';
 
 const root = document.documentElement, frame = document.querySelector('#art'), picker = document.querySelector('#picker');
-// Where the light starts in each picture (the gap between the fingers; the dove), where that point sits
-// in the panel, and where it sits on the desktop. The fresco is shown in the panel at a scale chosen for the hands.
+// Where the light starts in each picture (the gap between the fingers; the heart of the cloud), where that point
+// sits in the panel, and where it sits on the desktop. The fresco is shown in the panel at a scale chosen for the hands.
 const PICS = { clouds: { url: '/clouds.webp', x: 1100, y: 760, w: 2000, h: 1611 }, fresco: { url: '/fresco.webp', x: 982, y: 566, w: 2000, h: 1015, k: 0.56 } };
-const FIRST = 'clouds', PANEL = { x: SIZE.w / 2, y: 116, top: 368 }, DESK = [0.5, 0.36], HIGHEST = 0.2; // DESK: where the heart sits, as parts of the window; HIGHEST: as far up as it moves
+const FIRST = 'clouds', PANEL = { x: SIZE.w / 2, y: 116, top: 368 }, DESK = [0.5, 0.36];
 let own = null, redraw = () => {};
 export const onChange = (fn) => { redraw = fn; };
 const picture = () => (root.dataset.bg === 'own' ? own : PICS[root.dataset.bg] || PICS[FIRST]);
@@ -65,13 +65,11 @@ picker.onchange = () => {
   img.src = URL.createObjectURL(file);
 };
 
-// Desktop: cover the window with the picture so its heart (the dove, the fingertips) lands on DESK, and light it out
-// to `glow` of the way. `room` is the part of the window Home leaves free ({ top, bottom }, in pixels): when Home
-// shows more (the usage and GPU widgets) the heart moves up to the middle of what is left, so nothing sits on it.
-export function fitArt(glow, room) {
-  const W = frame.clientWidth, H = frame.clientHeight, [tx, lowest] = DESK, pic = picture();
+// Desktop: cover the window with the picture so the point its light starts from lands on DESK, and light it out to
+// `glow` of the way.
+export function fitArt(glow) {
+  const W = frame.clientWidth, H = frame.clientHeight, [tx, ty] = DESK, pic = picture();
   if (!W || !H) return;
-  const ty = room ? Math.max(HIGHEST, Math.min(lowest, (room.top + room.bottom) / 2 / H)) : lowest;
   const k = Math.max((W * tx) / pic.x, (W * (1 - tx)) / (pic.w - pic.x), (H * ty) / pic.y, (H * (1 - ty)) / (pic.h - pic.y));
   for (const img of frame.querySelectorAll('img')) Object.assign(img.style, { width: `${pic.w * k}px`, left: `${W * tx - pic.x * k}px`, top: `${H * ty - pic.y * k}px` });
   frame.style.setProperty('--gx', `${W * tx}px`);

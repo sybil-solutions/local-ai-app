@@ -8,8 +8,8 @@ import { Dove, Icon } from './icons.js';
 export const Wordmark = html`<span class="mark">${Dove}Local AI</span>`;
 // Shown before the machine's name while the page shows another machine than the one it is open on. The name itself is blurred.
 const Remote = () => s.dev !== -1 && html`<span class="where">Remote</span>`;
-// The machine being shown. Pressing it opens Machines.
-export const MachineChip = ({ go, nav }) => html`<button class="mark chip"${data({ go, nav })} aria-label="Machine: ${here()}"><i></i>${Remote()}<span class="who">${here()}</span></button>`;
+// The app's mark and the machine being shown. Pressing it opens Machines.
+export const MachineChip = ({ go, nav }) => html`<button class="mark chip"${data({ go, nav })} aria-label="Machine: ${here()}">${Dove}${Remote()}<span class="who">${here()}</span></button>`;
 export const LayoutButton = () => canFull() && IconButton({ icon: s.full ? 'shrink' : 'grow', act: 'fs', label: s.full ? 'Exit fullscreen' : 'Fullscreen' });
 // The top of a panel screen: Home's (the machine, the layout switch, Settings), a screen's (the name and Close), or bare.
 export const HomeBar = () => (s.snap

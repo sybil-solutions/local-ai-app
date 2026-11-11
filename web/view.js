@@ -36,8 +36,7 @@ function paint(force) {
     desk.classList.toggle('nopic', !page && !!s.snap && !!D() && !homeCfg().on.includes('hands')); // Home without its Picture block
     swap($('#ui'), html`${NavBar(page)}${!page && DeskHome(state)}${Notice()}`, id, force, '.apop');
     swap($('#page'), page ? DeskPage(page) : '', id, force, '.mlist,.mright');
-    const bottom = !page && $('.cbot', desk); // Home's content; the picture's heart is centred in the room above it
-    fitArt(lit(look(state)), bottom ? { top: 52, bottom: bottom.getBoundingClientRect().top } : null);
+    fitArt(lit(look(state)));
   } else {
     swap(panel, html`${SCREENS[id]()}${Notice()}`, id, force, '.scroll');
     const picture = $('canvas.art', panel), lower = picture ? picture.offsetTop - 52 : 0; // the picture sits where its block is; 52 is where the first block starts
