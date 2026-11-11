@@ -20,7 +20,7 @@ npm install && npm start    # or the same page in an Electron window
 
 The server needs Node 20 or newer. Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the Electron app.
 
-A machine that already runs Local AI installs it on another Linux machine on your tailnet: under Machines, choose Set up. It signs in over SSH; where it can't, it shows the one-line command instead. The installer brings its own Node.js when the machine has none.
+A machine that already runs Local AI installs it on another Linux machine on your tailnet: under Machines, choose Set up. It signs in over SSH and sends the app's files over that connection, so the other machine never has to reach this one; where it can't sign in, it shows the one-line command instead. The installer brings its own Node.js when the machine has none.
 
 | Setting | Default | |
 |---|---|---|
@@ -168,7 +168,7 @@ Run    = { id,            // the port it serves on
 | It talks to | For |
 |---|---|
 | `docker` | `run`, `stop`, `rm`, `ps`, `logs`, `pull`, `image inspect`. Containers carry `local-ai=1` and `local-ai.port`, `.recipe`, `.gpus`, `.since`. |
-| `nvidia-smi` | GPUs and their memory. On Apple silicon `sysctl` and `vm_stat` instead. |
+| `nvidia-smi` | GPUs and their memory. On Apple silicon `sysctl` and `vm_stat` instead. A GPU that shares the system's memory (DGX Spark) reports none, so its memory is read from `/proc/meminfo` and it is marked `shared`. |
 | `python3`, `pip` | On Apple silicon: a venv per host recipe and its pinned packages. `ps` and `lsof` check a remembered engine before it is adopted. |
 | An engine | `GET /v1/models` (is it up), `POST /v1/chat/completions` (one test question, speed), `/v1/responses` and `/v1/messages` (which APIs it has), `GET /metrics` (token counters). Decode speed is generated tokens over the 2 s between reads. Prefill speed is the tokens the engine computed while prefilling over the time the engine says that took: vLLM's histograms, llama.cpp's own gauge, or the `timings` a host engine reports in its answers. Where the engine reports no such timing the number is an estimate, shown as "Prefill tok/s (est.)": for a host engine (mlx_lm.server), uncached prompt tokens over the wait for the first streamed token, which also holds queueing and the first decode step; for the rest, prompt tokens that missed the cache over the window. The two are never mixed. Prefills under 1,000 tokens are left out, since they time the engine's overhead more than its speed, and the number shown is the average over the last five minutes of prefills, so it stays between prompts. Until the app has seen a prefill it shows the engine's lifetime average, never 0. Prompt tokens served from the prefix cache are not prefill. |
 | `ss` or `lsof` | Listening ports, to find models started elsewhere. |
