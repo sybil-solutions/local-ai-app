@@ -1,10 +1,6 @@
 // Your other machines. Connected ones are polled and their API is proxied; Tailscale says which computers are yours at all.
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { config, event, fail, PORT, run, saveConfig } from './util.js';
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+import { bytesUpTo, config, jsonUpTo, event, fail, PAYLOAD, PORT, run, saveConfig } from './util.js';
 
 const remote = new Map();
 let tail = { at: 0, status: null }, seen = { at: 0, list: [] };
@@ -18,17 +14,19 @@ async function status() {
   return tail.status;
 }
 
-// This machine on the tailnet: { name, ip, user }, or null without Tailscale.
+// This machine on the tailnet: { name, ip, ips, user, tagged, magic }, or null without Tailscale. `tagged` machines
+// all belong to one stand-in owner, so "the same owner" says nothing about them. `magic` is whether short names resolve
+// through Tailscale itself.
 export async function self() {
-  const me = (await status())?.Self;
-  return me?.TailscaleIPs?.[0] ? { name: (me.DNSName || '').replace(/\.$/, ''), ip: me.TailscaleIPs[0], user: me.UserID } : null;
+  const found = await status(), me = found?.Self;
+  return me?.TailscaleIPs?.[0] ? { name: (me.DNSName || '').replace(/\.$/, ''), ip: me.TailscaleIPs[0], ips: me.TailscaleIPs, user: me.UserID, tagged: !!me.Tags?.length, magic: !!found.CurrentTailnet?.MagicDNSEnabled } : null;
 }
 
 // Your own computers on the tailnet, and whether each already answers as Local AI. Phones, VPN exit nodes and shared machines are left out.
 export async function peers() {
   if (Date.now() - seen.at < 10000) return seen.list;
   const linked = new Set(config.devices.map((d) => new URL(d.url).hostname)), found = await status(), names = new Set();
-  const mine = Object.values(found?.Peer || {}).filter((p) => p.UserID === found.Self.UserID && !/ios|android|tvos/i.test(p.OS || ''));
+  const mine = found?.Self?.Tags?.length ? [] : Object.values(found?.Peer || {}).filter((p) => p.UserID === found.Self.UserID && !p.Tags?.length && !/ios|android|tvos/i.test(p.OS || ''));
   const list = await Promise.all(mine.map(async (p) => {
     const ip = p.TailscaleIPs?.[0];
     const app = p.Online && await fetch(`http://${ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false);
@@ -41,11 +39,14 @@ export async function peers() {
 }
 
 // Tailscale already proves which machines are yours, so those may connect and fetch the installer without a key.
-// The Host must be this machine's own tailnet name or address, so a rebound DNS name can't borrow that trust.
+// Yours means another machine signed in as the same person: not a tagged machine (they all share one stand-in owner),
+// and not a program on this machine calling its own tailnet address. The Host must be this machine's own tailnet name
+// or address, so a rebound DNS name can't borrow that trust; the short name counts only where Tailscale resolves it.
 export async function isMine(req) {
   const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, ''), me = await self();
-  if (!me || ![me.ip, me.name, me.name.split('.')[0]].includes((req.headers.host || '').replace(/:\d+$/, ''))) return false;
-  try { return JSON.parse((await run('tailscale', ['whois', '--json', ip], { timeout: 4000 })).stdout).Node.User === me.user; } catch { return false; }
+  if (!me || me.tagged || me.ips.includes(ip)) return false;
+  if (![me.ip, me.name, ...(me.magic ? [me.name.split('.')[0]] : [])].includes((req.headers.host || '').replace(/:\d+$/, ''))) return false;
+  try { const node = JSON.parse((await run('tailscale', ['whois', '--json', ip], { timeout: 4000 })).stdout).Node; return node.User === me.user && !node.Tags?.length; } catch { return false; }
 }
 
 // Installs Local AI on one of your own Tailscale machines, so nobody has to paste a command there. This computer signs
@@ -54,11 +55,12 @@ export async function isMine(req) {
 // (a firewall here would stop it). Only a machine Tailscale lists as yours is ever contacted, and the name is passed
 // to ssh as a word, never to a shell.
 const SSH_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const UNPACK_AND_INSTALL = 'T="$(mktemp -d)" && tar -xz -C "$T" && bash "$T/install.sh"';
-// Resolves with ssh's exit code (255 when it could not sign in) and the last of what it printed.
-const ship = (host) => new Promise((done) => {
-  const tar = spawn('tar', ['-czf', '-', '-C', ROOT, 'server', 'web', 'package.json', 'install.sh', 'README.md'], { stdio: ['ignore', 'pipe', 'ignore'] });
-  const ssh = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '--', host, UNPACK_AND_INSTALL], { stdio: ['pipe', 'pipe', 'pipe'] });
+const unpackAndInstall = (mode) => `T="$(mktemp -d)" && tar -xz -C "$T" && LOCAL_AI_SHIPPED=${mode} bash "$T/install.sh"`;
+// Resolves with ssh's exit code and the last of what it printed. 255: it could not sign in. 3 and 4 are the
+// installer declining (install.sh): the copy there updates itself, or Local AI is already running there.
+const ship = (host, mode) => new Promise((done) => {
+  const tar = spawn('tar', ['-czf', '-', '-C', PAYLOAD, 'server', 'web', 'package.json', 'install.sh', 'README.md'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const ssh = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '--', host, unpackAndInstall(mode)], { stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   const keep = (text) => { out = `${out}${text}`.slice(-4000); };
   const timer = setTimeout(() => ssh.kill(), 600000);
@@ -71,7 +73,9 @@ const ship = (host) => new Promise((done) => {
   ssh.on('error', () => end(127));
   ssh.on('close', (code) => end(code ?? 1));
 });
-export async function install({ ip }) {
+// `update` replaces a copy that is already running there (one this computer installed earlier). Without it, a machine
+// that turns out to run Local AI already is left as it is: this computer just can't reach it.
+export async function install({ ip, update = false }) {
   seen.at = 0;
   const peer = (await peers()).find((p) => p.ip === ip) || fail(404, 'That is not one of your Tailscale machines');
   if (!peer.online) fail(409, `${peer.name} is offline`);
@@ -80,7 +84,9 @@ export async function install({ ip }) {
   if ([...remote].some(([url, r]) => new URL(url).hostname === ip && r.state?.app?.can)) fail(409, `${peer.name} updates itself. Use Update there`);
   let last = '';
   for (const host of [...new Set([peer.name, peer.dns, peer.ip])].filter((h) => SSH_NAME.test(h || ''))) {
-    const out = await ship(host);
+    const out = await ship(host, update ? 'update' : 'install');
+    if (out.code === 3) fail(409, `${peer.name} updates itself. Use Update there`);
+    if (out.code === 4) fail(409, `${peer.name} already runs Local AI, but this computer can’t reach it on your Tailscale (port ${PORT}). Check that nothing there blocks that port`);
     if (!out.code) {
       for (let i = 0; i < 40; i++) {
         if (await fetch(`http://${peer.ip}:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false)) { seen.at = 0; event('info', 'device.installed', { name: peer.name }); return { ok: true }; }
@@ -93,6 +99,26 @@ export async function install({ ip }) {
   }
   event('warn', 'device.install', { name: peer.name, error: last });
   return fail(502, `This computer could not sign in to ${peer.name} over SSH, so it can’t install Local AI there for you`);
+}
+
+// What a connected machine says about itself, held to the shape the rest of the app reads. A snapshot that is not
+// one is refused whole (the last good one is kept); inside one, anything that is not what it should be is left out, so
+// neither this server nor the page has to trust another machine to be well.
+const MAX_SNAPSHOT = 8e6;
+const thing = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+const things = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : []);
+const wholes = (v) => (Array.isArray(v) ? v.filter(Number.isInteger) : []);
+const words = (v, max = 200) => (typeof v === 'string' ? v.slice(0, max) : '');
+export function conform(sent) {
+  if (!sent || typeof sent !== 'object' || typeof sent.name !== 'string' || !Array.isArray(sent.runs) || !Array.isArray(sent.groups) || !Array.isArray(sent.gpus)) throw new Error('Did not answer as Local AI');
+  const named = (r) => typeof r.id === 'string' && typeof r.name === 'string', recipe = (r) => ({ ...r, speed: thing(r.speed) });
+  return {
+    ...sent, name: words(sent.name, 120), devices: [], // its own connected machines are left out, or two machines connected to each other would nest each other's snapshots without end
+    runs: things(sent.runs).filter((r) => Number.isInteger(r.id) && typeof r.name === 'string' && typeof r.phase === 'string').map((r) => ({ ...r, view: thing(r.view), gpus: wholes(r.gpus) })),
+    groups: things(sent.groups).map((g) => ({ ...g, name: words(g.name), gpus: wholes(g.gpus), recipes: things(g.recipes).filter(named).map(recipe), tiers: Object.fromEntries(Object.entries(thing(g.tiers)).filter(([, r]) => r && typeof r === 'object' && named(r)).map(([k, r]) => [k, recipe(r)])) })),
+    gpus: things(sent.gpus), free: wholes(sent.free), docker: { ok: !!thing(sent.docker).ok, error: words(thing(sent.docker).error, 300) || null },
+    catalog: thing(sent.catalog), usage: thing(sent.usage), app: sent.app && typeof sent.app === 'object' && !Array.isArray(sent.app) ? sent.app : null,
+  };
 }
 
 // Whether every connected machine has answered, or failed to, at least once since the app started.
@@ -108,8 +134,7 @@ export const poll = () => Promise.all(config.devices.map(async (device) => {
   try {
     const res = await fetch(`${device.url}/api/state`, { headers: { authorization: `Bearer ${device.key}` }, signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw Object.assign(new Error(res.status === 401 ? 'Wrong key' : `Answered ${res.status}`), { final: res.status === 401 });
-    // Its own connected machines are left out, or two machines connected to each other would nest each other's snapshots without end.
-    remote.set(device.url, { online: true, error: null, state: { ...(await res.json()), devices: [] } });
+    remote.set(device.url, { online: true, error: null, state: conform(await jsonUpTo(res, MAX_SNAPSHOT)) });
     misses.delete(device.url);
   } catch (e) {
     const was = remote.get(device.url), n = (misses.get(device.url) || 0) + 1;
@@ -130,7 +155,7 @@ export async function add({ url, key, name }) {
   if (config.devices.some((d) => d.url === clean)) fail(409, 'That device is already added');
   const res = await fetch(`${clean}/api/state`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) }).catch((e) => fail(502, `Could not reach it: ${e.cause?.code || e.message}`));
   if (!res.ok) fail(res.status === 401 ? 401 : 502, res.status === 401 ? 'That key is wrong' : `It answered ${res.status}`);
-  config.devices.push({ url: clean, key, name: name?.trim() || (await res.json()).name });
+  config.devices.push({ url: clean, key, name: words(name, 120).trim() || conform(await jsonUpTo(res, MAX_SNAPSHOT)).name });
   saveConfig();
   seen.at = 0;
   event('info', 'device.added', { url: clean });
@@ -150,5 +175,6 @@ export async function forward(i, method, path, body) {
   const device = config.devices[i] || fail(404, 'No such device');
   const reply = await fetch(`${device.url}/api/${path}`, { method, body: method === 'GET' ? undefined : JSON.stringify(body), headers: { authorization: `Bearer ${device.key}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(60000) })
     .catch((e) => fail(502, `${device.name} is unreachable: ${e.cause?.code || e.message}`));
-  return { status: reply.status, type: reply.headers.get('content-type') || 'application/json', body: Buffer.from(await reply.arrayBuffer()) };
+  const sent = await bytesUpTo(reply, 32e6).catch((e) => fail(502, `${device.name}: ${e.message}`));
+  return { status: reply.status, type: reply.headers.get('content-type') || 'application/json', body: sent };
 }

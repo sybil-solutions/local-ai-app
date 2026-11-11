@@ -32,6 +32,7 @@ export const LOAD = {
   'adv-models': () => isFull() && loadCard(s.modelOpen || chosen()?.id),
   'model-page': () => loadCard(s.modelOpen),
   'app-update': () => send('app/check').catch(() => {}),
+  approve: () => load(`recipe?id=${encodeURIComponent(s.asking)}`, (recipe) => { s.look = recipe; }),
   edit: () => {
     s.draft = null;
     const view = all().find((r) => r.id === s.modelOpen);
@@ -55,10 +56,13 @@ export function go(id) {
 export const jump = (id) => { s.trail.length = 0; s.nav = null; go(id); s.trail.length = 0; };
 
 const stopRun = () => { const r = run(); s.opened = null; return r && !r.external ? send(scoped(`runs/${r.id}`), 'DELETE') : null; };
+// A model that runs as a program on the machine, not in a container, is shown first: what it runs, and a button to
+// allow it. True when that screen was opened in place of starting it.
+const mustLook = (id) => { if (!all().find((r) => r.id === id)?.approve) return false; s.asking = id; s.look = null; go('approve'); return true; };
 // A GPU can take a few seconds to show as free after a stop.
-async function startRun(recipe) {
+async function startRun(recipe, approve) {
   for (let tries = 0; ; tries++) {
-    try { return await send(scoped('runs'), 'POST', { recipe }); } catch (e) { if (e.status !== 409 || !/free GPU/.test(e.message) || tries >= 6) throw e; await sleep(1500); }
+    try { return await send(scoped('runs'), 'POST', { recipe, approve }); } catch (e) { if (e.status !== 409 || !/free GPU/.test(e.message) || tries >= 6) throw e; await sleep(1500); }
   }
 }
 // Home's layout is changed here at once and saved behind it, one save after another so the last change is the one kept.
@@ -72,16 +76,27 @@ const FLAGS = { ctx: ['--max-model-len', '--context-length', '--ctx-size', '-c']
 // Actions that only change what the page shows, or save a switch. They never wait for one another, so two switches
 // pressed quickly both count. Every other action is one at a time: a second press while it runs is ignored.
 export const LIGHT = new Set(['pick', 'expand', 'model', 'toggle', 'tone', 'span', 'period', 'draft', 'dismiss', 'appauto', 'copy']);
-// Each gets the button's data-* values and the button. Returning 'keep' leaves the screen as it is (no redraw).
+// Each gets the button's data-* values and the button. Returning 'keep' leaves the screen as it is (no redraw), and
+// 'stay' says the action opened a screen itself, so the button's own data-go is not followed.
 export const ACTS = {
   pick: (d) => { s.sel = d.id; },
   expand: (d) => { s.expanded = s.expanded === d.id ? null : d.id; },
   model: (d) => { s.modelOpen = d.id; },
-  start: () => startRun(chosen().id),
+  start: () => (mustLook(chosen().id) ? 'stay' : startRun(chosen().id)),
+  // Allowed: whatever is running makes way, and the model starts with the fingerprint of what was shown.
+  approve: async () => {
+    const r = all().find((x) => x.id === s.asking);
+    if (!r) throw new Error('This model is no longer in the list');
+    await stopRun();
+    s.sel = r.id;
+    await startRun(r.id, r.approve);
+    go('home');
+    return 'stay';
+  },
   stop: stopRun,
-  retry: async () => { const { recipe } = run(); await stopRun(); await startRun(recipe); },
-  tryfast: async () => { const fast = picks()[0]; await stopRun(); s.sel = fast.id; await startRun(fast.id); },
-  switch: async (d) => { await stopRun(); s.sel = d.id; await startRun(d.id); go('home'); },
+  retry: async () => { const { recipe } = run(); if (mustLook(recipe)) return 'stay'; await stopRun(); return startRun(recipe); },
+  tryfast: async () => { const fast = picks()[0]; if (mustLook(fast.id)) return 'stay'; await stopRun(); s.sel = fast.id; return startRun(fast.id); },
+  switch: async (d) => { if (mustLook(d.id)) return 'stay'; await stopRun(); s.sel = d.id; await startRun(d.id); go('home'); return null; },
   open: async (d) => {
     const r = run(), agent = d.agent || s.snap.agent;
     if (agent !== s.snap.agent) await send('settings', 'POST', { agent });
@@ -110,14 +125,14 @@ export const ACTS = {
     s.nav = 'm-setup';
     send('tailscale/install', 'POST', { ip: d.ip }).then(
       () => (s.nav === 'm-setup' && s.link === link ? connect() : send('devices', 'POST', { url }).then(() => { s.note = `${d.name} is set up and connected`; })),
-      (e) => { Object.assign(link, { error: e.message, manual: !/mac/i.test(d.os) }); if (s.nav === 'm-setup' && s.link === link) s.nav = 'm-install'; else s.note = e.message; }, // the command is for Linux
+      (e) => { Object.assign(link, { error: e.message, manual: e.status !== 409 && !/mac/i.test(d.os) }); if (s.nav === 'm-setup' && s.link === link) s.nav = 'm-install'; else s.note = e.message; }, // the command is for Linux
     ).catch((e) => { s.note = e.message; }).finally(() => { LOAD.machines(); render(true); });
     return null;
   },
   // A connected machine that was installed from here is updated the same way: this computer sends it the new files.
   peerupdate: (d) => {
     s.note = `Updating ${d.name}`;
-    send('tailscale/install', 'POST', { ip: d.ip }).then(() => { s.note = `${d.name} is up to date`; }, (e) => { s.note = e.message; }).finally(() => render(true));
+    send('tailscale/install', 'POST', { ip: d.ip, update: true }).then(() => { s.note = `${d.name} is up to date`; }, (e) => { s.note = e.message; }).finally(() => render(true));
   },
   connect: async (d) => {
     const typed = (s.form.host || '').trim().replace(/\/$/, ''), url = /^https?:\/\//.test(typed) ? typed : `http://${typed}${/:\d+$/.test(typed) ? '' : ':18700'}`;

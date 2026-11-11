@@ -2,17 +2,40 @@ import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const HOME = process.env.LOCAL_AI_HOME || join(homedir(), '.local-ai');
 export const HOST = process.env.LOCAL_AI_HOST || '127.0.0.1';
 export const PORT = +(process.env.LOCAL_AI_PORT || 18700);
 export const ENGINE_HOST = HOST === '0.0.0.0' ? '127.0.0.1' : HOST;
 export const at = (...parts) => join(HOME, ...parts);
+// The app's own files as a plain folder, for sending to another machine with tar. Run from source that is the repo.
+// In the packaged app the code sits inside an archive only Electron can read, so a copy is kept beside it.
+const packed = process.resourcesPath && join(process.resourcesPath, 'payload');
+export const PAYLOAD = packed && existsSync(packed) ? packed : join(dirname(fileURLToPath(import.meta.url)), '..');
 mkdirSync(HOME, { recursive: true, mode: 0o700 });
 
+// A value stored under a name that came from outside (a recipe id, a model name): only what was really put there,
+// never something every object has, such as `constructor`.
+export const own = (map, key) => (map && typeof key === 'string' && Object.hasOwn(map, key) ? map[key] : undefined);
 export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+// One at a time: whoever asks while the question is still being answered waits for that answer instead of asking
+// again. Without it, every request that arrives during a slow lookup starts the lookup over.
+export const once = (ask) => { let going = null; return (...args) => going || (going = ask(...args).finally(() => { going = null; })); };
 export const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
+// An answer from the network, read only up to `max` bytes. Whoever sent it can't make this machine hold more.
+export async function bytesUpTo(res, max) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of res.body || []) {
+    size += chunk.length;
+    if (size > max) throw new Error('Sent more than Local AI reads');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+export const jsonUpTo = async (res, max) => JSON.parse((await bytesUpTo(res, max)).toString('utf8'));
 // Runs jobs side by side. If one fails, the rest are told to stop and waited for before the failure is passed on, so nothing is left running.
 export async function together(signal, jobs) {
   const stop = new AbortController(), either = AbortSignal.any([signal, stop.signal]);
@@ -50,8 +73,8 @@ export function writeJson(file, value) {
 }
 
 // Never rejects: callers branch on code, and a missing binary is code 127.
-export const run = (cmd, args, { timeout = 30000, signal } = {}) => new Promise((done) => {
-  execFile(cmd, args, { timeout, signal, maxBuffer: 32e6, windowsHide: true }, (e, stdout, stderr) => {
+export const run = (cmd, args, { timeout = 30000, signal, env } = {}) => new Promise((done) => {
+  execFile(cmd, args, { timeout, signal, env, maxBuffer: 32e6, windowsHide: true }, (e, stdout, stderr) => {
     done({ code: e ? (e.code === 'ENOENT' ? 127 : typeof e.code === 'number' ? e.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || e?.message || '') });
   });
 });

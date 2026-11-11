@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, statfsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { at, event, sleep, together } from './util.js';
@@ -19,6 +19,10 @@ export function saveToken(token) {
   writeFileSync(tokenFile, String(token || '').trim(), { mode: 0o600 });
 }
 
+// A file's name in a listing from the network must be a plain path inside the repo (a/b/c.bin). Anything else could
+// be written wherever this user can write, so one such name refuses the whole download.
+export const safeName = (path) => typeof path === 'string' && /^[\w.@+-]+(\/[\w.@+-]+)*$/.test(path) && !path.split('/').some((part) => part === '..' || part === '.');
+
 async function hfFiles(repo, revision, signal) {
   const files = [];
   let url = `${HF}/api/models/${repo}/tree/${revision}?recursive=true`;
@@ -26,8 +30,14 @@ async function hfFiles(repo, revision, signal) {
     const res = await fetch(url, { headers: hfHeaders(), signal });
     if (res.status === 401 || res.status === 403) throw new Error(`${repo} is gated: add a token to ${join(HF_HOME, 'token')}`);
     if (!res.ok) throw new Error(`Hugging Face answered ${res.status} for ${repo}`);
-    files.push(...(await res.json()).filter((f) => f.type === 'file'));
-    url = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') || '')?.[1];
+    for (const f of (await res.json()).filter((x) => x.type === 'file')) {
+      if (!safeName(f.path) || !Number.isFinite(f.size) || f.size < 0) throw new Error(`${repo} lists a file with an unsafe name, so nothing was downloaded`);
+      files.push(f);
+    }
+    // The next page is asked for with the token, so it must be on the same server as this one.
+    const next = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') || '')?.[1];
+    url = next && new URL(next, url).origin === new URL(HF).origin ? new URL(next, url).href : null;
+    if (next && !url) throw new Error(`${repo}: the file list continues on another server, so nothing was downloaded`);
   }
   return files;
 }
@@ -40,6 +50,7 @@ const sha256 = async (file, signal) => {
 
 async function fetchFile(repo, revision, file, dest, onBytes, signal) {
   const target = join(dest, file.path);
+  if (!target.startsWith(`${dest}${sep}`)) throw new Error(`${file.path} would be written outside ${dest}`); // checked when listed; checked again where it is written
   const wanted = file.lfs?.oid;
   const good = async (p) => statSync(p).size === file.size && (!wanted || (await sha256(p, signal)) === wanted);
   if (existsSync(target) && (await good(target))) return onBytes(file.size);
@@ -79,7 +90,7 @@ const weightMount = (w) => (w.path ? `${w.path}:${w.at}:ro` : w.layout === 'hub'
 export const dirOf = (w) => w.path || weightDir(w);
 const markerOf = (w) => join(weightDir(w), `.complete-${createHash('sha256').update(String(w.files || '')).digest('hex').slice(0, 12)}`);
 // The docker arguments that put the weights inside the engine's container.
-export const mounts = (launch) => [...weightsOf(launch).flatMap((w) => ['-v', weightMount(w)]), ...(weightsOf(launch).some((w) => w.layout === 'hub') ? ['-e', 'HF_HUB_OFFLINE=1'] : [])];
+export const mounts = (launch) => [...weightsOf(launch).map((w) => `--volume=${weightMount(w)}`), ...(weightsOf(launch).some((w) => w.layout === 'hub') ? ['--env=HF_HUB_OFFLINE=1'] : [])];
 export const onDisk = (launch) => weightsOf(launch).every((w) => existsSync(w.path || markerOf(w)));
 
 // Fetches whatever the recipe's weights still need. report() is told the phase, the detail line and the progress.

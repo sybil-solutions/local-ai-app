@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { flagProblem } from './docker.js';
 import { loadSeconds, speedOf } from './speed.js';
-import { at, event, fail, readJson, writeJson } from './util.js';
+import { at, bytesUpTo, config, event, fail, jsonUpTo, own, readJson, saveConfig, writeJson } from './util.js';
 
 const FEED = process.env.LOCAL_AI_REGISTRY || 'https://raw.githubusercontent.com/sybil-solutions/local-ai-registry/main/dist/catalog.json';
-const ALLOWED_FLAGS = new Set(['--ipc', '--network', '--net', '--gpus', '--shm-size', '--ulimit', '--workdir', '-w']);
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const REVISION = /^[0-9a-f]{40}$/;
 const ENGINES = { vllm: 'vLLM', sglang: 'SGLang', tabbyapi: 'TabbyAPI', 'llama.cpp': 'llama.cpp', mlx: 'MLX' };
@@ -12,15 +12,16 @@ const catalogFile = at('catalog.json');
 const localFile = at('recipes.json');
 
 let catalog = readJson(catalogFile, { cards: {}, recipes: {}, models: {}, builds: {} });
-const local = readJson(localFile, {});
+const local = Object.assign(Object.create(null), readJson(localFile, {})); // your own recipes, by id. An id can be any text, so the object has no inherited names
 const feed = { at: null, error: null };
 
 export async function refresh() {
   try {
     const res = await fetch(FEED, { signal: AbortSignal.timeout(60000) });
     if (!res.ok) throw new Error(`registry answered ${res.status}`);
-    const next = await res.json();
-    if (!next.cards || !next.recipes) throw new Error('registry returned an unknown format');
+    const next = await jsonUpTo(res, 64e6);
+    if (!next || typeof next.cards !== 'object' || typeof next.recipes !== 'object' || !next.cards || !next.recipes) throw new Error('registry returned an unknown format');
+    for (const part of ['models', 'builds']) if (!next[part] || typeof next[part] !== 'object') next[part] = {};
     catalog = next;
     writeJson(catalogFile, next);
     Object.assign(feed, { at: new Date().toISOString(), error: null });
@@ -31,25 +32,27 @@ export async function refresh() {
   }
 }
 
-export const find = (id) => local[id] || catalog.recipes[id];
-export const flagsOf = (launch) => (launch.flags || []).flatMap((flag) => {
-  const text = flag.trim();
-  const eq = /^(-[\w-]+)=(.*)$/.exec(text);
-  return eq ? [eq[1], eq[2]] : text.split(/\s+(.*)/s).filter(Boolean);
-});
-
-// A host recipe this machine can run itself: Metal on Apple silicon, a Python command, every package pinned to one
-// version, its script matching the hash the registry gives, and weights pinned to a commit inside the run's folder.
+export const find = (id) => own(local, id) ?? own(catalog.recipes, id);
+// A host recipe this machine can run itself: Metal on Apple silicon; Python given the recipe's own script and nothing
+// else (no -c, no -m, no other file), the script matching its hash; every package pinned to one version; weights pinned
+// to a commit inside the run's folder; and one --port and at most one --host, which the app sets itself.
+// None of that makes the script safe: it runs as this user. So a host recipe also waits to be allowed (see `allowed`).
 const PIP_PIN = /^[A-Za-z0-9][\w.-]*==[\w.+-]+$/;
 const INSIDE = (p) => typeof p === 'string' && /^[\w][\w./-]*$/.test(p) && !p.split('/').includes('..');
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const plainEnv = (env) => env === undefined || (!!env && typeof env === 'object' && !Array.isArray(env) && Object.entries(env).every(([k, v]) => NAME.test(k) && ['string', 'number', 'boolean'].includes(typeof v)));
 function hostProblem(launch) {
+  const cmd = launch.command, script = launch.config;
   if (launch.backend !== 'metal' || process.platform !== 'darwin' || process.arch !== 'arm64') return 'Runs outside Docker';
-  if (!Array.isArray(launch.command) || !/^python3?$/.test(launch.command[0] || '')) return 'Runs outside Docker';
-  if (!launch.command.includes('--port')) return 'Does not say its port';
+  if (!Array.isArray(cmd) || !cmd.every((x) => typeof x === 'string') || !/^python3?$/.test(cmd[0] || '')) return 'Runs outside Docker';
+  if (!script || typeof script !== 'object' || !INSIDE(script.at) || script.at.includes('/') || !script.at.endsWith('.py') || typeof script.text !== 'string'
+    || createHash('sha256').update(script.text).digest('hex') !== script.sha256) return 'Its script does not match its hash';
+  if (cmd[1] !== script.at) return 'Runs something other than its own script';
+  const times = (flag) => cmd.filter((x) => x === flag).length;
+  if (times('--port') !== 1 || times('--host') > 1 || cmd.some((x) => /^--(port|host)=/.test(x)) || ['--port', '--host'].includes(cmd[cmd.length - 1])) return 'Does not say its port';
+  if (!plainEnv(launch.env)) return 'Sets an odd environment variable';
   if ([].concat(launch.pip || []).some((p) => !PIP_PIN.test(p))) return 'Engine packages are not pinned';
-  if (launch.config && (!INSIDE(launch.config.at) || launch.config.at.includes('/') || typeof launch.config.text !== 'string'
-    || createHash('sha256').update(launch.config.text).digest('hex') !== launch.config.sha256)) return 'Its script does not match its hash';
-  if ([].concat(launch.weights || []).some((w) => w.path || w.layout === 'hub' || !REPO.test(w.repo || '') || !REVISION.test(w.revision || '') || !INSIDE(w.at))) return 'Weights are not pinned';
+  if ([].concat(launch.weights || []).some((w) => !w || typeof w !== 'object' || w.path || w.layout === 'hub' || !REPO.test(w.repo || '') || !REVISION.test(w.revision || '') || !INSIDE(w.at))) return 'Weights are not pinned';
   if (launch.build || launch.setup || launch.prepare || launch.resources || (launch.machines || 1) > 1) return 'Needs manual setup';
   for (const [key, want] of Object.entries(launch.sysctl || {})) {
     if (!/^[\w.]+$/.test(key) || !(sysctlNow(key) >= +want)) return `Needs sudo sysctl ${key}=${want}`;
@@ -66,43 +69,79 @@ function sysctlNow(key) {
   return value;
 }
 
-// Your own recipes are trusted; public ones must be pinned and need nothing beyond one docker run, or one pinned host run.
-export function blocked(id) {
-  const recipe = find(id);
-  const launch = recipe.launch;
+// Why a recipe may not be started, or null. Your own recipes (`trusted`) are yours to write; a registry recipe must be
+// pinned and need nothing beyond one docker run, or one pinned host run. Nothing here reads anything but the recipe,
+// so scripts/fuzz.mjs can ask it about recipes no registry would ever hold.
+export function problemWith(recipe, { trusted = false } = {}) {
+  const launch = recipe?.launch;
+  if (!launch || typeof launch !== 'object') return 'Has no launch';
   if (launch.kind === 'host') return hostProblem(launch) || (recipe.proof?.[0]?.failed ? 'Failed its last test' : null);
-  if (!launch.image) return 'Has no container image';
-  if (local[id]) return null;
+  if (typeof launch.image !== 'string' || !launch.image) return 'Has no container image';
+  if (trusted) return null;
   if (launch.build) return 'Image must be built from source';
   if (launch.setup || launch.prepare || launch.resources) return 'Needs manual setup';
   if ((launch.machines || 1) > 1) return 'Needs several machines';
   if (!/^[a-z0-9][\w./:-]*@sha256:[0-9a-f]{64}$/i.test(launch.image)) return 'Image is not pinned';
-  // Each flag must be one allowed option with at most one plain value. Anything else could slip an option, or another image, in front of the pinned one.
-  const flag = [].concat(launch.flags || []).find((f) => !ALLOWED_FLAGS.has(/^(--?[\w-]+)(?:[=\s]+[^\s-]\S*)?$/.exec(String(f).trim())?.[1]));
-  if (flag) return `Uses ${flag}`;
+  // Anything a recipe gives Docker must be of the plain shape expected, so none of it can pass for something else.
+  const flags = flagProblem(launch);
+  if (flags) return flags;
+  if (!Number.isInteger(launch.port) || launch.port < 1 || launch.port > 65535) return 'Does not say its port';
+  if (launch.shm !== undefined && !/^\d+(\.\d+)?[bkmg]?b?$/i.test(String(launch.shm))) return 'Asks for an odd amount of shared memory';
+  if ((launch.args !== undefined && !Array.isArray(launch.args)) || [].concat(launch.entrypoint || [], launch.args || []).some((x) => !['string', 'number'].includes(typeof x))) return 'Has arguments that are not a list of text';
+  if (!plainEnv(launch.env)) return 'Sets an odd environment variable';
+  if (['cards', 'seqs', 'ctx'].some((k) => launch[k] != null && typeof launch[k] !== 'number')) return 'Has a number that is not a number';
+  if ([].concat(launch.weights || []).some((w) => !w || typeof w !== 'object')) return 'Weights are not pinned';
+  if (launch.config && (typeof launch.config.text !== 'string' || !/^\/[\w./-]+$/.test(launch.config.at || '') || launch.config.at.includes('..'))) return 'Its config file has an odd place';
   if ([].concat(launch.weights || []).some((w) => w.path || !REPO.test(w.repo || '') || !REVISION.test(w.revision || '') || !/^\/[\w./-]+$/.test(w.at || '') || w.at.includes('..'))) return 'Weights are not pinned';
   if (/(--host[ =]|host:\s*)127\.0\.0\.1/.test(`${(launch.args || []).join(' ')} ${launch.config?.text || ''}`)) return 'Only listens on loopback';
   return recipe.proof?.[0]?.failed ? 'Failed its last test' : null;
 }
+export const blocked = (id) => problemWith(find(id), { trusted: isLocal(id) });
 
-function score(model) {
-  const aa = catalog.models[model]?.aa;
-  return (aa?.of ? catalog.models[aa.of]?.aa : aa) || null;
+// A host recipe runs as this user, outside any container, so the registry naming it is not enough: it starts only once
+// the person at this machine has been shown what it runs and allowed it. What was allowed is this exact launch (its
+// fingerprint), so a recipe that changes afterwards asks again.
+const stable = (v) => (Array.isArray(v) ? `[${v.map(stable).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(',')}}` : JSON.stringify(v) ?? 'null');
+const marks = new WeakMap();
+function fingerprint(id) {
+  const launch = find(id)?.launch;
+  if (launch?.kind !== 'host') return null;
+  if (!marks.has(launch)) marks.set(launch, createHash('sha256').update(stable(launch)).digest('hex'));
+  return marks.get(launch);
+}
+const asks = (id) => { const mark = fingerprint(id); return mark && own(config.approved, id) !== mark ? mark : null; };
+// The id, once it may be started. `approve` is the fingerprint the page was shown; anything else is refused.
+export function allowed(id, approve) {
+  const mark = asks(id);
+  if (!mark) return id;
+  if (approve !== mark) fail(409, 'This model runs as a program on this computer, so it has to be allowed first. Open it under Models');
+  config.approved = { ...config.approved, [id]: mark };
+  saveConfig();
+  event('info', 'recipe.allowed', { id, fingerprint: mark.slice(0, 12) });
+  return id;
 }
 
+function score(model) {
+  const aa = own(catalog.models, model)?.aa;
+  return (aa?.of ? own(catalog.models, aa.of)?.aa : aa) || null;
+}
+
+// Numbers from a recipe or the registry, as numbers: a whole one no smaller than `least`, or an amount (null when it is none).
+const whole = (v, least = 0) => Math.max(least, Math.trunc(+v) || 0);
+const amount = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 function view(id) {
   const recipe = find(id);
-  const model = catalog.models[recipe.model];
+  const model = own(catalog.models, recipe.model);
   const proof = recipe.proof?.find((p) => !p.failed);
   const measured = speedOf(id);
   const aa = score(recipe.model);
   const text = `${(recipe.launch.args || []).join(' ')} ${recipe.launch.config?.text || ''}`;
   return {
-    id, local: !!local[id], host: recipe.launch.kind === 'host', name: recipe.name || model?.name || recipe.model, card: recipe.card,
-    cards: recipe.launch.cards || 1, engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: recipe.launch.ctx || 0,
-    vision: !!recipe.launch.vision, tps: measured?.c1 ?? proof?.tps ?? null, smart: aa?.index ?? null, seqs: recipe.launch.seqs || 1,
-    speed: { c1: measured?.c1 ?? proof?.tps ?? null, c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: catalog.builds[recipe.weights]?.size_gb ?? null,
-    released: model?.released || null, loadS: loadSeconds(id),
+    id, local: isLocal(id), host: recipe.launch.kind === 'host', approve: asks(id), name: String(recipe.name || model?.name || recipe.model), card: recipe.card,
+    cards: whole(recipe.launch.cards, 1), engine: ENGINES[String(recipe.engine || '').split(/[-@]/)[0]] || 'Custom', ctx: whole(recipe.launch.ctx),
+    vision: !!recipe.launch.vision, tps: measured?.c1 ?? amount(proof?.tps), smart: amount(aa?.index), seqs: whole(recipe.launch.seqs, 1),
+    speed: { c1: measured?.c1 ?? amount(proof?.tps), c4: measured?.c4 ?? null, c8: measured?.c8 ?? null, measured: !!measured, exact: measured?.exact ?? true, ttft: measured?.ttft ?? null, at: measured?.at ?? null }, sizeGb: amount(own(catalog.builds, recipe.weights)?.size_gb),
+    released: typeof model?.released === 'string' ? model.released : null, loadS: loadSeconds(id),
     think: !!model?.reasoning, tools: /tool-call-parser|enable-auto-tool-choice|--jinja/.test(text), kv: /--kv-cache-dtype[= ](?!auto)(\S+)/.exec(text)?.[1] || null,
   };
 }
@@ -166,13 +205,16 @@ function appleCard(gpuName, vramGb) {
 }
 export const cardFor = (gpu) => (gpu.unified ? appleCard(gpu.name, gpu.total / 1024) : cardOf(gpu.name, gpu.total / 1024, gpu.shared) ?? nearest(gpu.total / 1024));
 
+// A recipe's id is written on its container as a label and read back from Docker's listing, one line a container,
+// so it is plain text on one line.
+const PLAIN_ID = /^[^\x00-\x1f\x7f]{1,200}$/; // eslint-disable-line no-control-regex
 // A recipe this machine may start, as the app shows it. One that can't be read is reported and left out.
 const unreadable = new Set();
 function usable(id, card, count) {
   try {
     const recipe = find(id);
-    if (recipe.card !== card || (recipe.launch.cards || 1) > count || blocked(id)) return [];
-    if (!local[id]) familyOf(recipe.model); // a registry recipe is ranked by its model's name
+    if (!PLAIN_ID.test(id) || recipe.card !== card || whole(recipe.launch.cards, 1) > count || blocked(id)) return [];
+    if (!isLocal(id)) familyOf(recipe.model); // a registry recipe is ranked by its model's name
     return [view(id)];
   } catch (e) {
     if (!unreadable.has(id)) event('warn', 'recipe.unreadable', { id, error: e.message });
@@ -192,23 +234,24 @@ export function groups(gpus) {
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
     const list = latestOfEachFamily(ids.flatMap((id) => usable(id, card, members.length))).sort((a, b) => (b.tps || 0) - (a.tps || 0));
-    return { card, name: catalog.cards[tested]?.name || members[0].name, untested: tested ? null : catalog.cards[card]?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(list), recipes: list };
+    return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: tiers(list), recipes: list };
   });
 }
 
-export const label = (id) => (find(id) ? view(id).name : id);
-export const isLocal = (id) => !!local[id];
+// A run's name: its recipe's, or the id when the recipe is gone or can no longer be read.
+export const label = (id) => { try { return find(id) ? view(id).name : String(id); } catch { return String(id); } };
+export function isLocal(id) { return own(local, id) !== undefined; }
 export const raw = (id) => (find(id) ? { id, ...find(id) } : fail(404, 'No such recipe'));
 
 export function save({ id, ...recipe }) {
-  if (typeof id !== 'string' || !id.trim()) fail(400, 'Recipe needs an id');
+  if (typeof id !== 'string' || !id.trim() || !PLAIN_ID.test(id)) fail(400, 'Recipe needs an id');
   if (!recipe.launch || typeof recipe.launch !== 'object') fail(400, 'Recipe needs a launch object');
   if (recipe.launch.kind === 'host') fail(400, 'Recipes that run outside Docker can’t be edited here yet');
   if (typeof recipe.launch.image !== 'string' || !recipe.launch.image) fail(400, 'launch.image must be a container image');
   if (!Number.isInteger(recipe.launch.port)) fail(400, 'launch.port must be the port the engine listens on');
   if (typeof recipe.card !== 'string') fail(400, 'Recipe needs a card id');
   for (const w of [].concat(recipe.launch.weights || [])) if (!w?.at || !(w.path || (REPO.test(w.repo || '') && REVISION.test(w.revision || '')))) fail(400, 'Each weight needs "at" and either "path" or a "repo" with a 40-character "revision"');
-  const before = local[id];
+  const before = own(local, id);
   local[id] = recipe;
   try { blocked(id); view(id); } catch (e) { if (before) local[id] = before; else delete local[id]; fail(400, `That recipe can’t be read: ${e.message}`); }
   writeJson(localFile, local);
@@ -217,7 +260,7 @@ export function save({ id, ...recipe }) {
 }
 
 export function reset(id) {
-  if (!local[id]) fail(404, 'That recipe has no local changes');
+  if (!isLocal(id)) fail(404, 'That recipe has no local changes');
   delete local[id];
   writeJson(localFile, local);
   event('info', 'recipe.reset', { id });
@@ -227,22 +270,26 @@ export function reset(id) {
 // The registry as the app shows it: when it was last fetched, any error, how many recipes, and which version.
 export const registry = () => ({ ...feed, count: Object.keys(catalog.recipes).length, id: (catalog.sha256 || '').slice(0, 7) });
 
-// The model's page on Hugging Face: the repo the registry names, else the best match for its name.
+// The model's page on Hugging Face: the repo the registry names. Only a model the registry gives no repo for is looked
+// up by name, since anyone can publish a repo with a matching name.
 const cards = new Map();
 export async function card(id) {
   const recipe = find(id) || fail(404, 'No such recipe');
-  const model = catalog.models[recipe.model] || {};
+  const model = own(catalog.models, recipe.model) || {};
   const hit = cards.get(recipe.model);
   if (hit && Date.now() - hit.at < 864e5) return hit.card;
   const get = (url) => fetch(url, { signal: AbortSignal.timeout(12000) });
-  const name = (model.name || recipe.model).replace(/\s+/g, '-');
-  const found = await get(`https://huggingface.co/api/models?search=${encodeURIComponent(name)}&sort=downloads&limit=20`).then((r) => r.json()).catch(() => []);
-  const base = Array.isArray(found) ? found.find((m) => m.id.split('/')[1].toLowerCase().replace(/-it$/, '') === name.toLowerCase()) : null;
-  const repo = base?.id || model.hf || fail(404, 'This model has no card on Hugging Face');
+  let repo = REPO.test(model.hf || '') ? model.hf : null;
+  if (!repo) {
+    const name = String(model.name || recipe.model).replace(/\s+/g, '-');
+    const found = await get(`https://huggingface.co/api/models?search=${encodeURIComponent(name)}&sort=downloads&limit=20`).then((r) => r.json()).catch(() => []);
+    repo = (Array.isArray(found) ? found : []).map((m) => String(m?.id || '')).find((hit) => REPO.test(hit) && hit.split('/').pop().toLowerCase().replace(/-it$/, '') === name.toLowerCase()) || fail(404, 'This model has no card on Hugging Face');
+  }
   const meta = await get(`https://huggingface.co/api/models/${repo}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
   const readme = await get(`https://huggingface.co/${repo}/raw/main/README.md`).catch(() => null);
   if (!readme?.ok) fail(404, 'This model has no card on Hugging Face');
-  const card_ = { repo, license: meta.cardData?.license || null, downloads: meta.downloads ?? null, md: (await readme.text()).replace(/^---\n[\s\S]*?\n---\n/, '').slice(0, 14000) };
+  const text = (await bytesUpTo(readme, 4e6).catch(() => fail(404, 'This model’s card is too long to show'))).toString('utf8');
+  const card_ = { repo, license: typeof meta?.cardData?.license === 'string' ? meta.cardData.license.slice(0, 60) : null, downloads: amount(meta?.downloads), md: text.replace(/^---\n[\s\S]*?\n---\n/, '').slice(0, 14000) };
   cards.set(recipe.model, { at: Date.now(), card: card_ });
   return card_;
 }

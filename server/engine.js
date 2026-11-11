@@ -1,19 +1,19 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, copyFileSync, existsSync, fstatSync, ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, fstatSync, ftruncateSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join } from 'node:path';
+import { dockerArgs } from './docker.js';
+import { readGpus } from './gpus.js';
 import * as machines from './machines.js';
 import { meter } from './meter.js';
-import { blocked, cardFor, find, flagsOf, isLocal, label } from './recipes.js';
+import { blocked, cardFor, find, isLocal, label } from './recipes.js';
 import { loadSeconds, measure, saveLoad, speedOf } from './speed.js';
 import * as usage from './usage.js';
 import { at, config, ENGINE_HOST, event, fail, HOST, PORT, readJson, run, saveConfig, sleep, writeJson } from './util.js';
 import * as weights from './weights.js';
 
-const OWNED_FLAGS = new Set(['--network', '--net', '--gpus', '--name', '--rm', '-d', '--detach', '-p', '--publish', '--label', '--entrypoint', '--restart']);
 const START_DEADLINE = 2 * 3600e3;
-const METRICS_FLAGS = [[/sglang/, '--enable-metrics'], [/llama-server/, '--metrics']];
 const docker = (args, opts) => run('docker', args, opts);
 
 const runs = new Map();
@@ -23,7 +23,8 @@ export const status = { gpus: [], docker: { ok: false, error: 'Checking Docker' 
 let notify = () => {};
 export const onChange = (fn) => { notify = fn; };
 let shared = null;
-export const shareOn = (ip) => { shared = ip; };
+let sharedNames = []; // the names this machine answers to on the tailnet
+export const shareOn = (ip, names = []) => { shared = ip; sharedNames = names; };
 const update = (r, fields) => { Object.assign(r, fields); notify(); };
 const FAILURES = [
   [/out of memory|OutOfMemory|CUBLAS|failed to allocate|Not enough GPU memory/i, 'Ran out of room', 'Too big for the free GPU memory'],
@@ -47,45 +48,6 @@ function setFailed(r, error, logs = '') {
   event('error', 'run.failed', { id: r.id, recipe: r.recipe, error });
 }
 
-// Apple silicon has no nvidia-smi: the chip is one GPU whose memory is the unified RAM. `unified` marks it, so it is
-// free whenever no run holds it (the OS always uses some of that memory) and runs on it need no Docker.
-let chip = null;
-async function readAppleGpu() {
-  if (!chip) {
-    const [brand, mem] = await Promise.all([run('sysctl', ['-n', 'machdep.cpu.brand_string'], { timeout: 4000 }), run('sysctl', ['-n', 'hw.memsize'], { timeout: 4000 })]);
-    const name = brand.stdout.trim();
-    if (brand.code || mem.code || !/^Apple M\d/.test(name)) return [];
-    chip = { name, total: Math.round(+mem.stdout.trim() / 1048576) };
-  }
-  const vm = await run('vm_stat', [], { timeout: 4000 });
-  const page = +(/page size of (\d+)/.exec(vm.stdout)?.[1] || 16384);
-  const pages = (key) => +(new RegExp(`${key}:\\s+(\\d+)`).exec(vm.stdout)?.[1] || 0);
-  const used = vm.code ? null : Math.round(((pages('Pages active') + pages('Pages wired down') + pages('Pages occupied by compressor')) * page) / 1048576);
-  return [{ index: 0, name: chip.name, total: chip.total, used, util: null, power: null, temp: null, unified: true }];
-}
-
-// The machine's RAM in MiB, from /proc/meminfo, as { total, used }.
-function systemMemory() {
-  try {
-    const text = readFileSync('/proc/meminfo', 'utf8'), kb = (key) => +(new RegExp(`^${key}:\\s+(\\d+)`, 'm').exec(text)?.[1] || 0);
-    return { total: Math.round(kb('MemTotal') / 1024), used: Math.round((kb('MemTotal') - kb('MemAvailable')) / 1024) };
-  } catch { return null; }
-}
-
-async function readGpus() {
-  if (process.platform === 'darwin' && process.arch === 'arm64') return readAppleGpu();
-  const q = 'index,name,memory.total,memory.used,utilization.gpu,power.draw,temperature.gpu';
-  const r = await run('nvidia-smi', [`--query-gpu=${q}`, '--format=csv,noheader,nounits'], { timeout: 8000 });
-  if (r.code) return [];
-  const num = (s) => (Number.isFinite(+s) ? +s : null);
-  return r.stdout.trim().split('\n').filter(Boolean).map((line) => {
-    const [index, name, total, used, util, power, temp] = line.split(', ');
-    // A GPU that shares the system's memory (DGX Spark) reports none of its own: its memory is the machine's RAM.
-    const own = num(total), ram = own ? null : systemMemory();
-    return { index: +index, name, total: own ?? ram?.total ?? 0, used: own ? num(used) : ram?.used ?? null, util: num(util), power: num(power), temp: num(temp), ...(own ? {} : { shared: true }) };
-  });
-}
-
 const claimed = () => new Set([...runs.values()].filter((r) => r.phase !== 'failed').flatMap((r) => r.gpus));
 export const freeGpus = () => {
   const taken = claimed();
@@ -98,29 +60,6 @@ const portFree = (port) => new Promise((done) => {
   s.listen(port, HOST, () => s.close(() => done(true)));
 });
 
-function dockerArgs(r, recipe, name) {
-  const launch = recipe.launch;
-  r.reachable = !!shared || !/^127\./.test(HOST); // whether the port is published where another machine can call it
-  const entry = [].concat(launch.entrypoint || []);
-  const flags = flagsOf(launch);
-  const keep = [];
-  for (let i = 0; i < flags.length; i++) {
-    const part = flags.slice(i, flags[i + 1] && !flags[i + 1].startsWith('-') ? i + 2 : i + 1);
-    i += part.length - 1;
-    if (!OWNED_FLAGS.has(part[0])) keep.push(...part);
-  }
-  const configFile = launch.config && at('runs', String(r.id), basename(launch.config.at));
-  if (configFile) { mkdirSync(dirname(configFile), { recursive: true }); writeFileSync(configFile, launch.config.text); }
-  const command = [...entry, ...(launch.args || [])];
-  const metrics = METRICS_FLAGS.find(([re, flag]) => re.test(command.join(' ')) && !command.includes(flag))?.[1];
-  const env = Object.entries(launch.env || {}).filter(([k]) => !['NVIDIA_VISIBLE_DEVICES', 'CUDA_VISIBLE_DEVICES'].includes(k));
-  return ['run', '-d', '--name', name, '--label', 'local-ai=1', '--label', `local-ai.port=${r.id}`, '--label', `local-ai.recipe=${r.recipe}`,
-    '--label', `local-ai.gpus=${r.gpus.join('+')}`, '--label', `local-ai.since=${r.since}`, '--label', `local-ai.reach=${+r.reachable}`, '--gpus', `"device=${r.gpus.join(',')}"`,
-    '-p', `${HOST}:${r.id}:${launch.port}`, ...(shared ? ['-p', `${shared}:${r.id}:${launch.port}`] : []), ...(isLocal(r.recipe) ? [] : ['--security-opt', 'no-new-privileges']), ...(launch.shm ? ['--shm-size', launch.shm] : []), ...keep,
-    ...env.flatMap(([k, v]) => ['-e', `${k}=${v}`]), ...weights.mounts(launch), ...(configFile ? ['-v', `${configFile}:${launch.config.at}:ro`] : []),
-    ...(entry[0] ? ['--entrypoint', entry[0]] : []), launch.image, ...entry.slice(1), ...(launch.args || []), ...(metrics ? [metrics] : [])];
-}
-
 async function launch(r, recipe) {
   const { signal } = r.abort;
   try {
@@ -132,9 +71,12 @@ async function launch(r, recipe) {
       const pulled = await docker(['pull', recipe.launch.image], { timeout: 4 * 3600e3, signal });
       if (pulled.code) throw new Error(pulled.stderr.trim().slice(-400) || 'Could not pull the engine image');
     }
-    const name = `local-ai-${r.id}`;
+    const name = `local-ai-${r.id}`, L = recipe.launch;
     update(r, { phase: 'starting', detail: 'Loading model', container: name, since: Date.now() });
-    const started = await docker(dockerArgs(r, recipe, name), { timeout: 120000, signal });
+    r.reachable = !!shared || !/^127\./.test(HOST); // whether the port is published where another machine can call it
+    const configFile = L.config ? at('runs', String(r.id), basename(L.config.at)) : null;
+    if (configFile) { mkdirSync(dirname(configFile), { recursive: true }); writeFileSync(configFile, L.config.text); }
+    const started = await docker(dockerArgs({ run: r, launch: L, name, bind: [HOST, ...(shared ? [shared] : [])], mounts: weights.mounts(L), configFile, trusted: isLocal(r.recipe) }), { timeout: 120000, signal });
     if (started.code) {
       await docker(['rm', '-f', name]);
       r.container = null;
@@ -263,19 +205,21 @@ async function probeApis(r) {
   event('info', 'run.apis', { id: r.id, apis: r.apis });
 }
 
-const parseLabels = (text) => Object.fromEntries(text.split(',').map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; }));
+// Each label is asked for by name, as a column of its own. Docker's list of all labels is joined with commas, and a
+// label an image brings along could hold a comma and a name of ours after it.
+const LABELS = ['port', 'recipe', 'reach', 'gpus', 'since'];
 
 async function inspectAll() {
-  const ps = await docker(['ps', '-a', '--filter', 'label=local-ai=1', '--format', '{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Labels}}'], { timeout: 10000 });
+  const ps = await docker(['ps', '-a', '--filter', 'label=local-ai=1', '--format', ['{{.Names}}', '{{.State}}', '{{.Status}}', ...LABELS.map((k) => `{{.Label "local-ai.${k}"}}`)].join('\t')], { timeout: 10000 });
   if (ps.code) {
     update(status.docker, { ok: false, error: ps.code === 127 ? 'Docker is not installed' : `Docker is not reachable: ${ps.stderr.trim().slice(0, 200)}` });
     return null;
   }
   update(status.docker, { ok: true, error: null });
   return ps.stdout.trim().split('\n').filter(Boolean).map((line) => {
-    const [name, state, text, labels] = line.split('\t');
-    return { name, state, text, labels: parseLabels(labels) };
-  });
+    const [name, state, text, ...values] = line.split('\t');
+    return { name, state, text, labels: Object.fromEntries(LABELS.map((k, i) => [`local-ai.${k}`, values[i] || ''])) };
+  }).filter((c) => Number.isInteger(+c.labels['local-ai.port']) && +c.labels['local-ai.port'] > 0);
 }
 
 async function reconcile(c, listedAt) {
@@ -348,7 +292,7 @@ async function forwards(here, model) {
   const read = async (url) => usage.parseMetrics(await (await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(1500) })).text());
   const totals = (m) => [m.prompt_tokens_total, m.generation_tokens_total ?? m.tokens_predicted_total, m.request_success_total];
   for (const d of machines.views()) {
-    for (const r of d.online && d.state ? d.state.runs : []) {
+    for (const r of d.online && Array.isArray(d.state?.runs) ? d.state.runs : []) {
       if (r.phase !== 'ready' || r.served !== model || r.reachable === false) continue;
       try {
         const a = await read(here), far = await read(`http://${new URL(d.url).hostname}:${r.id}`);
@@ -490,9 +434,10 @@ function cleanEnvs(keep) {
   }
 }
 
-// The recipe's command with this machine's venv Python, listening on loopback at the inner port.
+// The recipe's command with this machine's venv Python, listening on loopback at the inner port. recipes.js has
+// already made sure there is one --port and at most one --host, each followed by its value.
 function hostCommand(launch, port, python) {
-  const cmd = [...launch.command];
+  const cmd = launch.command.map(String);
   if (/^python3?$/.test(cmd[0])) cmd[0] = python;
   const at_ = (flag) => cmd.indexOf(flag);
   if (at_('--port') < 1 || at_('--port') === cmd.length - 1) throw new Error('The recipe does not say which port it listens on');
@@ -500,6 +445,10 @@ function hostCommand(launch, port, python) {
   if (at_('--host') > 0 && at_('--host') < cmd.length - 1) cmd[at_('--host') + 1] = '127.0.0.1';
   return cmd;
 }
+// What an engine that runs on this machine is told about it: where things are and how text is written, and whatever
+// its recipe sets. Not the rest of this app's environment, which may hold tokens and keys the engine has no use for.
+const PASSED = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE'];
+const hostEnv = (launch) => ({ ...Object.fromEntries(PASSED.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), ...Object.fromEntries(Object.entries(launch.env || {}).map(([k, v]) => [k, String(v)])) });
 
 async function freeInner() {
   const taken = innerPorts();
@@ -509,7 +458,7 @@ async function freeInner() {
 
 // Opens the run's own port in front of the engine, where a container would have published it.
 async function openFront(r, inner) {
-  const m = meter(inner);
+  const m = meter(inner, () => [HOST, shared, ...sharedNames]);
   const where = [HOST, ...(shared && shared !== HOST ? [shared] : [])];
   r.close = await m.listen(r.id, where);
   r.meter = m;
@@ -534,7 +483,7 @@ async function launchHost(r, recipe, signal) {
   signal.throwIfAborted();
   update(r, { phase: 'starting', detail: 'Loading model', since: Date.now() });
   const out = openSync(join(dir, 'engine.log'), 'a');
-  const child = spawn(cmd, args, { cwd: dir, detached: true, stdio: ['ignore', out, out], env: { ...process.env, ...(launch.env || {}) } });
+  const child = spawn(cmd, args, { cwd: dir, detached: true, stdio: ['ignore', out, out], env: hostEnv(launch) });
   closeSync(out);
   await new Promise((done, failed) => { child.once('spawn', done); child.once('error', failed); });
   child.unref();

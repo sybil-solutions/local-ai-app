@@ -1,9 +1,14 @@
 // What the page knows: the server's last snapshot, the little the page remembers itself, and the questions every screen asks of them.
 export const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { return null; } return v; };
+// The key reaches the page three ways: written into it by the server (only for another of your own Tailscale
+// machines), in the address it was opened with (#key=…, taken out of the address at once), or typed once. A key that
+// came by address or by typing is remembered in this browser.
 const inlined = document.querySelector('meta[name=key]').content;
+const linked = /[#&]key=([0-9a-f]{16,})/.exec(location.hash || '')?.[1];
+if (linked) { store('key', linked); history.replaceState(null, '', `${location.pathname}${location.search}`); }
 
 export const s = {
-  key: inlined && inlined !== '__KEY__' ? inlined : store('key') || '',
+  key: inlined && inlined !== '__KEY__' ? inlined : linked || store('key') || '',
   snap: null, online: true, needKey: false, version: 0,
   dev: -1,            // which machine is shown: -1 is this one, else an index into snap.devices
   nav: null,          // the screen opened on top of Home, or null
@@ -13,6 +18,7 @@ export const s = {
   full: store('la-full') !== '0',
   note: '', busy: false, command: '', logText: '',
   period: 'days', span: 'all', usage: null, ends: null, peers: null, install: null, draft: null, link: null,
+  asking: null, look: null, // the model waiting to be allowed, and its recipe as fetched to show
   form: {}, cards: {},
 };
 

@@ -82,6 +82,8 @@ a.btn { line-height: 40px; text-decoration: none; box-sizing: border-box; }
 .kv.small b { font-weight: 500; }
 .box { font: 400 12px/1.6 var(--ui); border: 1px solid var(--line); border-radius: 4px; padding: 10px; color: var(--muted); overflow-wrap: anywhere; }
 .box.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #d6d3cd; }
+.box.pre { white-space: pre-wrap; }
+.box.clip { max-height: 200px; overflow: auto; }
 .field { height: 44px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 4px; padding: 0 12px; display: flex; align-items: center; color: var(--muted); font: 400 13px var(--ui); }
 input.field, select.field, textarea.box { width: 100%; box-sizing: border-box; background: none; color: var(--text); outline: none; resize: none; flex: none; }
 input.field:focus, select.field:focus, textarea.box:focus { border-color: var(--accent); }
@@ -275,7 +277,7 @@ html:not([data-bg=none]) .frame .screen.lowpic:has(canvas.art)::after { -webkit-
 #fs { display: none; }
 html.wide #fs { display: block; position: fixed; inset: 0; z-index: 3; background: var(--bg); overflow: hidden; }
 html.wide #view { visibility: hidden; }
-#ui { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+#ui { position: absolute; inset: 0; z-index: 3; pointer-events: none; } /* above the page, so a notice is never under a page's text; presses pass through to the page */
 #ui > * { pointer-events: auto; }
 #fs .line { text-align: center; }
 .nname { font: 600 24px/1.2 var(--ui); letter-spacing: -.02em; }

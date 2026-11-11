@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+// A stand-in for docker, for the smoke test. It keeps "containers" as files in FAKE_DOCKER_DIR, and a container that
+// runs is the stand-in engine (fake_engine.py) listening where the real one's port would have been published.
+// It reads `docker run` the way docker does (scripts/docker-model.mjs), so it starts what the real one would.
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseRun } from '../docker-model.mjs';
+
+const DIR = process.env.FAKE_DOCKER_DIR, HERE = dirname(fileURLToPath(import.meta.url));
+if (!DIR) { console.error('FAKE_DOCKER_DIR is not set'); process.exit(125); }
+mkdirSync(DIR, { recursive: true });
+const [verb, ...args] = process.argv.slice(2);
+const file = (name) => join(DIR, `${name}.json`), images = join(DIR, 'images.txt');
+const read = (name) => JSON.parse(readFileSync(file(name), 'utf8'));
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const kill = (c) => { if (c.pid && alive(c.pid)) { try { process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ } } };
+const pulled = () => (existsSync(images) ? readFileSync(images, 'utf8').split('\n').filter(Boolean) : []);
+const last = args[args.length - 1];
+
+if (verb === 'image' && args[0] === 'inspect') process.exit(pulled().includes(args[1]) ? 0 : 1);
+else if (verb === 'pull') { writeFileSync(images, [...pulled(), args[0]].join('\n')); console.log(`pulled ${args[0]}`); }
+else if (verb === 'run') {
+  const parsed = parseRun(args);
+  if (parsed.error) { console.error(`docker: ${parsed.error}`); process.exit(125); }
+  const of = (flag) => parsed.options.filter(([name]) => name === flag).map(([, value]) => value);
+  const name = of('--name')[0], labels = of('--label').join(',');
+  const [host, port] = String(of('--publish')[0] || of('-p')[0] || '').split(':');
+  if (!pulled().includes(parsed.image)) { console.error(`Unable to find image '${parsed.image}' locally`); process.exit(125); }
+  const engine = spawn('python3', [join(HERE, '..', 'fake_engine.py'), '--host', host, '--port', port], { detached: true, stdio: 'ignore' });
+  engine.unref();
+  writeFileSync(file(name), JSON.stringify({ name, labels, pid: engine.pid, args, image: parsed.image, options: parsed.options, command: parsed.command, started: Date.now() }));
+  console.log(`fake${engine.pid}`);
+} else if (verb === 'ps') {
+  for (const f of readdirSync(DIR).filter((x) => x.endsWith('.json'))) {
+    const c = JSON.parse(readFileSync(join(DIR, f), 'utf8')), up = alive(c.pid);
+    // The listing is written the way --format asks for it: {{.Names}}, {{.State}}, {{.Status}}, {{.Labels}}, {{.Label "name"}}.
+    const labels = Object.fromEntries(c.labels.split(',').map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; }));
+    const fields = { Names: c.name, State: up ? 'running' : 'exited', Status: up ? 'Up 1 second' : 'Exited (1) 1 second ago', Labels: c.labels };
+    const format = args[args.indexOf('--format') + 1] || '{{.Names}}';
+    console.log(format.replace(/\{\{\.Label "([^"]+)"\}\}/g, (_, k) => labels[k] ?? '').replace(/\{\{\.(\w+)\}\}/g, (_, k) => fields[k] ?? ''));
+  }
+} else if (verb === 'stop') { if (existsSync(file(last))) kill(read(last)); console.log(last); }
+else if (verb === 'rm') { if (!existsSync(file(last))) { console.error(`Error response from daemon: No such container: ${last}`); process.exit(1); } kill(read(last)); rmSync(file(last)); console.log(last); }
+else if (verb === 'logs') { if (existsSync(file(last))) console.log('INFO: 127.0.0.1:50000 - "POST /v1/chat/completions HTTP/1.1" 200 OK\nfake engine log line'); }
