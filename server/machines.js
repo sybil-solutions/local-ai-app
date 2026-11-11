@@ -58,8 +58,12 @@ const SSH_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const unpackAndInstall = (mode) => `T="$(mktemp -d)" && tar -xz -C "$T" && LOCAL_AI_SHIPPED=${mode} bash "$T/install.sh"`;
 // Resolves with ssh's exit code and the last of what it printed. 255: it could not sign in. 3 and 4 are the
 // installer declining (install.sh): the copy there updates itself, or Local AI is already running there.
+// The app's files as one stream. A Mac's tar would add each file's Mac-only attributes, which another system unpacks
+// as a ._ file beside it or warns about, so there they are left out.
+const PLAIN = process.platform === 'darwin' ? ['--no-xattrs', '--no-mac-metadata'] : [];
+export const pack = () => spawn('tar', [...PLAIN, '-czf', '-', '-C', PAYLOAD, 'server', 'web', 'package.json', 'install.sh', 'README.md'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, COPYFILE_DISABLE: '1' } });
 const ship = (host, mode) => new Promise((done) => {
-  const tar = spawn('tar', ['-czf', '-', '-C', PAYLOAD, 'server', 'web', 'package.json', 'install.sh', 'README.md'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const tar = pack();
   const ssh = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '--', host, unpackAndInstall(mode)], { stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   const keep = (text) => { out = `${out}${text}`.slice(-4000); };

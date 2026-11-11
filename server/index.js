@@ -1,5 +1,4 @@
 // The server. One port serves the web app, the API in ROUTES below, and a long-polled snapshot of everything on this machine.
-import { spawn } from 'node:child_process';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -13,7 +12,7 @@ import * as recipes from './recipes.js';
 import * as speed from './speed.js';
 import * as update from './update.js';
 import * as usage from './usage.js';
-import { at, config, event, fail, HOST, PAYLOAD, PORT, saveConfig } from './util.js';
+import { at, config, event, fail, HOST, PORT, saveConfig } from './util.js';
 import * as weights from './weights.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..'), WEB = join(ROOT, 'web');
@@ -151,7 +150,7 @@ const OPEN = compile({
   // it, which is how the desktop app tells this server from another program that took the port.
   'GET /api/health': ({ q }) => ({ ok: true, app: 'local-ai', ...(/^[0-9a-f]{16,128}$/.test(q.get('nonce') || '') ? { proof: createHmac('sha256', config.key).update(q.get('nonce')).digest('hex') } : {}) }),
   'POST /api/pair': mine(() => ({ key: config.key, name: hostname() })),
-  'GET /install.tgz': mine(({ res }) => { res.writeHead(200, { 'content-type': 'application/gzip' }); spawn('tar', ['-czf', '-', '-C', PAYLOAD, 'server', 'web', 'package.json', 'install.sh', 'README.md']).stdout.pipe(res); }),
+  'GET /install.tgz': mine(({ res }) => { res.writeHead(200, { 'content-type': 'application/gzip' }); machines.pack().stdout.pipe(res); }),
   'GET /install': mine(({ req, res }) => {
     res.writeHead(200, { 'content-type': 'text/x-shellscript' });
     res.end(`#!/bin/bash\n# Copies Local AI from the machine that served this, then installs it for this user.\nset -e\nT="$(mktemp -d)"\ncurl -fsSL http://${req.headers.host}/install.tgz | tar -xz -C "$T"\n"$T/install.sh"\n`);
