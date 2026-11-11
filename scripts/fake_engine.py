@@ -9,6 +9,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL = "fake-engine"
+# Counted the way vLLM counts, and served on /metrics, so a container run of this has usage to read.
+COUNTS = {"prompt_tokens_total": 0, "generation_tokens_total": 0, "request_success_total": 0}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -29,6 +31,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.split("?")[0] == "/v1/models":
             return self.send(200, {"object": "list", "data": [{"id": MODEL, "object": "model"}]})
+        if self.path == "/metrics":
+            return self.send(200, "".join('vllm:%s{model_name="%s"} %d\n' % (k, MODEL, v) for k, v in COUNTS.items()).encode(), "text/plain")
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -39,6 +43,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, {"error": "messages required"})
         n = max(1, min(int(body.get("max_tokens") or 16), 64))
         usage = {"prompt_tokens": 2000, "completion_tokens": n, "total_tokens": 2000 + n}
+        COUNTS["prompt_tokens_total"] += 2000
+        COUNTS["generation_tokens_total"] += n
+        COUNTS["request_success_total"] += 1
         if not body.get("stream"):
             return self.send(200, {"id": "x", "object": "chat.completion", "model": MODEL, "usage": usage,
                                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok " * n}, "finish_reason": "stop"}]})

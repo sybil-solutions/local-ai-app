@@ -28,7 +28,8 @@ export const Line = (text) => html`<div class="line">${text}</div>`;
 export const Spacer = html`<div class="sp"></div>`;
 // The part of a screen that scrolls. `home` lays Home's blocks out; `sort` marks a list whose rows can be dragged.
 export const Scroll = (children, { home, sort, style } = {}) => html`<div class="scroll${home ? ' home' : ''}"${attrs({ 'data-sort': sort, style })}>${children}</div>`;
-export const Box = (text, { mono, style } = {}) => html`<div class="box${mono ? ' mono' : ''}"${attrs({ style })}>${text}</div>`;
+// Text in a frame. `mono` for commands and output; `pre` keeps its line breaks; `clip` scrolls it past a few lines.
+export const Box = (text, { mono, pre, clip, style } = {}) => html`<div class="box${mono ? ' mono' : ''}${pre ? ' pre' : ''}${clip ? ' clip' : ''}"${attrs({ style })}>${text}</div>`;
 
 // A row that opens a screen.
 export const NavRow = (name, go) => html`<button class="item"${data({ go })}>${name}<small>${Icon('right', 14)}</small></button>`;

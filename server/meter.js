@@ -1,11 +1,40 @@
 // A host run's front door. Engines like mlx_lm.server have no /metrics, so the app listens on the run's port itself,
 // passes every request through to the engine on an inner port, and counts the tokens each answer reports.
 import { createServer, request } from 'node:http';
+import { hostname, networkInterfaces } from 'node:os';
 
 const COUNTED = /^\/(v1\/)?(chat\/completions|completions|responses|messages)$/;
 const MAX_BODY = 16e6; // a non-streamed answer longer than this passes through uncounted
+const MAX_LINE = 4e6; // a streamed line longer than this is not read for usage
 
-export function meter(inner) {
+// Who may use the port. The engine behind it answers anyone, so the door does the asking:
+//   The address must be this machine's (loopback, one of its own addresses, or one of its names). A page on some
+//   site that points its own name at this machine still says that name, and is refused.
+//   A request from a web page says which site the page is from. Pages served from this machine may ask; another
+//   site's page may not, and neither may a page that hides where it is from. Programs (agents, curl, apps) say nothing.
+const LOOPBACK = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/;
+const hostOf = (value) => String(value || '').toLowerCase().replace(/:\d+$/, '');
+let own = { at: 0, names: new Set() };
+function here(extra) {
+  if (Date.now() - own.at > 30000) {
+    const mine = Object.values(networkInterfaces()).flat().map((a) => (a.family === 'IPv6' ? `[${a.address.replace(/%.*$/, '')}]` : a.address));
+    own = { at: Date.now(), names: new Set([...mine, hostname(), `${hostname()}.local`].map((n) => n.toLowerCase())) };
+  }
+  const also = extra().filter(Boolean).map((n) => String(n).toLowerCase());
+  return (name) => LOOPBACK.test(name) || own.names.has(name) || also.includes(name);
+}
+export function refusal(headers, extra = () => []) {
+  const known = here(extra);
+  if (!known(hostOf(headers.host))) return 'This port answers only to this machine’s own address';
+  if (headers.origin === undefined) return null;
+  let from = null;
+  try { from = new URL(headers.origin); } catch { /* "null", or not an address at all */ }
+  return from && (!/^https?:$/.test(from.protocol) || known(from.hostname.toLowerCase())) ? null : 'This port does not answer pages from other sites';
+}
+// A number an engine reported, as a number: anything else counts as nothing.
+const num = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : 0);
+
+export function meter(inner, names = () => []) {
   // Token and request counters are named as vLLM names them, so usage.js reads both the same way. Prefill is kept in
   // two pairs that are never mixed:
   //   engine_prefill_*: what the engine itself reports it computed and how long that took (the `timings` block
@@ -32,10 +61,12 @@ export function meter(inner) {
         if (!streamed) { size += buf.length; if (size <= MAX_BODY) body += buf; return; }
         const lines = (tail + buf).split('\n');
         tail = lines.pop();
+        if (tail.length > MAX_LINE) tail = '';
         for (const line of lines) {
           if (!line.startsWith('data:') || line.includes('[DONE]')) continue;
           let data;
           try { data = JSON.parse(line.slice(5)); } catch { continue; }
+          if (!data || typeof data !== 'object') continue;
           if (data.usage) usage = data.usage;
           if (data.timings) timings = data.timings;
           const delta = data.choices?.[0]?.delta;
@@ -44,18 +75,21 @@ export function meter(inner) {
       },
       end(ok) {
         if (!streamed && size <= MAX_BODY) { try { const data = JSON.parse(body); usage = data.usage || null; timings = data.timings || null; } catch { /* not JSON */ } }
-        const inTok = usage?.prompt_tokens ?? usage?.input_tokens ?? 0, outTok = usage?.completion_tokens ?? usage?.output_tokens ?? (usage ? 0 : chunks);
+        if (!usage || typeof usage !== 'object') usage = null;
+        const inTok = num(usage?.prompt_tokens ?? usage?.input_tokens), outTok = usage ? num(usage.completion_tokens ?? usage.output_tokens) : chunks;
         counts.prompt_tokens_total += inTok;
         counts.generation_tokens_total += outTok;
         if (ok) counts.request_success_total++;
-        const cached = usage?.prompt_tokens_details?.cached_tokens ?? 0;
-        if (ok && timings?.prompt_n > 0 && timings.prompt_ms > 0) { counts.engine_prefill_tokens_sum += timings.prompt_n; counts.engine_prefill_seconds_sum += timings.prompt_ms / 1000; }
+        const cached = num(usage?.prompt_tokens_details?.cached_tokens), prefill = [num(timings?.prompt_n), num(timings?.prompt_ms)];
+        if (ok && prefill[0] > 0 && prefill[1] > 0) { counts.engine_prefill_tokens_sum += prefill[0]; counts.engine_prefill_seconds_sum += prefill[1] / 1000; }
         else if (ok && first && inTok - cached > 0) { counts.ttft_prompt_tokens_sum += inTok - cached; counts.ttft_seconds_sum += (first - began) / 1000; }
       },
     };
   }
 
   const server = createServer((req, res) => {
+    const why = refusal(req.headers, names);
+    if (why) { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: why })); req.resume(); return; }
     const counted = req.method === 'POST' && COUNTED.test(req.url.split('?')[0]), began = performance.now();
     if (counted) { counts.num_requests_running++; caller((req.socket.remoteAddress || '').replace(/^::ffff:/, '')); }
     let finished = false;

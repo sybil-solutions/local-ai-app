@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { at, config, event, fail, HOME, run, saveConfig, writeJson } from './util.js';
+import { at, config, event, fail, HOME, once, own, run, saveConfig, writeJson } from './util.js';
 
 const openai = (url, model) => ({ env: { OPENAI_BASE_URL: `${url}/v1`, OPENAI_API_BASE: `${url}/v1`, OPENAI_API_KEY: 'local', OPENAI_MODEL: model }, args: [] });
 // Pi and Oh My Pi keep their own config folder, so they stay signed in. The running models reach them through an
@@ -41,14 +41,35 @@ const WIN = process.platform === 'win32';
 const shell = process.env.SHELL || 'sh';
 let cached = { at: 0, found: new Set() };
 
-async function installed() {
+// A terminal reads your shell's startup files, and those often put newer tools first on PATH (a Node, a Bun). A
+// program started by an app gets none of that: an agent that runs in your terminal could fail when started from here.
+// So the app asks your shell once what PATH a terminal would have, the way editors do, and looks for agents and
+// starts them with it. A shell that does not answer in ten seconds is asked again later; until then the login
+// shell's own PATH is used.
+let asked = 0, termPath = null;
+const terminalPath = once(async () => {
+  if (WIN || Date.now() - asked < 600e3) return termPath;
+  const out = await run(shell, ['-lic', 'echo __LOCAL_AI_ENV__; command env'], { timeout: 10000 });
+  asked = Date.now();
+  termPath = /__LOCAL_AI_ENV__[\s\S]*?^PATH=(.+)$/m.exec(out.stdout)?.[1] || null;
+  if (!termPath) event('warn', 'agents.path', { error: 'the shell did not say its PATH; using the login shell' });
+  return termPath;
+});
+// Runs a command line where a terminal of yours would find its programs.
+async function inShell(command, timeout) {
+  if (WIN) return run('cmd', ['/c', command], { timeout });
+  const path = await terminalPath();
+  return path ? run('/bin/sh', ['-c', command], { timeout, env: { ...process.env, PATH: path } }) : run(shell, ['-lc', command], { timeout });
+}
+
+const installed = once(async () => {
   if (Date.now() - cached.at < 30000) return cached.found;
   const names = Object.keys(HARNESSES);
-  const r = WIN ? await run('where', names) : await run(shell, ['-lc', names.map((n) => `command -v ${n}`).join(';')], { timeout: 8000 });
+  const r = WIN ? await run('where', names) : await inShell(names.map((n) => `command -v ${n}`).join(';'), 8000);
   const found = new Set(names.filter((n) => new RegExp(`(^|[/\\\\])${n}(\\.\\w+)?\\s*$`, 'm').test(r.stdout) || HARNESSES[n].paths?.some((p) => existsSync(p))));
   cached = { at: Date.now(), found };
   return found;
-}
+});
 // The command that starts an agent: its name when the shell finds it, else the fixed place it was found at.
 const binOf = (id) => HARNESSES[id].paths?.find((p) => existsSync(p)) || id;
 
@@ -56,8 +77,7 @@ const binOf = (id) => HARNESSES[id].paths?.find((p) => existsSync(p)) || id;
 const versions = { at: 0, of: {} }, latest = { at: 0, of: {} }, jobs = {};
 let notify = () => {};
 export const onChange = (fn) => { notify = fn; };
-const inShell = (command, timeout) => (WIN ? run('cmd', ['/c', command], { timeout }) : run(shell, ['-lc', command], { timeout }));
-async function refreshVersions(found) {
+const refreshVersions = once(async (found) => {
   const before = JSON.stringify([versions.of, latest.of]);
   if (Date.now() - versions.at > 900e3 || [...found].some((n) => !(n in versions.of))) {
     versions.at = Date.now();
@@ -71,7 +91,7 @@ async function refreshVersions(found) {
     }));
   }
   return before !== JSON.stringify([versions.of, latest.of]);
-}
+});
 
 export const list = async () => {
   const found = await installed();
@@ -81,7 +101,7 @@ export const list = async () => {
 
 // Installs a missing agent, or updates one with its own updater when it has one.
 export async function change(id) {
-  const h = HARNESSES[id] || fail(400, 'Unknown agent');
+  const h = own(HARNESSES, id) || fail(400, 'Unknown agent');
   const has = (await installed()).has(id);
   const command = has && h.self ? h.self : h.npm ? `npm install -g ${h.npm}@latest` : fail(409, `${h.name} comes with its own installer`);
   if (jobs[id]?.phase === 'running') return { ok: true };
@@ -131,6 +151,14 @@ const writeExtension = (file) => { if (!existsSync(file) || readFileSync(file, '
 const piHome = () => process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent');
 const piShared = () => join(piHome(), 'extensions', 'local-ai.js');
 
+// The copy in Pi's own folder is kept current only when it is this instance's: one that reads another Local AI's
+// list (a second install) is left alone, and one whose list is gone (an install since removed) is taken over.
+function sharedIsOurs() {
+  if (!existsSync(piShared())) return false;
+  const reads = /readFileSync\(("(?:[^"\\]|\\.)*")/.exec(readFileSync(piShared(), 'utf8'))?.[1];
+  try { const list = JSON.parse(reads); return list === piModels || !existsSync(list); } catch { return false; }
+}
+
 let lastModels = null;
 // Keeps the extension's model list equal to what is running. The preferred model is listed only while it runs.
 export function syncPi(targets) {
@@ -140,7 +168,7 @@ export function syncPi(targets) {
   mkdirSync(at('agents'), { recursive: true, mode: 0o700 });
   writeJson(piModels, JSON.parse(text));
   writeExtension(piExt);
-  if (existsSync(piShared())) writeExtension(piShared()); // keeps a copy placed earlier current with this version
+  if (sharedIsOurs()) writeExtension(piShared());
   lastModels = text;
 }
 
@@ -164,7 +192,7 @@ const APP_DIRS = ['/Applications', join(homedir(), 'Applications'), '/System/App
 
 // The terminals installed here, in order of preference. Looked for again every 30 s.
 let terms = { at: 0, list: [] };
-async function terminals() {
+const terminals = once(async () => {
   if (Date.now() - terms.at < 30000) return terms.list;
   let list = [];
   if (process.platform === 'darwin') list = MAC_TERMINALS.filter((t) => APP_DIRS.some((dir) => existsSync(join(dir, `${t.app}.app`))));
@@ -175,7 +203,7 @@ async function terminals() {
   }
   terms = { at: Date.now(), list };
   return list;
-}
+});
 // What the app shows: the terminals to choose from and the one Open uses (the chosen one while it is still installed).
 export async function terminalChoice() {
   const list = await terminals(), now = list.find((t) => t.id === config.terminal) || list[0];
@@ -225,7 +253,7 @@ async function openDsh(target) {
 
 // Always returns the command, so a machine without a terminal or display still gets something to paste.
 export async function open(agent, target, folder, targets = [target]) {
-  const harness = HARNESSES[agent] || fail(400, 'Unknown agent');
+  const harness = own(HARNESSES, agent) || fail(400, 'Unknown agent');
   if (!(await installed()).has(agent)) fail(409, `${harness.name} is not installed`);
   if (target.apis && !target.apis.includes(harness.needs)) fail(409, `This engine has no ${harness.needs} API, which ${harness.name} needs`);
   if (!existsSync(folder)) fail(400, `Folder ${folder} does not exist`);
@@ -240,7 +268,9 @@ export async function open(agent, target, folder, targets = [target]) {
     writeFileSync(script, `@echo off\r\n${command}\r\n`);
   } else {
     command = `cd ${q(folder)} && ${vars.length ? `env ${vars.map(([k, v]) => `${k}=${q(v)}`).join(' ')} ` : ''}${[bin, ...args].map(q).join(' ')}`;
-    writeFileSync(script, `#!${shell} -l\n${command}\n`);
+    // Started with the PATH a terminal of yours has, where the shell said it; else by a login shell.
+    const path = await terminalPath();
+    writeFileSync(script, path ? `#!/bin/sh\nexport PATH=${q(path)}\n${command}\n` : `#!${shell} -l\n${command}\n`);
     chmodSync(script, 0o700);
   }
   const term = await terminalFor(script);

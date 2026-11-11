@@ -23,7 +23,8 @@ globalThis.window = globalThis;
 globalThis.localStorage = { getItem: () => null, setItem() {} };
 globalThis.innerWidth = 1280;
 globalThis.innerHeight = 820;
-globalThis.location = { port: '18700' };
+globalThis.location = { port: '18700', hash: '', pathname: '/', search: '' };
+globalThis.history = { replaceState() {} };
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
 globalThis.document = { querySelector: () => ({ content: 'fixture-key' }), documentElement: { dataset, style: { setProperty() {} }, classList: { toggle() {} } } };
 
@@ -86,7 +87,7 @@ const CARD_MD = () => `# ${t('Model Card')}\n\nSome **bold** text, \`code\`, a [
 // Everything the page remembers itself, back to how it starts.
 function reset(extra = {}) {
   Object.assign(s, { snap: null, online: true, needKey: false, version: 0, dev: -1, nav: null, trail: [], sel: null, expanded: null, modelOpen: null, opened: null, agentsOpen: false, full: true,
-    note: '', busy: false, command: '', logText: '', period: 'days', span: 'all', usage: null, ends: null, peers: null, install: null, draft: null, link: null, form: {}, cards: {} }, extra);
+    note: '', busy: false, command: '', logText: '', period: 'days', span: 'all', usage: null, ends: null, peers: null, install: null, draft: null, link: null, asking: null, look: null, form: {}, cards: {} }, extra);
 }
 
 // ---- the states -----------------------------------------------------------------------------------------------------
@@ -155,6 +156,8 @@ const PAGES = [
   ['model-page', () => { base({ modelOpen: t('r/balanced') })(); s.cards[`-1 ${t('r/balanced')}`] = { error: t('This model has no card on Hugging Face') }; }],
   ['model-page', () => { base({ modelOpen: t('r/balanced') })(); s.cards[`-1 ${t('r/balanced')}`] = { repo: t('org/model'), license: t('apache-2.0'), downloads: 123456, md: CARD_MD(), html: markdown(CARD_MD()) }; }],
   ['model-page', () => { base({ modelOpen: t('r/mine') }, { runs: [] })(); }],
+  ['approve', base({ asking: t('r/host') })], ['approve', base({ asking: t('gone') })],
+  ['approve', base({ asking: t('r/host'), look: { id: t('r/host'), launch: { kind: 'host', command: ['python3', t('serve.py'), '--port', '8080'], pip: [t('mlx-lm==0.30.0')], weights: [{ repo: t('org/model'), revision: t('0123456789abcdef'), at: 'model' }], config: { at: t('serve.py'), text: t('print("hello")\n') } } } })],
   ['edit', base({ modelOpen: t('r/fast') })],
   ['edit', () => { base({ modelOpen: t('r/fast') })(); s.draft = { raw: { id: t('r/fast'), launch: {} }, name: t('Fast Model 3.5'), engine: 'vLLM', local: true, ctx: 131072, cards: 2, seqs: 4, kv: 'fp8', args: t('--max-model-len 131072 "a b"'), touched: new Set() }; }],
   ['edit', () => { base({ modelOpen: t('r/fast') })(); s.draft = { raw: { id: t('r/fast'), launch: {} }, name: t('Fast Model 3.5'), engine: t('SGLang'), local: false, ctx: 0, cards: 1, seqs: 1, kv: 'Off', args: '', touched: new Set() }; }],
