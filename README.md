@@ -10,6 +10,8 @@ Local AI is three small pieces:
 
 There is no gateway. Each engine serves its own OpenAI-compatible API on its own port, and agents talk to it directly.
 
+There is also an iPhone app in `ios/`: it talks to the models your machines are running, and runs LFM3-1.7B on the phone itself. It is built and checked on its own; see [`ios/README.md`](ios/README.md).
+
 ## Run it
 
 On a Mac, open `Local-AI-<version>-arm64.dmg` from the repository's Releases and drag Local AI to Applications. It is signed with a Developer ID and notarized by Apple, and brings its own Node.js. On Linux:
@@ -91,6 +93,7 @@ web/
 electron/main.js   a window onto the page; starts the server if none is running; fits the window to the panel when the page shows it (preload.cjs)
 electron/          also the Mac build's entitlements and before-pack.cjs, which puts a readable copy of the app in the bundle for installing on other machines
 install.sh         user service + Omarchy web app
+ios/               the iPhone app (Swift); its own README
 scripts/           screens.mjs (every screen drawn), smoke.mjs (the real server end to end), fuzz.mjs (hostile input),
                    release-mac.sh (the signed, notarized DMG), and the stand-ins they use (fake_engine.py, fakebin/)
 design/            the approved design and the developer handoff (reference only)

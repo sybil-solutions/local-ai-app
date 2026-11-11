@@ -1,0 +1,85 @@
+# The Xcode project is made from this file: `xcodegen` in this folder writes LocalAI.xcodeproj.
+name: LocalAI
+options:
+  bundleIdPrefix: ai.sybilsolutions
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # The two build scripts below read and write outside the folders Xcode's script sandbox allows.
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+targets:
+  LocalAI:
+    type: application
+    platform: iOS
+    sources:
+      - LocalAI
+    info:
+      path: LocalAI/Info.plist
+      properties:
+        CFBundleDisplayName: Local AI
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Only iPhones with the memory to run the model: this tier is the iPhone 15 Pro and everything since, all 8 GB or more.
+        UIRequiredDeviceCapabilities: [arm64, iphone-performance-gaming-tier]
+        NSLocalNetworkUsageDescription: Local AI talks to the computers on your network that are running your models.
+        # Your machines answer over plain HTTP at an address you type, on your own network or Tailscale. Tailscale's
+        # addresses (100.x) are not "local" to iOS and an address can't be listed as an exception, so plain HTTP is
+        # allowed as a whole. (NSAllowsLocalNetworking must not be set beside it: iOS then ignores this key.)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.sybilsolutions.local.ios
+        PRODUCT_NAME: Local AI
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        # llama.cpp is linked for iPhones only. Its framework has no slice for the Simulator, where the app builds
+        # without it and LlamaEngine.swift compiles to nothing (#if canImport(llama)).
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) $(SRCROOT)/Vendor/llama.xcframework/ios-arm64"
+        "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) -framework llama"
+    preBuildScripts:
+      - name: Fetch llama.cpp
+        script: '"$SRCROOT/fetch-llama.sh"'
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: Embed llama.cpp (iPhone only)
+        basedOnDependencyAnalysis: false
+        script: |
+          [ "$PLATFORM_NAME" = iphoneos ] || exit 0
+          mkdir -p "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
+          rsync -a --delete "$SRCROOT/Vendor/llama.xcframework/ios-arm64/llama.framework" "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/"
+          if [ "${CODE_SIGNING_ALLOWED:-NO}" = YES ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+            codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/llama.framework"
+          fi
+  LocalAIUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - LocalAIUITests
+    dependencies:
+      - target: LocalAI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.sybilsolutions.local.ios.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  LocalAI:
+    build:
+      targets:
+        LocalAI: all
+        LocalAIUITests: [test]
+    test:
+      targets:
+        - LocalAIUITests
