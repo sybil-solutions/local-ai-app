@@ -16,7 +16,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
-import { tmpdir } from 'node:os';
+import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -124,6 +124,10 @@ catalog.recipes[PAIR] = { ...docked({ cards: 2 }), model: 'pair-1', proof: [{ tp
 catalog.recipes[SPREAD] = { ...docked({ machines: 2, flags: ['--network host'] }), model: 'spread-1' };
 // A third recipe for both cards whose only speed is from the registry's older acceptance, and a much higher one
 // than the measured recipe's. The registry recommends the measured one for the two-card setup.
+// A recipe that needs almost all of this machine's memory to be free: the machine has that much, so it is offered, but
+// that much is never free, so it is not started.
+const TIGHT = 'smoke/gpu/tight.docker';
+catalog.recipes[TIGHT] = { ...docked({ needs: { host_ram_gb: totalmem() / 2 ** 30 - 0.01 } }), model: 'tight-1' };
 const OLDFAST = 'smoke/gpu/oldfast.docker.2x';
 catalog.recipes[OLDFAST] = { ...docked({ cards: 2 }), model: 'oldfast-1', proof: [{ tps: 500, legacy: true, gates: 'load chat' }] };
 catalog.cards['smoke-gpu'].setups[1].picks = [PAIR, OLDFAST];
@@ -434,6 +438,8 @@ try {
   check('a recipe that is one engine across two machines is listed under its setup, says so, and is not started', spread?.machines === 2 && /Runs across 2 machines/.test(spread?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: SPREAD } })).status === 409, spread?.why);
   const hungry = refused.find((r) => r.id === HUNGRY);
   check('a recipe that needs more memory than this machine has says so and is not started', /Needs 1000000 GB of memory/.test(hungry?.why || '') && (await api('/api/runs', { method: 'POST', body: { recipe: HUNGRY } })).status === 409, hungry?.why);
+  const tight = await api('/api/runs', { method: 'POST', body: { recipe: TIGHT } });
+  check('a recipe is not started when the memory it needs is not free at that moment, and the refusal gives both numbers', offered.includes(TIGHT) && tight.status === 409 && /Needs \d+ GB of free memory beside the GPUs; \d+ GB is free/.test(tight.json?.error || '') && !(await state()).runs.some((r) => r.recipe === TIGHT), JSON.stringify(tight.json));
   check('notes from a recipe\'s source do not keep it from being offered', offered.includes(NOTED));
   const shown = (id) => nv.groups.flatMap((g) => g.recipes).find((r) => r.id === id);
   check('a recipe the lab saw call a tool is shown as able to, one with no such proof is not', shown(NOTED)?.tools === true && shown(DOCKED)?.tools === false);
