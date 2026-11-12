@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { totalmem } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { freemem, totalmem } from 'node:os';
 import { flagProblem, resourceProblem } from './docker.js';
 import { loadSeconds, speedOf } from './speed.js';
 import { at, bytesUpTo, config, event, fail, jsonUpTo, own, readJson, saveConfig, writeJson } from './util.js';
@@ -111,6 +112,17 @@ function shortOf(launch) {
   return typeof ram === 'number' && ram > totalmem() / GB ? `Needs ${Math.ceil(ram)} GB of memory beside the GPUs; this machine has ${Math.floor(totalmem() / GB)}` : null;
 }
 export const blocked = (id) => problemWith(find(id), { trusted: isLocal(id) }) || shortOf(find(id).launch);
+// The same need held against what is free at this moment, when the recipe is about to start. `host_ram_gb` is free
+// memory the engine takes beside the GPUs; started without it, the engine loads for minutes and is then killed when
+// the machine runs out. On Linux free means MemAvailable: what a new program can be given without swapping.
+function freeGb() {
+  try { const m = /^MemAvailable:\s+(\d+) kB/m.exec(readFileSync('/proc/meminfo', 'utf8')); if (m) return +m[1] / 2 ** 20; } catch { /* not Linux */ }
+  return freemem() / GB;
+}
+export function shortNow(id) {
+  const ram = find(id)?.launch?.needs?.host_ram_gb, free = freeGb();
+  return typeof ram === 'number' && ram > free ? `Needs ${Math.ceil(ram)} GB of free memory beside the GPUs; ${Math.floor(free)} GB is free on this machine now` : null;
+}
 
 // A host recipe runs as this user, outside any container, so the registry naming it is not enough: it starts only once
 // the person at this machine has been shown what it runs and allowed it. What was allowed is this exact launch (its

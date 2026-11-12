@@ -6,7 +6,7 @@ import { containerLogs, launchContainer, stopContainer, sweepContainers } from '
 import { discover } from './discovery.js';
 import { readGpus } from './gpus.js';
 import { adoptHosts, checkHost, hostLog, launchHost, stopHost } from './hosts.js';
-import { blocked, cardFor, find, label } from './recipes.js';
+import { blocked, cardFor, find, label, shortNow } from './recipes.js';
 import { freeGpus, runs, setFailed, status, update } from './runs.js';
 import { loadSeconds } from './speed.js';
 import * as usage from './usage.js';
@@ -43,7 +43,7 @@ export function start(id, picked) {
 }
 async function begin(id, picked) {
   const recipe = find(id) || fail(404, 'No such recipe');
-  const why = blocked(id);
+  const why = blocked(id) || shortNow(id);
   if (why) fail(409, why);
   const host = recipe.launch.kind === 'host';
   if (!host && !status.docker.ok) fail(503, status.docker.error);
