@@ -22,7 +22,7 @@ export async function publish() {
   for (const g of groups) for (const r of g.recipes) r.ready = weights.onDisk(recipes.find(r.id).launch);
   const state = {
     // Apple silicon runs its recipes as host programs, so Docker is only asked for where a container recipe needs it.
-    name: hostname(), docker: engine.status.docker, needsDocker: !engine.status.gpus.length || !engine.status.gpus.every((g) => g.unified), gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
+    name: hostname(), os: process.platform, docker: engine.status.docker, needsDocker: !engine.status.gpus.length || !engine.status.gpus.every((g) => g.unified), gpus: engine.status.gpus, free: engine.freeGpus().map((g) => g.index), groups, runs: engine.listRuns(),
     usage: usage.view(), catalog: recipes.registry(), last: config.last || null, devices: machines.views(),
     agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder, ...term,
     home: config.home || null, background: config.background || 'clouds', tone: config.tone || null, picture: (config.picture && existsSync(at('background')) && config.picture.at) || null, app: update.view(), hfToken: weights.tokenHint(),

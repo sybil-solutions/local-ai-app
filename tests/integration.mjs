@@ -14,7 +14,7 @@
 // Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -268,7 +268,17 @@ try {
     const stopped = update(broken, `${full}:${tools}`);
     check('an update that cannot unpack what it fetched changes nothing, and says so', stopped.status === 1 && fetched() && /Nothing was changed/.test(stopped.stdout) && readFileSync(join(broken, 'node', 'bin', 'node'), 'utf8').includes('exit 1')
       && readFileSync(join(broken, 'server', 'index.js'), 'utf8').includes('was here') && !existsSync(join(broken, 'node.new')) && !existsSync(join(broken, '.new')), `status ${stopped.status} ${stopped.stdout} ${stopped.stderr}`);
-    // 3. The one-line installer the website gives (scripts/get.sh): it downloads the release and its checksum (curl
+    // 3. A desktop that is not Omarchy (it has xdg-open) gets an app-menu entry that opens the page with the key, which
+    // only this user can read. A machine with no desktop gets none.
+    const entry = join(home, '.local', 'share', 'applications', 'local-ai.desktop'), desk = join(HOME, 'installer-tools-desktop'), secret = 'k'.repeat(48);
+    mkdirSync(desk);
+    standIn(desk, 'xdg-open', 'exit 0');
+    mkdirSync(join(home, '.local-ai'), { recursive: true });
+    writeFileSync(join(home, '.local-ai', 'config.json'), JSON.stringify({ key: secret }));
+    const bare = update(own, tools), none = !existsSync(entry), menu = update(own, `${desk}:${tools}`);
+    check('on another desktop the installer adds an app-menu entry that opens the page with the key, readable only by this user', bare.status === 0 && none && menu.status === 0 && /Added Local AI to the app menu/.test(menu.stdout)
+      && existsSync(entry) && readFileSync(entry, 'utf8').includes(`Exec=xdg-open "http://127.0.0.1:${PORT}/#key=${secret}"`) && (statSync(entry).mode & 0o777) === 0o600, `status ${menu.status} ${menu.stdout} ${menu.stderr}`);
+    // 4. The one-line installer the website gives (scripts/get.sh): it downloads the release and its checksum (curl
     // stands in for the release's address and hands over files made here), and runs the installer inside only when
     // the two match.
     const release = join(HOME, 'release'), getTools = join(HOME, 'get-tools');

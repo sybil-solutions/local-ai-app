@@ -14,7 +14,7 @@ There is also an iPhone app in `ios/`: it talks to the models your machines are 
 
 ## Run it
 
-Downloads are at [local.sybilsolutions.ai/download](https://local.sybilsolutions.ai/download/). On a Mac, open the DMG and drag Local AI to Applications. It is signed with a Developer ID and notarized by Apple, and brings its own Node.js. On Linux, one line installs the newest release (and, run again, updates it):
+Downloads are at [local.sybilsolutions.ai/download](https://local.sybilsolutions.ai/download/). On a Mac, open the DMG and drag Local AI to Applications. It is signed with a Developer ID and notarized by Apple, and brings its own Node.js. On Windows, run the installer: it installs for you alone (no administrator needed) and brings its own Node.js too; it is not signed yet, so Windows asks before it runs. On Linux, one line installs the newest release (and, run again, updates it):
 
 ```
 curl -fsSL https://local.sybilsolutions.ai/install.sh | bash
@@ -23,16 +23,16 @@ curl -fsSL https://local.sybilsolutions.ai/install.sh | bash
 That line downloads the release, checks it against its published checksum and runs the `install.sh` inside it. From a copy of this repository:
 
 ```
-./install.sh                # a user service that keeps the server running; on Omarchy, also an app-menu entry
+./install.sh                # a user service that keeps the server running, and an app-menu entry
 node server/index.js        # or just the server: open http://127.0.0.1:18700
 npm install && npm start    # or the same page in an Electron window, from source
 ```
 
 Run from source on a Mac, the Dock and the first word of the menu bar say Electron, because that is the name of the program `npm start` runs. The installed app is Local AI everywhere.
 
-The server needs Node 20 or newer (the Mac app and `install.sh` bring it). Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see, or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the app.
+The server needs Node 20 or newer (the Mac app and `install.sh` bring it). Starting models also needs Docker and an NVIDIA GPU that `nvidia-smi` can see (on Windows, Docker Desktop, which hands the GPUs to engines through WSL 2), or a Mac with Apple silicon and Python 3.11 or newer (no Docker). The server itself has no dependencies. `install.sh` is for Linux; on a Mac, use the app.
 
-A page opened in a browser asks for the machine's key once (the app's own window, and the Omarchy app-menu entry, are handed it). The key is under Settings › API endpoints, and in `~/.local-ai/config.json`.
+A page opened in a browser asks for the machine's key once (the app's own window, and the app-menu entry the installer adds, are handed it: on Omarchy the entry is an app window of its own, on any other Linux desktop it opens the page in your browser). The key is under Settings › API endpoints, and in `~/.local-ai/config.json`.
 
 A machine that already runs Local AI installs it on another Linux machine on your tailnet: under Machines, choose Set up. It signs in over SSH and sends the app's files over that connection, so the other machine never has to reach this one; where it can't sign in, it shows the one-line command instead. The installer brings its own Node.js when the machine has none.
 
@@ -134,8 +134,8 @@ ios/               the iPhone app (Swift); its own README
 tests/             e2e.mjs (the real desktop app, driven through its window), integration.mjs (the real server against
                    stand-in engines, Docker and a second machine), screens.mjs (every screen drawn), fuzz.mjs (hostile
                    input), and stand-ins/ (an engine, a Docker and an nvidia-smi that answer like real ones)
-scripts/           release-mac.sh (the signed, notarized DMG), publish.sh (puts a version where anyone can download it),
-                   get.sh (the one-line installer the website gives for Linux)
+scripts/           release-mac.sh (the signed, notarized DMG), release-win.sh (the Windows installer), publish.sh (puts
+                   a version where anyone can download it), get.sh (the one-line installer the website gives for Linux)
 design/            the approved design and the developer handoff (reference only)
 ```
 
@@ -271,7 +271,8 @@ npm run fuzz                               # hostile input against everything th
 npm run test:integration                   # the real server against stand-in engines, Docker and a second machine
 npm run test:e2e                           # the real desktop app, driven through its window
 npm run release:mac                        # the signed, notarized DMG (needs a Developer ID and a notarytool profile)
-npm run release:public                     # that DMG and the Linux files, as the newest public download
+BUILD_ON=<a Linux machine> npm run release:win   # the Windows installer, built on that machine in Docker
+npm run release:public                     # both and the Linux files, as the newest public download once they are checked
 ```
 
 **Tests.** There are no unit tests, on purpose: a function that passes alone says little about an app whose work is other programs. Two kinds of test run the real thing and check what a user would notice.
@@ -284,9 +285,11 @@ Beside them, `tests/screens.mjs` draws every screen in both layouts for every st
 
 CI (`.github/workflows/`) runs all of it on Linux on every push and pull request (the end-to-end test under `xvfb`), the integration and end-to-end tests on macOS when `server/`, `electron/` or `tests/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit.
 
-`npm run release:mac` builds `dist/Local-AI-<version>-arm64.dmg`: the app is signed with the Developer ID in the keychain under the hardened runtime, notarized, and stapled; then the DMG itself is signed, notarized and stapled, and Gatekeeper is asked whether it would open both. Set `APPLE_KEYCHAIN_PROFILE` to a profile saved with `xcrun notarytool store-credentials`.
+`npm run release:mac` builds `dist/Local-AI-<version>-arm64.dmg`: the app is signed with the Developer ID in the keychain under the hardened runtime, notarized, and stapled; then the DMG itself is signed, notarized and stapled, and Gatekeeper is asked whether it would open both. Set `APPLE_KEYCHAIN_PROFILE` to a profile saved with `xcrun notarytool store-credentials`. It empties `dist/` first, so it is run before the Windows build.
 
-`npm run release:public` (`scripts/publish.sh`) then publishes that version to `sybil-solutions/local-ai-releases`, a public repository that holds no source, only releases: the DMG as `Local-AI-mac-arm64.dmg`, the Linux files as `local-ai-linux.tar.gz` (made from the commit with `git archive`) with its checksum, the one-line installer (`scripts/get.sh`, published as `install.sh`) and `SHA256SUMS`. The names carry no version, so `releases/latest/download/<name>` is always the newest, and the website's Download button and `https://local.sybilsolutions.ai/install.sh` are redirects to those addresses: a new version needs no change to the website. It refuses to run with uncommitted changes or a DMG that Gatekeeper would not open. `scripts/publish.sh --linux` publishes the Linux files alone, for when the Mac app cannot be built; a plain run for the same version later adds the Mac app to that release.
+`npm run release:win` (`scripts/release-win.sh`) builds `dist/Local-AI-<version>-x64.exe`, an installer for 64-bit Windows that installs for the person who runs it. It is built on Linux, in the Docker image electron-builder publishes for this (pinned by its digest); with `BUILD_ON=<ssh host>` the commit is sent to that machine, built there and the installer brought back. It is not signed: there is no Windows certificate yet.
+
+`npm run release:public` (`scripts/publish.sh`) then publishes that version to `sybil-solutions/local-ai-releases`, a public repository that holds no source, only releases: the DMG as `Local-AI-mac-arm64.dmg`, the Windows installer as `Local-AI-windows-x64.exe`, the Linux files as `local-ai-linux.tar.gz` (made from the commit with `git archive`) with its checksum, the one-line installer (`scripts/get.sh`, published as `install.sh`) and `SHA256SUMS`. The names carry no version, so `releases/latest/download/<name>` is always the newest, and the website's Download buttons and `https://local.sybilsolutions.ai/install.sh` are redirects to those addresses: a new version needs no change to the website. It refuses to run with uncommitted changes, without both apps, or with a DMG that Gatekeeper would not open. A new version goes up as a pre-release, which those addresses do not lead to; that repository's `Check a release` workflow then downloads the files and runs them on Windows, macOS and Linux machines (installs each, starts it, asks its server what it sees), and only when all three work is the version made the newest release.
 
 There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that arranges components from `web/components/`; a component is a function that returns markup written with the `html` tag, which escapes everything put into it, so text the page is told can never become markup. A button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/actions.js`). To add a route, add a line to `ROUTES`.
 
