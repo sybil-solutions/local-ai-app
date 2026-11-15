@@ -40,6 +40,9 @@ export const STATE = {
   noreply: () => ({ pose: 'broken', word: 'No reply', line: run().view.line, btns: !run().external && html`${Button({ label: 'Restart', act: 'retry', kind: 'go' })}${Button({ label: 'Stop', act: 'stop', kind: 'neg' })}` }),
   // On Windows Docker is Docker Desktop, which hands the GPUs to engines through WSL 2.
   needsdocker: () => ({ pose: 'apart', word: 'Needs Docker', line: 'One free install', btns: LinkButton({ label: 'Install Docker', href: `https://docs.docker.com/${D().os === 'win32' ? 'desktop/setup/install/windows-install/' : 'engine/install/'}`, kind: 'go' }) }),
+  // Docker is running, but not for this user: on Linux, one who is not in the docker group. The fix needs sudo, which
+  // the app does not have, and takes effect once the user's programs have all been started again.
+  dockerdenied: () => ({ pose: 'apart', word: 'No access to Docker', line: 'Run sudo usermod -aG docker $USER, then restart' }),
   dockeroff: () => ({ pose: 'apart', word: 'Docker is off', line: 'Turn it on to start models', btns: Button({ label: 'Turn on', act: 'docker', kind: 'go' }) }),
   nogpu: () => ({ pose: 'apart', word: 'No GPU here', line: 'This computer can’t run models', btns: Elsewhere() }),
   nothing: () => ({ pose: 'apart', word: 'Nothing fits', line: `No tested models for ${D().groups[0]?.name || 'this GPU'}`, btns: Elsewhere() }),

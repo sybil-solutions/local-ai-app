@@ -41,5 +41,6 @@ export function setFailed(r, error, logs = '') {
 const claimed = () => new Set([...runs.values()].filter((r) => r.phase !== 'failed').flatMap((r) => r.gpus));
 export const freeGpus = () => {
   const taken = claimed();
-  return status.gpus.filter((g) => !taken.has(g.index) && (g.unified || g.shared || (g.used ?? 0) < 2048)); // shared memory is always partly in use by the system
+  // Shared memory is always partly in use by the system. `busy` is an Intel card another program's container holds.
+  return status.gpus.filter((g) => !taken.has(g.index) && !g.busy && (g.unified || g.shared || (g.used ?? 0) < 2048));
 };

@@ -4,7 +4,7 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { containerLogs, launchContainer, stopContainer, sweepContainers } from './containers.js';
+import { containerLogs, isHeld, launchContainer, stopContainer, sweepContainers } from './containers.js';
 import { discover } from './discovery.js';
 import { readGpus } from './gpus.js';
 import { adoptHosts, checkHost, hostLog, launchHost, stopHost } from './hosts.js';
@@ -122,6 +122,7 @@ export async function tick() {
     // Every running engine is asked how it is on every tick. Docker itself is asked less often (see dockerIsDue).
     if (dockerIsDue()) await sweepContainers(listedAt);
     else await Promise.all([...runs.values()].filter((r) => r.container && !r.busy && !['stopping', 'failed'].includes(r.phase)).map(health));
+    for (const gpu of status.gpus) if (isHeld(gpu)) gpu.busy = true; // an Intel card another program's container holds
     await discover(listedAt);
   } catch (e) {
     event('error', 'tick.failed', { error: e.message });

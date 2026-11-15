@@ -1,6 +1,8 @@
-// The machine's GPUs and their memory: NVIDIA cards from nvidia-smi, or the one chip of an Apple silicon Mac.
+// The machine's GPUs and their memory: NVIDIA cards from nvidia-smi, Intel Arc cards from lspci (Linux), or the one
+// chip of an Apple silicon Mac.
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { run } from './util.js';
 
 // LOCAL_AI_GPU=nvidia looks for NVIDIA cards even on a Mac (the tests use it to exercise the Docker path).
@@ -64,9 +66,7 @@ function watch() {
 }
 process.on('exit', () => live?.child.kill());
 
-// Each GPU as { index, name, total, used, util, power, temp } with memory in MiB. No GPUs is an empty list.
-export async function readGpus() {
-  if (APPLE) return readApple();
+async function readNvidia() {
   const fresh = live ? [...live.rows.values()].filter((row) => Date.now() - row.at < 7000) : [];
   if (fresh.length) return fresh.map((row) => row.gpu).sort((a, b) => a.index - b.index);
   if (live && Date.now() - live.since > 10000) { live.child.kill(); live = null; } // it stopped printing: start over
@@ -75,4 +75,58 @@ export async function readGpus() {
   const gpus = once.code ? [] : once.stdout.trim().split('\n').map((line) => card(line.trim())).filter(Boolean);
   if (gpus.length && !live) watch();
   return gpus;
+}
+
+// Intel Arc cards, on Linux. lspci names them (`[Arc Pro B70]`) and says how large their memory is; the card's render
+// node, which is what an engine's container is given, is found under /dev/dri/by-path by the card's PCI address.
+// A card whose own memory is at least 4 GB is a card of its own (a B70 shows its 32 GB). One that shows less is part
+// of the processor and uses the machine's RAM (`shared`, as a DGX Spark does). The driver does not say how much of a
+// card's memory is in use, so `used` is unknown for a card of its own; whether another container holds the card is
+// found from Docker (containers.js). What lspci says is kept for a minute: cards do not come and go.
+// LOCAL_AI_DRI is the folder the render nodes are in. The tests point it at a folder of their own, so they see the
+// cards they made and never the machine's.
+const DRI = process.env.LOCAL_AI_DRI || '/dev/dri';
+const BYTES = { K: 2 ** 10, M: 2 ** 20, G: 2 ** 30, T: 2 ** 40 };
+// What `lspci -D -v -d 8086:` printed, as the Arc cards in it: { address, name, memory } with memory in MiB.
+export function arcCards(text) {
+  return text.split(/\n(?=\S)/).map((block) => {
+    const [, address, kind, name] = /^(\S+) ([^:]+): Intel Corporation .*\[(Arc [^\]]+)\]/.exec(block) || [];
+    if (!name || !/VGA|Display/.test(kind)) return null;
+    const sizes = [...block.matchAll(/Memory at .*\[size=(\d+)([KMGT])\]/g)].map(([, n, unit]) => (+n * BYTES[unit]) / BYTES.M);
+    return { address, name: `Intel ${name}`, memory: Math.max(0, ...sizes) };
+  }).filter(Boolean).sort((a, b) => a.address.localeCompare(b.address));
+}
+let listed = { at: 0, cards: [] };
+const celsius = (address) => { // the package temperature, where the driver gives one
+  try {
+    const dir = `/sys/bus/pci/devices/${address}/hwmon`, mon = join(dir, readdirSync(dir)[0]);
+    const label = readdirSync(mon).find((f) => /^temp\d+_label$/.test(f) && readFileSync(join(mon, f), 'utf8').trim() === 'pkg');
+    return label ? Math.round(+readFileSync(join(mon, label.replace('_label', '_input')), 'utf8') / 1000) : null;
+  } catch { return null; }
+};
+async function readIntel(first) {
+  if (Date.now() - listed.at > 60000) {
+    const out = await run('lspci', ['-D', '-v', '-d', '8086:'], { timeout: 8000 });
+    listed = { at: Date.now(), cards: out.code ? [] : arcCards(out.stdout) };
+  }
+  const gpus = [];
+  for (const c of listed.cards) {
+    const link = `pci-${c.address}-render`;
+    let node;
+    try { node = realpathSync(join(DRI, 'by-path', link)); } catch { continue; } // no render node: its driver is not loaded
+    const own = c.memory >= 4096, ram = own ? null : systemMemory();
+    gpus.push({ index: first + gpus.length, name: c.name, total: own ? c.memory : ram?.total ?? 0, used: own ? null : ram?.used ?? null, util: null, power: null, temp: celsius(c.address),
+      backend: 'intel-xpu', node, link, ...(own ? {} : { shared: true }) });
+  }
+  return gpus;
+}
+// The render node's name (renderD128), which is how a container that was given the card names it.
+export const nodeName = (gpu) => basename(gpu.node);
+
+// Each GPU as { index, name, total, used, util, power, temp } with memory in MiB. No GPUs is an empty list. An Intel
+// card also has `backend`, its render `node` and the name of the `link` to it under /dev/dri/by-path.
+export async function readGpus() {
+  if (APPLE) return readApple();
+  const nvidia = await readNvidia();
+  return process.platform === 'linux' || process.env.LOCAL_AI_DRI ? [...nvidia, ...(await readIntel(nvidia.length))] : nvidia;
 }
