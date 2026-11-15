@@ -29,7 +29,7 @@ jobs:
       - name: Every screen draws, and nothing it is told becomes markup
         run: node tests/screens.mjs
       - name: install.sh, the one-line installer and the release scripts
-        run: shellcheck -S warning install.sh scripts/get.sh scripts/release-mac.sh scripts/publish.sh
+        run: shellcheck -S warning install.sh scripts/get.sh scripts/release-mac.sh scripts/release-win.sh scripts/publish.sh
   integration:
     needs: lint
     runs-on: ubuntu-24.04

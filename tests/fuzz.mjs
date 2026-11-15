@@ -12,7 +12,8 @@
 //   7. Host recipes (programs run on the machine itself): one that is accepted runs its own hashed script and nothing else.
 //   8. DeepSeek Harness's settings, which the app edits as text: whatever models are written in, with whatever names,
 //      every line that was the person's own is still there, in order, and taking the models out again gives the file back.
-//   9. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
+//   9. Listening ports: what each system's own tool prints (ss, lsof, netstat) is read into the same rows.
+//  10. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
 //      requests to the API must never crash it, hang it, or give anything away without the key.
 // Usage: node tests/fuzz.mjs [seed]     exit code 0 when nothing was found. FUZZ_N sets how many random cases (default 40000).
 import { spawn } from 'node:child_process';
@@ -276,7 +277,21 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
   section('DeepSeek Harness settings: models go in and out, and every line that was the person\'s own stays', cases);
 }
 
-// ---- 9. the running server -----------------------------------------------------------------------------------------
+// ---- 9. listening ports ----------------------------------------------------------------------------------------------
+{
+  const { listening } = await import('../server/discovery.js');
+  const rows = (text, os) => listening(text, os).map((r) => `${r.where}:${r.port} by ${r.who}`).join(', ');
+  const same = (os, text, want) => { if (rows(text, os) !== want) found(`the listening ports ${os} lists were read wrong`, rows(text, os)); };
+  same('linux', 'LISTEN 0      511        127.0.0.1:18700      0.0.0.0:*    users:(("node",pid=4242,fd=21))\nLISTEN 0      4096               *:8000            *:*    users:(("python",pid=7,fd=3))\n', '127.0.0.1:18700 by 4242, *:8000 by 7');
+  same('darwin', 'COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\nnode    4242 me   21u  IPv4 0x1      0t0  TCP 127.0.0.1:18700 (LISTEN)\npython3    7 me    3u  IPv6 0x2      0t0  TCP *:8000 (LISTEN)\n', '127.0.0.1:18700 by 4242, *:8000 by 7');
+  // Windows lists every connection, and names their state in the language it is set to. Only the listening ones are read.
+  same('win32', '\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1128\r\n'
+    + '  TCP    127.0.0.1:18700        0.0.0.0:0              ABH\u00d6REN         9044\r\n  TCP    100.64.0.10:8000       0.0.0.0:0              LISTENING       5120\r\n  TCP    127.0.0.1:52011        127.0.0.1:18700        ESTABLISHED     9100\r\n',
+  '0.0.0.0:135 by 1128, 127.0.0.1:18700 by 9044, 100.64.0.10:8000 by 5120');
+  section('listening ports: what Linux, macOS and Windows each print is read into the same rows', 3);
+}
+
+// ---- 10. the running server ----------------------------------------------------------------------------------------
 const PORT = 29700 + Math.floor(rnd() * 200) * 2;
 const registry = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ cards: {}, models: {}, builds: {}, recipes: { 'fuzz/none': { card: 'none', model: 'm', engine: 'vllm', launch: { image: 'x', port: 1 } } } })); });
 await new Promise((done) => registry.listen(0, '127.0.0.1', done));

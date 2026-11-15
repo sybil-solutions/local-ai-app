@@ -52,6 +52,21 @@ async function forwards(here, model) {
   return null;
 }
 
+// The program each system has for listing the ports that are listening, and what it printed read as
+// { where, port, who }: the address, the port and the program listening (its name on a Mac, elsewhere its number).
+// Windows' netstat lists every connection; one that is listening is the one whose other end is no address at all,
+// which holds in every language Windows prints in.
+const LISTING = { darwin: ['lsof', '-iTCP', '-sTCP:LISTEN', '-P', '-n'], win32: ['netstat', '-ano', '-p', 'TCP'], linux: ['ss', '-ltnpH'] };
+export function listening(text, os = process.platform) {
+  const rows = [];
+  for (const line of text.split('\n')) {
+    const cols = line.trim().split(/\s+/), [, where, port] = /(\S+):(\d+)\s/.exec(`${line} `) || [];
+    if (!port || (os === 'win32' && cols[2] !== '0.0.0.0:0')) continue;
+    rows.push({ where, port: +port, who: os === 'darwin' ? cols[1] : os === 'win32' ? cols[4] : /pid=(\d+)/.exec(line)?.[1] });
+  }
+  return rows;
+}
+
 // Models someone else started: anything on this machine that answers like an OpenAI server. They are shown, never stopped.
 // A port that answered and is not a model is not asked again for five minutes, unless another program takes it.
 const DULL_MS = 300e3, dull = new Map(); // "port by program" → when it last said it is not a model
@@ -80,16 +95,13 @@ export async function discover(now) {
     const to = r.external && r.phase === 'ready' && await forwards(r.url, r.served);
     if (to) { runs.delete(r.id); usage.uncount(r); usage.forget(r); event('info', 'run.forwarded', { id: r.id, model: r.served, to }); changed(); } // what it counted while it looked like a model here is taken back
   }
-  const mac = process.platform === 'darwin', text = (mac ? await run('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n']) : await run('ss', ['-ltnpH'])).stdout;
+  const [tool, ...args] = LISTING[process.platform] || LISTING.linux, text = (await run(tool, args)).stdout;
   // Each listening port with the address to ask it on: loopback, unless it listens on one address only (a server bound
   // to the tailnet address alone does not answer on loopback). `who` is the program listening, where the system says.
   const open = new Map();
-  for (const line of text.split('\n')) {
-    const [, where, port] = /(\S+):(\d+)\s/.exec(`${line} `) || [];
-    if (!port) continue;
+  for (const { where, port, who } of listening(text)) {
     const ip = where.replace(/%.*$/, ''), only = /^\d+\.\d+\.\d+\.\d+$/.test(ip) && ip !== '0.0.0.0' && !ip.startsWith('127.') ? ip : null;
-    const who = mac ? line.trim().split(/\s+/)[1] : /pid=(\d+)/.exec(line)?.[1];
-    if (!open.has(+port) || !only) open.set(+port, { host: only || '127.0.0.1', outside: !/^(127\.|\[::1\])/.test(where), who: `${port} by ${who || '?'}` });
+    if (!open.has(port) || !only) open.set(port, { host: only || '127.0.0.1', outside: !/^(127\.|\[::1\])/.test(where), who: `${port} by ${who || '?'}` });
   }
   for (const [who, at] of dull) if (now - at > DULL_MS) dull.delete(who);
   const ask = [...open.keys()].filter((p) => p > 1024 && p !== PORT && !runs.has(p) && !innerPorts().has(p) && !dull.has(open.get(p).who)).sort((a, b) => a - b);

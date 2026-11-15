@@ -1,5 +1,6 @@
 #!/bin/bash
-# Installs Local AI for this user: the files, a service that keeps the server running, and an app-menu entry on Omarchy.
+# Installs Local AI for this user: the files, a service that keeps the server running, and an app-menu entry (on
+# Omarchy an app window of its own, on any other desktop the page in your browser).
 # With Tailscale running, the app also answers on this machine's tailnet address, so your other machines can connect to it.
 set -e
 [ "$(uname -s)" = Linux ] || { echo "This installer sets up a Linux user service. On a Mac, use the Local AI app."; exit 1; }
@@ -91,6 +92,12 @@ KEY="$("$NODE" -e 'try { process.stdout.write(JSON.parse(require("fs").readFileS
 if command -v omarchy-webapp-install >/dev/null; then
   timeout 30 omarchy-webapp-install "Local AI" "$URL/#key=$KEY" "$URL/icon.png" </dev/null >/dev/null 2>&1 && echo "Added Local AI to the app menu." || echo "Could not add the app-menu entry. Add it from the Omarchy menu: Install > Web App, with the address below"
   grep -ls "$URL/#key=" "$HOME/.local/share/applications/"*.desktop 2>/dev/null | while read -r entry; do chmod 600 "$entry"; done
+elif [ -n "$KEY" ] && command -v xdg-open >/dev/null; then
+  # Any other desktop: an app-menu entry that opens the page in your browser. It holds the key, so only you can read it.
+  ENTRY="${XDG_DATA_HOME:-$HOME/.local/share}/applications/local-ai.desktop"
+  mkdir -p "$(dirname "$ENTRY")"
+  rm -f "$ENTRY"
+  (umask 077; printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Local AI' 'Comment=Start a local model with one click' "Exec=xdg-open \"$URL/#key=$KEY\"" "Icon=$DEST/web/icon.png" 'Terminal=false' 'Categories=Development;' > "$ENTRY") && echo "Added Local AI to the app menu."
 fi
 echo "Local AI is running at $URL"
 # Shown only to a person at a terminal, never into a log: the address that opens the page with its key.
