@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { openDsh, openT3 } from './apps.js';
+import { countAsLocal } from './omarchy.js';
 import { piArgs, WINDOW } from './pi.js';
 import { inShell, launched, q, shell, terminalPath, WIN } from './shell.js';
 import { terminalFor } from './terminals.js';
@@ -100,6 +101,9 @@ export async function open(agent, target, folder, targets = [target]) {
   if (!(await installed()).has(agent)) fail(409, `${harness.name} is not installed`);
   if (target.apis && !target.apis.includes(harness.needs)) fail(409, `This engine has no ${harness.needs} API, which ${harness.name} needs`);
   if (!existsSync(folder)) fail(400, `Folder ${folder} does not exist`);
+  // Pi, Oh My Pi and T3 Code (which runs Pi) know each running model as a provider of its own; OpenCode knows one, local-ai.
+  if (['pi', 'omp', 't3'].includes(agent)) countAsLocal(targets.map((t) => t.key));
+  if (agent === 'opencode') countAsLocal(['local-ai']);
   if (harness.open) return harness.open(target, folder, targets);
   const { env, args } = harness.build(target), bin = binOf(agent);
   mkdirSync(at('agents'), { recursive: true, mode: 0o700 });
