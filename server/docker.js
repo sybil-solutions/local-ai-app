@@ -42,15 +42,18 @@ const resourceArgs = (r) => (r ? [...(r.memoryBytes ? [`--memory=${r.memoryBytes
 // The arguments for `docker`. run: { id, recipe, gpus, since, reachable }. `bind` is the addresses the engine's port
 // is published on. `mounts` are the weights' -v arguments, `configFile` the recipe's config written to disk, and
 // `trusted` says the recipe is the user's own (which may do what it likes; a registry recipe may not gain privileges).
+// NVIDIA cards are handed over by number (--gpus). Intel cards are `devices`: { nodes, links }, the render node of
+// each card, and a folder of links to those nodes that takes the place of /dev/dri/by-path in the container, because
+// Intel's libraries open every card they find a link to there and the engine must find only its own.
 // Every option is written as one word (name=value), so none can take another's place.
-export function dockerArgs({ run, launch, name, bind, mounts = [], configFile = null, trusted = false }) {
+export function dockerArgs({ run, launch, name, bind, mounts = [], configFile = null, trusted = false, devices = null }) {
   const entry = [].concat(launch.entrypoint || []).map(String), command = [...entry, ...[].concat(launch.args || []).map(String)];
   const metrics = METRICS.find(([re, flag]) => re.test(command.join(' ')) && !command.includes(flag))?.[1];
   const kept = flagsOf(launch).filter(([flag]) => !OWNED.has(flag)).map(([flag, value]) => (value === null ? flag : `${flag}=${value}`));
   const env = Object.entries(launch.env || {}).filter(([k]) => !['NVIDIA_VISIBLE_DEVICES', 'CUDA_VISIBLE_DEVICES'].includes(k));
   return ['run', '-d', `--name=${name}`,
     '--label=local-ai=1', `--label=local-ai.port=${run.id}`, `--label=local-ai.recipe=${run.recipe}`, `--label=local-ai.gpus=${run.gpus.join('+')}`, `--label=local-ai.since=${run.since}`, `--label=local-ai.reach=${+run.reachable}`,
-    `--gpus="device=${run.gpus.join(',')}"`, ...bind.map((host) => `--publish=${host}:${run.id}:${launch.port}`),
+    ...(devices ? [...devices.nodes.map((node) => `--device=${node}`), `--volume=${devices.links}:/dev/dri/by-path:ro`] : [`--gpus="device=${run.gpus.join(',')}"`]), ...bind.map((host) => `--publish=${host}:${run.id}:${launch.port}`),
     ...(trusted ? [] : ['--security-opt=no-new-privileges']), ...(launch.shm ? [`--shm-size=${launch.shm}`] : []), ...kept, ...(resourceProblem(launch) ? [] : resourceArgs(launch.resources)),
     ...env.map(([k, v]) => `--env=${k}=${v}`), ...mounts, ...(configFile ? [`--volume=${configFile}:${launch.config.at}:ro`] : []),
     ...(entry[0] ? [`--entrypoint=${entry[0]}`] : []), '--', launch.image, ...entry.slice(1), ...[].concat(launch.args || []).map(String), ...(metrics ? [metrics] : [])];

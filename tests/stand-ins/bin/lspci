@@ -1,0 +1,5 @@
+#!/bin/sh
+# A stand-in for lspci, for the tests: it prints the file FAKE_LSPCI names (the cards a test made up), or nothing.
+# It comes first on the PATH of a server under test, so that server never sees the cards of the machine it runs on.
+[ -n "$FAKE_LSPCI" ] && cat "$FAKE_LSPCI"
+exit 0

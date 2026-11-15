@@ -100,5 +100,9 @@ elif [ -n "$KEY" ] && command -v xdg-open >/dev/null; then
   (umask 077; printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Local AI' 'Comment=Start a local model with one click' "Exec=xdg-open \"$URL/#key=$KEY\"" "Icon=$DEST/web/icon.png" 'Terminal=false' 'Categories=Development;' > "$ENTRY") && echo "Added Local AI to the app menu."
 fi
 echo "Local AI is running at $URL"
+# Starting a model takes Docker, and Docker only answers to its group. Said here, where the fix can be pasted.
+if command -v docker >/dev/null && ! docker ps >/dev/null 2>&1 && docker ps 2>&1 | grep -qi 'permission denied'; then
+  echo "To start models, let this user use Docker: sudo usermod -aG docker $(id -un), then restart the computer."
+fi
 # Shown only to a person at a terminal, never into a log: the address that opens the page with its key.
 if [ -t 1 ] && [ -n "$KEY" ]; then echo "Open it with: $URL/#key=$KEY"; fi
