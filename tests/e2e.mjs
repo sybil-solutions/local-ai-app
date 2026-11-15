@@ -50,7 +50,7 @@ await new Promise((done) => registry.listen(0, '127.0.0.1', done));
 // elsewhere (both apps are on this one machine, and each would find the other's).
 writeFileSync(join(WORK, 'pi'), '#!/bin/sh\necho "pi 9.9.9"\n');
 chmodSync(join(WORK, 'pi'), 0o755);
-const world = (name, port) => ({ ...process.env, LOCAL_AI_DRI: join(WORK, 'dri'), LOCAL_AI_HOME: join(WORK, name), LOCAL_AI_PORT: String(port), LOCAL_AI_SHARE: '0', LOCAL_AI_GPU: 'nvidia', LOCAL_AI_TERMINAL: 'none', LOCAL_AI_DISCOVER: '0',
+const world = (name, port) => ({ ...process.env, LOCAL_AI_DRI: join(WORK, 'dri'), XDG_STATE_HOME: join(WORK, 'xdg-state'), XDG_CONFIG_HOME: join(WORK, 'xdg-config'), LOCAL_AI_HOME: join(WORK, name), LOCAL_AI_PORT: String(port), LOCAL_AI_SHARE: '0', LOCAL_AI_GPU: 'nvidia', LOCAL_AI_TERMINAL: 'none', LOCAL_AI_DISCOVER: '0',
   LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`, FAKE_DOCKER_DIR: join(WORK, `${name}-docker`), HF_HOME: join(WORK, 'hf'),
   PI_CODING_AGENT_DIR: join(WORK, 'pi-home'), DSH_HOME: join(WORK, 'dsh-home'), PATH: `${BIN}:${WORK}:${process.env.PATH}` });
 const keyOf = (name) => JSON.parse(readFileSync(join(WORK, name, 'config.json'), 'utf8')).key;

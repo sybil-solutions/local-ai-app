@@ -26,6 +26,12 @@ const PORT = 28700 + Math.floor(Math.random() * 400) * 2; // run ports are PORT+
 const APPLE = process.platform === 'darwin' && process.arch === 'arm64';
 const DRI = join(HOME, 'dri'); // where a server under test looks for Intel cards' render nodes: empty, until a test makes some
 process.env.LOCAL_AI_DRI = DRI;
+// Omarchy's folders, as on a machine that runs Omarchy, in the test's own home: a server under test writes its
+// record for Omarchy's Agents panel here, never into the folders of the machine it runs on.
+const OMARCHY = join(HOME, 'xdg-state', 'omarchy', 'agents', 'usage');
+process.env.XDG_STATE_HOME = join(HOME, 'xdg-state');
+process.env.XDG_CONFIG_HOME = join(HOME, 'xdg-config');
+mkdirSync(OMARCHY, { recursive: true });
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const failures = [];
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok || !detail ? '' : ` (${detail})`}`); if (!ok) failures.push(name); };
@@ -316,6 +322,9 @@ try {
   const port = outside.address().port;
   const found = await until('the outside engine to be found', async () => (await state()).runs.find((r) => r.external && r.id === port), 45000);
   check('finds a model started outside the app', found.served === 'outside-model');
+  const record = await until('the record for Omarchy\'s Agents panel', async () => { try { return JSON.parse(readFileSync(join(OMARCHY, 'local-ai.json'), 'utf8')); } catch { return null; } }, 15000);
+  // The plan line names every model running here; a machine that runs the tests may have one of its own up too.
+  check('on Omarchy, its Agents panel is told which model is running, and no token counts of its own', record.id === 'local-ai' && record.ready === true && record.tierLabel.split(', ').includes('outside-model') && record.hasLocalStats === false && record.todayTotalTokens === 0 && Array.isArray(record.limits), JSON.stringify(record));
   const sized = await until('its context length', async () => (await state()).runs.find((r) => r.id === port && r.ctx), 20000);
   check('reads a found model\'s context length from the engine', sized.ctx === 65536, `ctx ${sized.ctx}`);
   // Agents: Pi and Oh My Pi get the model through an extension, so they keep their own config folder and logins.
