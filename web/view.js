@@ -1,5 +1,5 @@
 // Drawing: which screen is shown, in which layout, and the window that fits it.
-import { drawArt, fitArt } from './art.js';
+import { applyBg, drawArt, fitArt } from './art.js';
 import { Notice } from './components/layout.js';
 import { DeskHome, DeskPage, NavBar } from './desktop.js';
 import { html } from './html.js';
@@ -82,17 +82,25 @@ function fitPanel() {
   const want = Math.max(PANEL.h, natural());
   if (Math.abs(want - fitted) < 2) return;
   fitted = want;
-  shellWindow.compact(true, want, PANEL.w);
+  shellWindow.compact(true, want, PANEL.least);
 }
 // Asks the window for the panel's shape (the least height, until Home says it needs more) or for its room back.
 export function fitWindow(compact) {
   fitted = PANEL.h;
-  return shellWindow?.compact(compact, fitted, PANEL.w);
+  return shellWindow?.compact(compact, fitted, PANEL.least);
 }
-// The panel is drawn in its own units and scaled to the window, up to one and a half times.
+// The panel is drawn in its own units and scaled to the window. It is always exactly as wide as the window: where
+// the window is wider than the panel's least width at that scale, the panel has more units across instead of bare
+// ground beside it. The desktop app's own window takes the panel's shape and shows it at up to one and a half
+// times, since that window is small and yours to size. Any other window (a browser's, a tiled web app's) is the
+// size it was given, so there the panel is drawn at its real size, as the desktop layout is, and only ever made
+// smaller, for a window narrower or shorter than the panel's least size.
 export function layout() {
-  const k = Math.min(innerWidth / PANEL.w, innerHeight / (shellWindow && !s.full ? fitted : PANEL.h), 1.5);
-  Object.assign(frame.style, { transform: `scale(${k})`, left: `${(innerWidth - PANEL.w * k) / 2}px` });
+  const k = Math.min(innerWidth / PANEL.least, innerHeight / (shellWindow && !s.full ? fitted : PANEL.h), shellWindow ? 1.5 : 1);
+  PANEL.w = innerWidth / k;
+  root.style.setProperty('--pw', `${PANEL.w}px`);
+  Object.assign(frame.style, { transform: `scale(${k})`, left: '0' });
   panel.style.height = `${innerHeight / k}px`;
+  applyBg(); // the picture covers the panel at the width it has now
   render(true);
 }

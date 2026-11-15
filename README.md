@@ -6,7 +6,7 @@ Local AI is three small pieces:
 
 - **A registry of recipes** ([local-ai-registry](https://github.com/sybil-solutions/local-ai-registry)): for each GPU, which models run on it and the exact `docker run` that starts each one.
 - **A server** (`server/`): reads the registry, starts engines (in Docker, or as a pinned program on Apple silicon), and reports what the machine is doing.
-- **An app** (`web/`): one page the server serves. A narrow window shows the panel, a wide one the desktop layout. Electron (`electron/`) and the Omarchy web app are just windows onto that page.
+- **An app** (`web/`): one page the server serves. A narrow window (under 640 px) shows the panel, a wide one the desktop layout. The panel is always exactly as wide as its window. In the desktop app's own window, which takes the panel's shape, it is shown at up to one and a half times its size; in any other window (a browser's, a tiled Omarchy web app's) it is drawn at its real size. Electron (`electron/`) and the Omarchy web app are just windows onto that page.
 
 There is no gateway. Each engine serves its own OpenAI-compatible API on its own port, and agents talk to it directly.
 
