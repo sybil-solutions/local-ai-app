@@ -6,7 +6,8 @@ body { margin: 0; background: var(--ground); color: var(--text); font: 14px/1.45
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
-/* The panel: one screen, --pw units wide and at least --ph tall, scaled to the window. Header, picture, word and line. */
+/* The panel: one screen, at least --pw units wide and --ph tall, scaled to the window and always as wide as it (the
+   page sets --pw to the width it has). Header, picture, word and line. */
 :root { --pw: 312px; --ph: 432px; }
 #view { position: fixed; inset: 0; overflow: hidden; cursor: default; touch-action: auto; }
 .frame { position: absolute; width: var(--pw); top: 0; transform-origin: 0 0; }
@@ -36,6 +37,7 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 canvas.art { display: block; width: var(--pw); height: 128px; margin: 0 -14px; flex: none; }
 .word { font: var(--ds) var(--dw) var(--dsize)/1.05 var(--display); font-stretch: var(--dst); letter-spacing: var(--dl); text-align: center; text-wrap: balance; }
 .line { font: 400 13px/1.4 var(--ui); color: var(--muted); text-align: center; min-height: 20px; font-variant-numeric: tabular-nums; }
+.frame .word, .frame .line { text-align: left; } /* in the panel they start at the left edge, like the numbers and rows under them and like the desktop layout */
 .sp { flex: 1; }
 .frame .screen:has(canvas.art) .word, .frame .screen:has(canvas.art) .line { text-shadow: 0 1px 10px rgba(0,0,0,.65); }
 .home { display: flex; flex-direction: column; gap: 10px; }
