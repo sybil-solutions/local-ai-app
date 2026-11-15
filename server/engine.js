@@ -1,7 +1,9 @@
 // Starting, stopping and watching models. A run is a Docker container (containers.js) or, on Apple silicon, a
 // program on this machine (hosts.js); models someone else started are found and shown too (discovery.js). Whether
 // an engine answers is asked the same way of all three (health.js). What they share is in runs.js.
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { join } from 'node:path';
 import { containerLogs, launchContainer, stopContainer, sweepContainers } from './containers.js';
 import { discover } from './discovery.js';
 import { readGpus } from './gpus.js';
@@ -98,8 +100,11 @@ function dockerIsDue() {
   return sweeps++ % every === 0;
 }
 
+// Docker is an app on a Mac and on Windows (Docker Desktop, in the place its installer puts it), a service on Linux.
+const DESKTOP = join(process.env.ProgramFiles || 'C:\\Program Files', 'Docker', 'Docker', 'Docker Desktop.exe');
 export async function startDocker() {
-  const tries = process.platform === 'darwin' ? [['open', ['-a', 'Docker']]] : [['systemctl', ['start', 'docker']], ['systemctl', ['--user', 'start', 'docker']]];
+  const tries = process.platform === 'darwin' ? [['open', ['-a', 'Docker']]] : process.platform === 'win32' ? (existsSync(DESKTOP) ? [['cmd', ['/c', 'start', '', DESKTOP]]] : [])
+    : [['systemctl', ['start', 'docker']], ['systemctl', ['--user', 'start', 'docker']]];
   for (const [cmd, args] of tries) if (!(await run(cmd, args, { timeout: 20000 })).code) { sweeps = 0; await tick(); return { ok: true }; }
   return fail(500, 'Could not start Docker. Start it yourself, then come back');
 }
