@@ -6,6 +6,7 @@ import { gzipSync } from 'node:zlib';
 import * as agents from './agents.js';
 import * as engine from './engine.js';
 import * as machines from './machines.js';
+import { showRuns } from './omarchy.js';
 import * as recipes from './recipes.js';
 import * as update from './update.js';
 import * as usage from './usage.js';
@@ -27,6 +28,7 @@ export async function publish() {
     agents: list, agent: (list.find((a) => a.id === config.agent && a.installed) || list.find((a) => a.installed))?.id || config.agent, folder: config.folder, ...term,
     home: config.home || null, background: config.background || 'clouds', tone: config.tone || null, picture: (config.picture && existsSync(at('background')) && config.picture.at) || null, app: update.view(), hfToken: weights.tokenHint(),
   };
+  showRuns(state.runs); // Omarchy's Agents panel, where there is one
   const text = JSON.stringify(state);
   if (text === signature) return;
   signature = text;

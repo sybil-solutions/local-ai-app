@@ -13,7 +13,8 @@
 //   8. DeepSeek Harness's settings, which the app edits as text: whatever models are written in, with whatever names,
 //      every line that was the person's own is still there, in order, and taking the models out again gives the file back.
 //   9. Listening ports and Intel cards: what each system's own tool prints (ss, lsof, netstat, lspci) is read into the same rows.
-//  10. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
+//  10. Omarchy's files: the provider ids it counts as self-hosted, and the record its Agents panel draws.
+//  11. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
 //      requests to the API must never crash it, hang it, or give anything away without the key.
 // Usage: node tests/fuzz.mjs [seed]     exit code 0 when nothing was found. FUZZ_N sets how many random cases (default 40000).
 import { spawn } from 'node:child_process';
@@ -29,6 +30,8 @@ const HOME = mkdtempSync(join(tmpdir(), 'local-ai-fuzz-'));
 process.env.LOCAL_AI_HOME = HOME; // the server's modules write their state here when they are loaded
 process.env.HF_HOME = join(HOME, 'hf');
 process.env.LOCAL_AI_DRI = join(HOME, 'dri'); // a server under test looks for Intel cards here, never in the machine's /dev/dri
+process.env.XDG_STATE_HOME = join(HOME, 'xdg-state'); // and Omarchy's folders are the test's own
+process.env.XDG_CONFIG_HOME = join(HOME, 'xdg-config');
 const N = +(process.env.FUZZ_N || 40000), seed = +(process.argv[2] || 20261111);
 const failures = [];
 const found = (what, detail) => { if (failures.length < 40) console.log(`FOUND ${what}: ${detail}`); failures.push(what); };
@@ -302,7 +305,26 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
   section('listening ports and Intel cards: what each system\'s own tool prints is read into the same rows', 4);
 }
 
-// ---- 10. the running server ----------------------------------------------------------------------------------------
+// ---- 10. Omarchy's files -------------------------------------------------------------------------------------------
+{
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { countAsLocal, recordFor } = await import('../server/omarchy.js');
+  const locals = join(HOME, 'xdg-config', 'omarchy', 'agents', 'local.json'), read = () => readFileSync(locals, 'utf8').trim();
+  countAsLocal(['la-self-18701']);
+  if (existsSync(locals)) found('a machine without Omarchy was given Omarchy\'s file', locals);
+  mkdirSync(join(HOME, 'xdg-config', 'omarchy', 'agents'), { recursive: true });
+  writeFileSync(locals, '{"providers":["Homelab"],"mine":true}');
+  countAsLocal(['la-self-18701', 'homelab', 'la-self-18701']);
+  countAsLocal(['la-self-18701', 'local-ai']);
+  if (read() !== '{"providers":["Homelab","la-self-18701","local-ai"],"mine":true}') found('the ids Omarchy counts as self-hosted were not added once each, beside what was there', read());
+  for (const broken of ['{"providers":', '[1]', '"x"']) { writeFileSync(locals, broken); countAsLocal(['la-self-18702']); if (read() !== broken) found('a file of Omarchy\'s that could not be read was written over', read()); }
+  const plan = (runs) => recordFor(runs)?.tierLabel ?? null;
+  if (plan([]) !== null || plan([{ name: 'A', phase: 'failed' }, { name: 'B', phase: 'stopping' }]) !== null) found('a record for Omarchy with nothing running', JSON.stringify(recordFor([])));
+  if (plan([{ name: 'A', phase: 'weights' }]) !== 'Starting A' || plan([{ name: 'A', phase: 'starting' }, { name: 'B', phase: 'ready' }, { name: 'C', phase: 'ready' }]) !== 'B, C') found('the plan line for Omarchy was wrong', `${plan([{ name: 'A', phase: 'weights' }])} | ${plan([{ name: 'B', phase: 'ready' }])}`);
+  section('Omarchy\'s files: ids are added once beside what is there, a file that cannot be read is left alone, and nothing running means no record', 9);
+}
+
+// ---- 11. the running server ----------------------------------------------------------------------------------------
 const PORT = 29700 + Math.floor(rnd() * 200) * 2;
 const registry = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ cards: {}, models: {}, builds: {}, recipes: { 'fuzz/none': { card: 'none', model: 'm', engine: 'vllm', launch: { image: 'x', port: 1 } } } })); });
 await new Promise((done) => registry.listen(0, '127.0.0.1', done));
