@@ -12,7 +12,7 @@
 //   7. Host recipes (programs run on the machine itself): one that is accepted runs its own hashed script and nothing else.
 //   8. DeepSeek Harness's settings, which the app edits as text: whatever models are written in, with whatever names,
 //      every line that was the person's own is still there, in order, and taking the models out again gives the file back.
-//   9. Listening ports: what each system's own tool prints (ss, lsof, netstat) is read into the same rows.
+//   9. Listening ports and Intel cards: what each system's own tool prints (ss, lsof, netstat, lspci) is read into the same rows.
 //  10. The running server: every short path made of traversal pieces must give a file from web/ or 404, and random
 //      requests to the API must never crash it, hang it, or give anything away without the key.
 // Usage: node tests/fuzz.mjs [seed]     exit code 0 when nothing was found. FUZZ_N sets how many random cases (default 40000).
@@ -28,6 +28,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = mkdtempSync(join(tmpdir(), 'local-ai-fuzz-'));
 process.env.LOCAL_AI_HOME = HOME; // the server's modules write their state here when they are loaded
 process.env.HF_HOME = join(HOME, 'hf');
+process.env.LOCAL_AI_DRI = join(HOME, 'dri'); // a server under test looks for Intel cards here, never in the machine's /dev/dri
 const N = +(process.env.FUZZ_N || 40000), seed = +(process.argv[2] || 20261111);
 const failures = [];
 const found = (what, detail) => { if (failures.length < 40) console.log(`FOUND ${what}: ${detail}`); failures.push(what); };
@@ -109,22 +110,25 @@ const { html } = await import('../web/html.js');
     if (why) continue;
     started++;
     const run = { id: 18701, recipe: 'r/x', gpus: [0], since: 1, reachable: false };
+    // One time in three the card is an Intel one, which the engine is given as a device with a folder of links to it.
+    const devices = rnd() < 0.33 ? { nodes: ['/dev/dri/renderD128'], links: join(HOME, 'runs', '18701', 'by-path') } : null;
     let args;
-    try { args = dockerArgs({ run, launch, name: 'local-ai-18701', bind: ['127.0.0.1'], mounts: weights.mounts(launch), configFile: launch.config ? join(HOME, 'runs', '18701', 'c') : null }); } catch (e) { found('building the command threw for a recipe that passed', `${e.message} for ${JSON.stringify(launch).slice(0, 300)}`); continue; }
+    try { args = dockerArgs({ run, launch, name: 'local-ai-18701', bind: ['127.0.0.1'], mounts: weights.mounts(launch), configFile: launch.config ? join(HOME, 'runs', '18701', 'c') : null, devices }); } catch (e) { found('building the command threw for a recipe that passed', `${e.message} for ${JSON.stringify(launch).slice(0, 300)}`); continue; }
     const show = () => `${JSON.stringify(args).slice(0, 400)} from ${JSON.stringify(launch).slice(0, 300)}`;
     if (args.some((a) => typeof a !== 'string')) { found('an argument that is not text', show()); continue; }
     const read = parseRun(args.slice(1));
     if (read.error) { found('a command Docker would refuse', `${read.error}: ${show()}`); continue; }
     if (read.image !== PIN) found('a command that would run another image than the pinned one', show());
     const of = (flag) => read.options.filter(([name]) => name === flag).map(([, value]) => value);
-    for (const [name] of read.options) if (!options.has(name)) found(`an option the app never allows (${name})`, show());
-    if (of('--name').join() !== 'local-ai-18701' || of('--gpus').join() !== '"device=0"' || of('--publish').join() !== `127.0.0.1:18701:${launch.port}` || of('--security-opt').join() !== 'no-new-privileges') found('the app\'s own options were changed', show());
+    for (const [name] of read.options) if (!options.has(name) && !(devices && name === '--device')) found(`an option the app never allows (${name})`, show());
+    if (of('--name').join() !== 'local-ai-18701' || of('--gpus').join() !== (devices ? '' : '"device=0"') || of('--device').join() !== (devices ? '/dev/dri/renderD128' : '') || of('--publish').join() !== `127.0.0.1:18701:${launch.port}` || of('--security-opt').join() !== 'no-new-privileges') found('the app\'s own options were changed', show());
     for (const v of of('--volume')) { const [from, , mode] = v.split(':'); if (mode !== 'ro' || !roots.some((r) => resolve(from) === r || resolve(from).startsWith(`${r}${sep}`))) found('a mount that is not one of the app\'s own folders, read-only', `${v} in ${show()}`); }
     for (const v of of('--env')) if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(v)) found('an environment setting that is not NAME=value', `${v} in ${show()}`);
     if (of('--cap-add').some((v) => v !== 'IPC_LOCK')) found('a capability other than locking memory', show());
     if ([...of('--memory'), ...of('--memory-swap')].some((v) => !/^[1-9]\d*$/.test(v))) found('a memory limit that is not a plain number of bytes', show());
-    const asked = launch.resources || {}, lock = of('--cap-add').length > 0 && !(launch.flags || []).some((f) => /cap-add/.test(String(f)));
-    if (lock !== (asked.ipcLock === true) || (of('--memory').join() || null) !== (asked.memoryBytes ? String(asked.memoryBytes) : null)) found('resources that are not the ones the recipe asked for', show());
+    // Locked memory can be asked for as a typed resource or as the one allowed --cap-add option; a recipe that uses the option says nothing about the resource.
+    const asked = launch.resources || {}, optioned = (launch.flags || []).some((f) => /cap-add/.test(String(f)));
+    if ((!optioned && (of('--cap-add').length > 0) !== (asked.ipcLock === true)) || (of('--memory').join() || null) !== (asked.memoryBytes ? String(asked.memoryBytes) : null)) found('resources that are not the ones the recipe asked for', show());
   }
   section(`hostile registry recipes: every one the app would start (${started.toLocaleString('en-US')}) runs the pinned image with only the app's options`, N);
 }
@@ -288,7 +292,14 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
   same('win32', '\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1128\r\n'
     + '  TCP    127.0.0.1:18700        0.0.0.0:0              ABH\u00d6REN         9044\r\n  TCP    100.64.0.10:8000       0.0.0.0:0              LISTENING       5120\r\n  TCP    127.0.0.1:52011        127.0.0.1:18700        ESTABLISHED     9100\r\n',
   '0.0.0.0:135 by 1128, 127.0.0.1:18700 by 9044, 100.64.0.10:8000 by 5120');
-  section('listening ports: what Linux, macOS and Windows each print is read into the same rows', 3);
+  // What lspci prints about Intel's devices: the Arc cards in it, by address, each with the largest memory it shows.
+  const { arcCards } = await import('../server/gpus.js');
+  const device = (address, kind, name, sizes) => `${address} ${kind}: Intel Corporation ${name} (rev 04)\n\tSubsystem: Dell Device 0db9\n${sizes.map((s) => `\tMemory at 6000000000 (64-bit, prefetchable) [size=${s}]\n`).join('')}\tKernel driver in use: xe\n\n`;
+  const cards = arcCards(device('0000:83:00.0', 'VGA compatible controller', 'Battlemage G31 [Arc Pro B70]', ['16M', '32G']) + device('0000:00:1f.3', 'Audio device', 'Panther Lake [Arc Audio]', ['16K'])
+    + device('0000:00:02.0', 'VGA compatible controller', 'Panther Lake [Arc B390]', ['16M', '256M']) + device('0000:01:00.0', 'Display controller', 'DG2 [Arc A770]', ['16G']) + device('0000:00:02.1', 'VGA compatible controller', 'Raptor Lake [UHD Graphics 770]', ['256M']))
+    .map((c) => `${c.address} ${c.name} ${c.memory}`).join(', ');
+  if (cards !== '0000:00:02.0 Intel Arc B390 256, 0000:01:00.0 Intel Arc A770 16384, 0000:83:00.0 Intel Arc Pro B70 32768') found('the Intel Arc cards lspci lists were read wrong', cards);
+  section('listening ports and Intel cards: what each system\'s own tool prints is read into the same rows', 4);
 }
 
 // ---- 10. the running server ----------------------------------------------------------------------------------------

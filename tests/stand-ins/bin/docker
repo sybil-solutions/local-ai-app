@@ -39,8 +39,16 @@ else if (verb === 'run') {
     // The listing is written the way --format asks for it: {{.Names}}, {{.State}}, {{.Status}}, {{.Labels}}, {{.Label "name"}}.
     const labels = Object.fromEntries(c.labels.split(',').map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; }));
     const fields = { Names: c.name, State: up ? 'running' : 'exited', Status: up ? 'Up 1 second' : 'Exited (1) 1 second ago', Labels: c.labels };
-    const format = args[args.indexOf('--format') + 1] || '{{.Names}}';
+    const at = args.indexOf('--format'), format = at < 0 ? '{{.Names}}' : args[at + 1]; // `ps -q` gives names, which stand in for ids
     console.log(format.replace(/\{\{\.Label "([^"]+)"\}\}/g, (_, k) => labels[k] ?? '').replace(/\{\{\.(\w+)\}\}/g, (_, k) => fields[k] ?? ''));
+  }
+} else if (verb === 'inspect') {
+  // Only what the app asks of it: each container's local-ai label, and the devices it was given.
+  const at = args.indexOf('--format'), format = args[at + 1];
+  for (const name of args.slice(at + 2).filter((n) => existsSync(file(n)))) {
+    const c = read(name), labels = Object.fromEntries(String(c.labels || '').split(',').filter(Boolean).map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; }));
+    const devices = (c.options || []).filter(([flag]) => flag === '--device').map(([, value]) => value);
+    console.log(format.replace(/\{\{index \.Config\.Labels "([^"]+)"\}\}/g, (_, k) => labels[k] ?? '').replace(/\{\{range \.HostConfig\.Devices\}\}\{\{\.PathOnHost\}\}([\s\S]*?)\{\{end\}\}/g, (_, sep) => devices.map((d) => d + sep).join('')));
   }
 } else if (verb === 'stop') { if (existsSync(file(last))) kill(read(last)); console.log(last); }
 else if (verb === 'rm') { if (!existsSync(file(last))) { console.error(`Error response from daemon: No such container: ${last}`); process.exit(1); } kill(read(last)); rmSync(file(last)); console.log(last); }

@@ -212,12 +212,13 @@ function tiers(list) {
 const norm = (s) => s.toLowerCase().replace(/\((r|tm)\)/g, '').replace(/geforce|nvidia|amd|radeon|intel|graphics|[^a-z0-9]/g, '');
 
 // `shared` is a GPU that uses the machine's RAM: it reports a little less than the card's nominal size, so its card is
-// found by name alone among the cards the registry marks as unified memory.
-function cardOf(gpuName, vramGb, shared = false) {
+// found by name alone among the cards the registry marks as unified memory. A GPU that says what kind it is
+// (`backend`: an Intel card) is looked for among the registry's cards of that kind only.
+function cardOf(gpuName, vramGb, shared = false, backend = null) {
   const n = norm(gpuName);
   const score = ([id, card]) => Math.max(0, ...[norm(card.name), norm(id), ...(card.match?.names || [])].filter((x) => x && n.includes(x)).map((x) => x.length));
   const off = (entry) => Math.abs(entry[1].vram_gb - vramGb);
-  const hits = Object.entries(catalog.cards).filter((entry) => score(entry) && (off(entry) <= 1 || (shared && entry[1].match?.unifiedMemory)));
+  const hits = Object.entries(catalog.cards).filter((entry) => (!backend || entry[1].backend === backend) && score(entry) && (off(entry) <= 1 || (shared && entry[1].match?.unifiedMemory)));
   return hits.sort((a, b) => score(b) - score(a) || off(a) - off(b))[0]?.[0] ?? null;
 }
 
@@ -234,7 +235,8 @@ function appleCard(gpuName, vramGb) {
   return Object.entries(catalog.cards).find(([, c]) => c.backend === 'metal' && Math.abs(c.vram_gb - vramGb) <= 1
     && [norm(c.name), ...(c.match?.names || [])].includes(n))?.[0] ?? null;
 }
-export const cardFor = (gpu) => (gpu.unified ? appleCard(gpu.name, gpu.total / 1024) : cardOf(gpu.name, gpu.total / 1024, gpu.shared) ?? nearest(gpu.total / 1024));
+// An Intel card runs only what was tested on it: an engine built for NVIDIA cards does not run there.
+export const cardFor = (gpu) => (gpu.unified ? appleCard(gpu.name, gpu.total / 1024) : cardOf(gpu.name, gpu.total / 1024, gpu.shared, gpu.backend) ?? (gpu.backend ? null : nearest(gpu.total / 1024)));
 
 // A recipe's id is written on its container as a label and read back from Docker's listing, one line a container,
 // so it is plain text on one line.
@@ -307,7 +309,7 @@ function recommendedOf(card, setups, list) {
 export function groups(gpus) {
   const byCard = new Map();
   for (const gpu of gpus) {
-    const tested = gpu.unified ? cardFor(gpu) : cardOf(gpu.name, gpu.total / 1024, gpu.shared), key = `${cardFor(gpu)}:${!!tested}`;
+    const tested = gpu.unified ? cardFor(gpu) : cardOf(gpu.name, gpu.total / 1024, gpu.shared, gpu.backend), key = `${cardFor(gpu)}:${!!tested}`;
     if (!byCard.has(key)) byCard.set(key, { card: cardFor(gpu), tested, members: [] });
     byCard.get(key).members.push(gpu);
   }

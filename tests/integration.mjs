@@ -14,7 +14,7 @@
 // Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -24,6 +24,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = mkdtempSync(join(tmpdir(), 'local-ai-integration-'));
 const PORT = 28700 + Math.floor(Math.random() * 400) * 2; // run ports are PORT+1..99, host engines PORT+100..199
 const APPLE = process.platform === 'darwin' && process.arch === 'arm64';
+const DRI = join(HOME, 'dri'); // where a server under test looks for Intel cards' render nodes: empty, until a test makes some
+process.env.LOCAL_AI_DRI = DRI;
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const failures = [];
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok || !detail ? '' : ` (${detail})`}`); if (!ok) failures.push(name); };
@@ -131,6 +133,12 @@ catalog.recipes[TIGHT] = { ...docked({ needs: { host_ram_gb: totalmem() / 2 ** 3
 const OLDFAST = 'smoke/gpu/oldfast.docker.2x';
 catalog.recipes[OLDFAST] = { ...docked({ cards: 2 }), model: 'oldfast-1', proof: [{ tps: 500, legacy: true, gates: 'load chat' }] };
 catalog.cards['smoke-gpu'].setups[1].picks = [PAIR, OLDFAST];
+// An Intel card the registry has tested, with two recipes for it. Their engine is given the card as a device.
+const ARC = 'smoke/arc/good.docker', ARC_TOO = 'smoke/arc/second.docker';
+catalog.cards['smoke-arc'] = { name: 'Intel Arc Pro B70', vram_gb: 32, backend: 'intel-xpu', match: { names: ['arcprob70'] } };
+const arced = (model) => ({ card: 'smoke-arc', model, engine: 'llama.cpp', proof: [{ tps: 30 }], launch: { image: PINNED, port: 8000, cards: 1, seqs: 1, ctx: 8192, backend: 'intel-xpu', shm: '8g', args: ['--model', 'x'], env: { ONEAPI_DEVICE_SELECTOR: 'level_zero:0' } } });
+catalog.recipes[ARC] = arced('arc-1');
+catalog.recipes[ARC_TOO] = arced('arc-2');
 const HOSTED = 'smoke/chip/fake.host', TAMPERED = 'smoke/chip/tampered.host';
 if (APPLE) {
   const sysctl = (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', timeout: 5000 }).trim();
@@ -148,12 +156,13 @@ const proxy = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ 
 const logFile = join(HOME, 'server.log');
 let server = null, log = '';
 // `nvidia: true` starts it as on an NVIDIA machine: the stand-in nvidia-smi and docker come first on the PATH.
+// `arc: true` gives that machine Intel Arc cards as well: the stand-in lspci names the ones in lspci.txt.
 const FAKE_DOCKER = join(HOME, 'docker'), THERE_DOCKER = join(HOME, 'docker-second');
-function startServer({ nvidia = false } = {}) {
+function startServer({ nvidia = false, arc = false } = {}) {
   server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'),
     HF_ENDPOINT: `http://127.0.0.1:${hf.address().port}`, LOCAL_AI_MODELS: `${join(HOME, 'models')}:${HAVE}`, // downloads go to the first folder; the second holds weights already here
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
-    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}), ...(arc ? { FAKE_LSPCI: join(HOME, 'lspci.txt') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (b) => { log += b; });
   server.stderr.on('data', (b) => { log += b; });
   return until('the server to answer', async () => (await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
@@ -537,6 +546,30 @@ try {
   check('a folder that differs from what was published is not used: the weights are downloaded to the app\'s own folder', otherRun.options.filter((o) => o[0] === '--volume').map((o) => o[1]).join() === `${own}:/models:ro` && downloads.includes('changed/model.safetensors') && readFileSync(join(own, 'model.safetensors'), 'utf8') === published['model.safetensors'], `${downloads}`);
   check('and the folder that differs is left as it was', readFileSync(join(HAVE, 'changed', 'model.safetensors'), 'utf8') === 'x'.repeat(70000) && readdirSync(join(HAVE, 'changed')).length === 2);
   await api(`/api/runs/${other}`, { method: 'DELETE' });
+
+  // Intel Arc cards beside the NVIDIA ones. lspci names two (and a sound device that is no card); their render nodes
+  // are in the test's own folder. A container of another program holds the second card.
+  await stopServer();
+  mkdirSync(join(DRI, 'by-path'), { recursive: true });
+  for (const [address, node] of [['0000:48:00.0', 'renderD128'], ['0000:83:00.0', 'renderD129']]) { writeFileSync(join(DRI, node), ''); symlinkSync(`../${node}`, join(DRI, 'by-path', `pci-${address}-render`)); }
+  const lspci = (address, name, size) => `${address} VGA compatible controller: Intel Corporation ${name} (prog-if 00 [VGA controller])\n\tMemory at d0000000 (64-bit, non-prefetchable) [size=16M]\n\tMemory at 4070000000 (64-bit, prefetchable) [size=${size}]\n\tKernel driver in use: xe\n\n`;
+  writeFileSync(join(HOME, 'lspci.txt'), `${lspci('0000:83:00.0', 'Battlemage G31 [Arc Pro B70]', '32G')}0000:00:1f.3 Audio device: Intel Corporation Sound [Arc Audio]\n\tMemory at e0000000 (64-bit) [size=16K]\n\n${lspci('0000:48:00.0', 'Battlemage G31 [Arc Pro B70]', '32G')}${lspci('0000:00:02.0', 'Raptor Lake [UHD Graphics 770]', '256M')}`);
+  writeFileSync(join(FAKE_DOCKER, 'someone-elses.json'), JSON.stringify({ name: 'someone-elses', labels: 'app=other', options: [['--device', join(DRI, 'renderD129')]] }));
+  await startServer({ nvidia: true, arc: true });
+  const node = (name) => realpathSync(join(DRI, name));
+  const arc = await until('the Intel cards to be listed, and the one another container holds to be known', async () => { const s = await state(); return s.gpus.length === 4 && s.gpus[3].busy && s; }, 30000);
+  check('Intel Arc cards are found beside the NVIDIA ones, each with its memory and its render node', arc.gpus.slice(2).map((g) => `${g.index} ${g.name} ${g.total} ${g.backend} ${g.node}`).join() === `2 Intel Arc Pro B70 32768 intel-xpu ${node('renderD128')},3 Intel Arc Pro B70 32768 intel-xpu ${node('renderD129')}`, JSON.stringify(arc.gpus.slice(2)));
+  const arcGroup = arc.groups.find((g) => g.card === 'smoke-arc');
+  check('they are the registry\'s Intel card, with its recipes and none of an NVIDIA card\'s', arcGroup?.gpus.join() === '2,3' && arcGroup.recipes.map((r) => r.id).sort().join() === [ARC, ARC_TOO].sort().join() && arc.groups.length === 2, JSON.stringify(arc.groups.map((g) => [g.card, g.gpus, g.recipes.length])));
+  check('a card another program\'s container holds is not free', arc.free.includes(2) && !arc.free.includes(3) && !arc.gpus[2].busy, JSON.stringify(arc.free));
+  const onArc = (await api('/api/runs', { method: 'POST', body: { recipe: ARC } })).json?.id;
+  await until('the engine on the Intel card to be ready', async () => { const r = (await state()).runs.find((x) => x.id === onArc); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
+  const arcRun = JSON.parse(readFileSync(join(FAKE_DOCKER, `local-ai-${onArc}.json`), 'utf8')), arcOpt = (name) => arcRun.options.filter((o) => o[0] === name).map((o) => o[1]), links = join(HOME, 'runs', String(onArc), 'by-path');
+  check('its engine is given the free card as a device, not by number, and still can gain no privileges', arcOpt('--device').join() === node('renderD128') && !arcOpt('--gpus').length && arcOpt('--security-opt').join() === 'no-new-privileges' && arcOpt('--shm-size').join() === '8g' && arcOpt('--env').includes('ONEAPI_DEVICE_SELECTOR=level_zero:0'), JSON.stringify(arcRun.options));
+  check('and is shown a link to that card only, where Intel\'s libraries look for cards', arcOpt('--volume').includes(`${links}:/dev/dri/by-path:ro`) && readdirSync(links).join() === 'pci-0000:48:00.0-render' && readlinkSync(join(links, 'pci-0000:48:00.0-render')) === '../renderD128', readdirSync(links).join());
+  const held = await api('/api/runs', { method: 'POST', body: { recipe: ARC_TOO } });
+  check('a second engine is not started on the card that is held', held.status === 409 && /0 free/.test(held.json?.error || ''), JSON.stringify(held));
+  await api(`/api/runs/${onArc}`, { method: 'DELETE' });
 } catch (e) {
   check('the integration test ran to the end', false, e.message);
 }

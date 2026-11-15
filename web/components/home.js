@@ -23,7 +23,7 @@ const Stat = (label, value, live) => html`<div class="stat${live ? ' live' : ''}
 // The running model's numbers. Lifetime tokens opens Usage.
 export const Stats = (r) => html`<div class="stats">${Stat('Decode tok/s', r.stats?.tps || 0, true)}${Stat(r.stats?.ppsEst ? 'Prefill tok/s (est.)' : 'Prefill tok/s', r.stats?.pps || 0)}${Stat('Session tokens', r.stats?.used || 0)}<button class="linkstat" data-go="usage">${Stat('Lifetime tokens', D().usage.all)}</button></div>`;
 // Memory in use on each GPU. A GPU that reports no memory of its own shows a dash.
-const GpuBars = () => html`<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => html`<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${g.total ? Math.min(100, ((g.used || 0) / g.total) * 100).toFixed(0) : 0}%"></u></i><span>${g.total ? `${gb(g.used || 0)} of ${gb(g.total)} GB` : '—'}</span></div>`)}</div>`;
+const GpuBars = () => html`<div class="wbtn"><span class="wtitle">GPUs</span>${D().gpus.map((g) => html`<div class="gpu"><span>GPU ${g.index}</span><i><u style="width:${g.total ? Math.min(100, ((g.busy && g.used == null ? g.total : g.used || 0) / g.total) * 100).toFixed(0) : 0}%"></u></i><span>${!g.total ? '—' : g.used == null ? `${gb(g.total)} GB${g.busy ? ', in use' : ''}` : `${gb(g.used)} of ${gb(g.total)} GB`}</span></div>`)}</div>`;
 
 export const StartButton = () => Button({ label: chosen().ready ? 'Run' : 'Download', act: 'start', kind: 'go', disabled: !hasRoom() });
 export const OpenButtons = () => Split(agentName() ? Button({ label: `Open ${agentName()}`, act: 'open', kind: 'go' }) : Button({ label: 'Choose an agent', go: 'chooser', kind: 'go' }), Button({ label: Icon('down'), go: 'chooser', aria: 'Choose an agent' }));
