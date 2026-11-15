@@ -4,7 +4,7 @@ import { shareWithPi, syncPi, WINDOW } from './pi.js';
 import { launched, q } from './shell.js';
 import { config, event, fail, run, saveConfig } from './util.js';
 
-// A model as an app's own list shows it: "glm-5.3-flash · pop-os".
+// A model as an app's own list shows it: "glm-5.3-flash · workstation".
 const titleOf = (t) => `${t.name} · ${t.device}`;
 
 // T3 Code: a thread is started on this exact model. T3 Code runs Pi itself and keeps a model for every thread, so

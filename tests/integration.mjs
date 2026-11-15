@@ -268,6 +268,28 @@ try {
     const stopped = update(broken, `${full}:${tools}`);
     check('an update that cannot unpack what it fetched changes nothing, and says so', stopped.status === 1 && fetched() && /Nothing was changed/.test(stopped.stdout) && readFileSync(join(broken, 'node', 'bin', 'node'), 'utf8').includes('exit 1')
       && readFileSync(join(broken, 'server', 'index.js'), 'utf8').includes('was here') && !existsSync(join(broken, 'node.new')) && !existsSync(join(broken, '.new')), `status ${stopped.status} ${stopped.stdout} ${stopped.stderr}`);
+    // 3. The one-line installer the website gives (scripts/get.sh): it downloads the release and its checksum (curl
+    // stands in for the release's address and hands over files made here), and runs the installer inside only when
+    // the two match.
+    const release = join(HOME, 'release'), getTools = join(HOME, 'get-tools');
+    mkdirSync(release);
+    mkdirSync(getTools);
+    for (const name of readdirSync(tools).filter((n) => n !== 'curl')) symlinkSync(join(tools, name), join(getTools, name));
+    for (const name of ['cut', 'gzip']) symlinkSync(execFileSync('which', [name], { encoding: 'utf8' }).trim(), join(getTools, name));
+    execFileSync('tar', ['-czf', join(release, 'local-ai-linux.tar.gz'), '-C', ROOT, 'server', 'web', 'package.json', 'install.sh', 'README.md']);
+    const sum = execFileSync('sha256sum', [join(release, 'local-ai-linux.tar.gz')], { encoding: 'utf8' }).split(' ')[0];
+    standIn(getTools, 'curl', `for a in "$@"; do out="$a"; done; case "$*" in *release.test/local-ai-linux.tar.gz.sha256*) cat "${release}/sum" > "$out" ;; *release.test/local-ai-linux.tar.gz*) cat "${release}/local-ai-linux.tar.gz" > "$out" ;; *) echo '{"app":"local-ai"}' ;; esac`);
+    const get = (dest) => spawnSync('bash', [join(ROOT, 'scripts', 'get.sh')], { env: { PATH: getTools, HOME: home, LOCAL_AI_RELEASE: 'http://release.test', LOCAL_AI_DIR: dest }, encoding: 'utf8', timeout: 60000 });
+    const withNode = (dest) => { mkdirSync(join(dest, 'node', 'bin'), { recursive: true }); symlinkSync(process.execPath, join(dest, 'node', 'bin', 'node')); return dest; };
+    writeFileSync(join(release, 'sum'), `${'0'.repeat(64)}  local-ai-linux.tar.gz\n`);
+    const wrong = withNode(join(HOME, 'got-wrong')), refused = get(wrong);
+    check('the one-line installer installs nothing when the download does not match its checksum', refused.status === 1 && /did not match its checksum/.test(refused.stdout) && !existsSync(join(wrong, 'server')), `status ${refused.status} ${refused.stdout} ${refused.stderr}`);
+    writeFileSync(join(release, 'sum'), `${sum}  local-ai-linux.tar.gz\n`);
+    const right = withNode(join(HOME, 'got-right')), got = get(right);
+    check('and installs the release when it does', got.status === 0 && existsSync(join(right, 'server', 'index.js')) && existsSync(join(right, 'web', 'index.html')) && /Local AI is running/.test(got.stdout), `status ${got.status} ${got.stdout} ${got.stderr}`);
+    mkdirSync(join(right, '.git'));
+    const cloned = get(right);
+    check('and leaves a copy that updates itself alone', cloned.status === 3 && /updates itself/.test(cloned.stdout), `status ${cloned.status} ${cloned.stdout}`);
   }
   check('settings reject an unknown background', (await api('/api/settings', { method: 'POST', body: { background: '../x' } })).status === 200 && (await state()).background !== '../x');
 

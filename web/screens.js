@@ -106,7 +106,7 @@ export const SCREENS = {
       : Row({ quiet: true, name: p.name, sub: os(p), right: `Seen ${ago(p.seen)}` })));
     return html`${CloseBar()}${Head('Machines')}${Scroll(html`${Label('Connected', { group: true })}${mine.map(DeviceRow)}${Label('On your Tailscale', { group: true })}${s.peers === null ? Note('Looking') : others.length ? others : Note('No other machines')}`)}${Button({ label: 'Add machine', go: 'addmachine' })}`;
   },
-  addmachine: () => html`${CloseBar()}${Head('Add machine')}${typed('host', 'Address', 'http://100.90.62.80:18700')}${typed('mkey', 'Key', 'Not needed on your Tailscale')}${Spacer}${Button({ label: 'Add machine', act: 'connect', kind: 'go' })}`,
+  addmachine: () => html`${CloseBar()}${Head('Add machine')}${typed('host', 'Address', 'http://100.64.0.10:18700')}${typed('mkey', 'Key', 'Not needed on your Tailscale')}${Spacer}${Button({ label: 'Add machine', act: 'connect', kind: 'go' })}`,
   usage: () => html`${CloseBar()}${Head('Usage')}${Scroll(UsageBody())}`,
   'adv-models': () => html`${CloseBar()}${Head('Models')}${Label(`${all().length} this machine can start, largest setup first`)}${Scroll(sections().map((sec) => html`${Label(sec.label, { group: true })}${sec.rows.map(ListRow)}`))}`,
   'model-page': () => {

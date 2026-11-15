@@ -186,7 +186,7 @@ export function follow() {
 
 // One of your own Tailscale machines hands over its key when asked; anything else needs it typed.
 export async function add({ url, key, name }) {
-  if (!/^https?:\/\/[^\s/]+\/?$/.test(url || '')) fail(400, 'Enter a URL such as http://100.90.62.80:18700');
+  if (!/^https?:\/\/[^\s/]+\/?$/.test(url || '')) fail(400, 'Enter a URL such as http://100.64.0.10:18700');
   const clean = url.replace(/\/$/, '');
   key ||= (await fetch(`${clean}/api/pair`, { method: 'POST', signal: AbortSignal.timeout(8000) }).then((r) => (r.ok ? r.json() : null), () => null))?.key;
   if (!key) fail(401, 'That machine needs its key. It’s under API endpoints there');
