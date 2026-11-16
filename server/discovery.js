@@ -23,6 +23,14 @@ async function isEngine(url, models) {
   } catch { return null; }
 }
 
+// Whether what answers there says how many tokens it served: an engine's counters, or Local Studio's gateway.
+async function countable(url) {
+  try {
+    const res = await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(800) });
+    return res.ok && /^((vllm|sglang|llamacpp)[:_]|local_studio_)/m.test(await res.text());
+  } catch { return false; }
+}
+
 // A forwarder on this machine in front of a model on a connected machine answers exactly like that model, counters
 // and all. It is that machine's model, not one running here, and what it serves is that machine's usage. It is
 // recognised by the same model id being there and by being the same engine:
@@ -113,10 +121,16 @@ export async function discover(now) {
       return [port, model];
     } catch { dull.set(open.get(port).who, now); return [port, null]; }
   }));
-  const known = new Set([...runs.values()].map((r) => r.served));
   for (const [port, model] of found) {
-    if (!model || known.has(model)) continue; // the same model behind a proxy is still one model
-    known.add(model);
+    if (!model) continue;
+    // The same model behind a proxy is still one model. Where only one of the two can be counted (an engine with no
+    // counters, and Local Studio's gateway in front of it, which keeps its own), that one is the model.
+    const same = [...runs.values()].find((r) => r.served === model);
+    if (same) {
+      if (!same.external || await countable(same.url) || !(await countable(`http://${open.get(port).host}:${port}`))) continue;
+      runs.delete(same.id);
+      event('info', 'run.moved', { from: same.id, to: port, model });
+    }
     if (await forwards(`http://${open.get(port).host}:${port}`, model)) continue; // a forwarder to a connected machine's model
     runs.set(port, { id: port, recipe: null, external: true, reachable: open.get(port).outside, name: model, url: `http://${open.get(port).host}:${port}`, served: model, gpus: [], phase: 'ready', detail: null, progress: null, error: null, since: now, readyAt: now, apis: null, stats: null, misses: 0 });
     event('info', 'run.found', { id: port, model });
