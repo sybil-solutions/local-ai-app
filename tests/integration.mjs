@@ -157,6 +157,24 @@ if (APPLE) {
 const registry = await serve(() => [200, catalog]);
 // A proxy in front of cloud models: answers /v1/models with several, has no engine counters. Not a model running here.
 const proxy = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ id: 'cloud-a' }, { id: 'cloud-b' }] }] : [404, { error: 'not found' }]));
+// Local Studio's gateway in front of an engine with no counters: its /metrics has only its own numbers, and it keeps
+// what each request used by day, model and machine. 5000 tokens were served before the app first sees it; rows for
+// another machine behind the same gateway, and for another model, are never this model's.
+const studioRows = [
+  { day: '2026-01-01', machineId: 'here', model: 'studio-model', client: 'pi', requests: 2, errors: 0, inputUncached: 4000, cacheRead: 800, cacheWrite: 0, output: 200, ttftSumMs: 2000 },
+  { day: '2026-01-01', machineId: 'peer', model: 'studio-model', client: 'pi', requests: 9, errors: 0, inputUncached: 90000, cacheRead: 0, cacheWrite: 0, output: 9000, ttftSumMs: 9000 },
+  { day: '2026-01-01', machineId: 'here', model: 'other-model', client: 'pi', requests: 9, errors: 0, inputUncached: 90000, cacheRead: 0, cacheWrite: 0, output: 9000, ttftSumMs: 9000 },
+];
+const studio = await serve((req) => {
+  if (req.url === '/v1/models') return [200, { data: [{ id: 'studio-model', max_model_len: 32768, owned_by: 'local-ai-tests', local_studio: { machineId: 'here', via: 'local' } }] }];
+  if (req.url === '/metrics') return [200, 'local_studio_uptime_seconds 5\nlocal_studio_gateway_inflight 0', 'text/plain'];
+  if (req.url === '/api/usage/daily') return [200, studioRows];
+  if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+    studioRows.push({ day: '2026-01-02', machineId: 'here', model: 'studio-model', client: 'api', requests: 1, errors: 0, inputUncached: 1000, cacheRead: 500, cacheWrite: 0, output: 100, ttftSumMs: 500 });
+    return [200, { choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 1500, completion_tokens: 100 } }];
+  }
+  return [404, { error: 'not found' }];
+});
 
 // The app itself.
 const logFile = join(HOME, 'server.log');
@@ -204,7 +222,7 @@ async function cleanup() {
   for (const dir of [FAKE_DOCKER, THERE_DOCKER]) { try { for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) pids.push(JSON.parse(readFileSync(join(dir, f), 'utf8')).pid); } catch { /* the Docker path never ran */ } }
   try { pids = pids.concat(Object.values(JSON.parse(readFileSync(join(HOME, 'hosts.json'), 'utf8'))).map((h) => h.pid)); } catch { /* none started */ }
   for (const pid of pids) if (pid && alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
-  outside.close(); registry.close(); proxy.close(); hf.close();
+  outside.close(); registry.close(); proxy.close(); studio.close(); hf.close();
   writeFileSync(logFile, log);
   if (failures.length) console.log(`\n--- server log (last 60 lines) ---\n${log.trim().split('\n').slice(-60).join('\n')}`);
   rmSync(HOME, { recursive: true, force: true });
@@ -347,6 +365,17 @@ try {
   const after = await until('the short request to be counted', async () => { const r = (await state()).runs.find((x) => x.id === port); return r?.stats?.used >= 2300 && r; }, 15000);
   check('a short prefill does not drag the prefill speed down', after.stats.pps === 2000, `pps ${after.stats.pps}`);
   check('stopping a model the app did not start is refused', (await api(`/api/runs/${port}`, { method: 'DELETE' })).status === 409);
+
+  // A model behind Local Studio's gateway: its tokens come from the gateway's own records, counted from when it is first
+  // seen, for this machine and this model only.
+  const sport = studio.address().port;
+  await until('the model behind Local Studio\'s gateway to be found', async () => (await state()).runs.find((r) => r.external && r.id === sport), 45000);
+  await until('a first read of the gateway', async () => (await state()).runs.find((r) => r.id === sport)?.stats, 25000);
+  await chat(sport, false);
+  const viaStudio = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === sport); return r?.stats?.used > 0 && r; }, 30000);
+  check('counts tokens through Local Studio\'s gateway, from when it is first seen, for this machine and model only', viaStudio.stats.used === 1600, `used ${viaStudio.stats.used}`);
+  const past = (await api('/api/usage')).json.days.find((d) => d.d === '2026-01-01');
+  check('takes in what the gateway served before, once, for this machine only', past?.models['studio-model'] === 5000 && past?.models['other-model'] === 99000 && past.req === 11, JSON.stringify(past));
 
   // A second Local AI, with a model of its own that this machine can also reach on a port here (as it would through
   // a forwarder). Until the two are connected nothing says whose model it is, so it is shown as running here. Once
