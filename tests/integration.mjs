@@ -175,6 +175,8 @@ const studio = await serve((req) => {
   }
   return [404, { error: 'not found' }];
 });
+// The engine behind that gateway answers too, on a port of its own, with no counters: the gateway is the model.
+const twin = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ id: 'studio-model', max_model_len: 32768, owned_by: 'local-ai-tests' }] }] : [404, { error: 'not found' }]));
 
 // The app itself.
 const logFile = join(HOME, 'server.log');
@@ -222,7 +224,7 @@ async function cleanup() {
   for (const dir of [FAKE_DOCKER, THERE_DOCKER]) { try { for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) pids.push(JSON.parse(readFileSync(join(dir, f), 'utf8')).pid); } catch { /* the Docker path never ran */ } }
   try { pids = pids.concat(Object.values(JSON.parse(readFileSync(join(HOME, 'hosts.json'), 'utf8'))).map((h) => h.pid)); } catch { /* none started */ }
   for (const pid of pids) if (pid && alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
-  outside.close(); registry.close(); proxy.close(); studio.close(); hf.close();
+  outside.close(); registry.close(); proxy.close(); studio.close(); twin.close(); hf.close();
   writeFileSync(logFile, log);
   if (failures.length) console.log(`\n--- server log (last 60 lines) ---\n${log.trim().split('\n').slice(-60).join('\n')}`);
   rmSync(HOME, { recursive: true, force: true });
@@ -372,6 +374,7 @@ try {
   await until('the model behind Local Studio\'s gateway to be found', async () => (await state()).runs.find((r) => r.external && r.id === sport), 45000);
   await until('a first read of the gateway', async () => (await state()).runs.find((r) => r.id === sport)?.stats, 25000);
   await chat(sport, false);
+  check('of an engine with no counters and the gateway in front of it, shows the gateway only', !(await state()).runs.some((r) => r.id === twin.address().port));
   const viaStudio = await until('its tokens to be counted', async () => { const r = (await state()).runs.find((x) => x.id === sport); return r?.stats?.used > 0 && r; }, 30000);
   check('counts tokens through Local Studio\'s gateway, from when it is first seen, for this machine and model only', viaStudio.stats.used === 1600, `used ${viaStudio.stats.used}`);
   const past = (await api('/api/usage')).json.days.find((d) => d.d === '2026-01-01');
