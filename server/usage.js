@@ -2,9 +2,10 @@
 import { at, readJson, run, writeJson } from './util.js';
 
 const file = at('usage.json');
-const usage = { days: {}, hours: {}, last: {}, ...readJson(file, {}) };
+const usage = { days: {}, hours: {}, last: {}, imported: {}, ...readJson(file, {}) };
 let dirty = false;
-const keyOf = (r) => r.container || `port-${r.id}`;
+// A gateway's totals are one model's, so another model behind the same port starts from its own.
+const keyOf = (r) => r.container || (r.gateway ? `gateway-${r.id}-${r.served}` : `port-${r.id}`);
 // A counter row by name. Names come from engines, so one like "__proto__" must still be an ordinary key.
 function rowOf(rows, name) {
   if (!Object.hasOwn(rows, name)) Object.defineProperty(rows, name, { value: { in: 0, out: 0, req: 0 }, enumerable: true, writable: true, configurable: true });
@@ -68,23 +69,70 @@ function prefillSpeed(r, m, seconds, now) {
   return m[sec] > 0 ? { pps: m[tok] / m[sec], est } : null;
 }
 
+// Local Studio's gateway sits in front of engines that may have no counters of their own, and keeps what every request
+// through it used: a row per day (or hour), model, client and machine. Those rows for this model on this machine, added
+// up, stand in for the engine's counters. They are read every ten seconds at most (the gateway adds them up as it goes),
+// and a total that goes down is old rows pruned there, not a new engine, so it counts as nothing new.
+const GATEWAY_EVERY = 10000;
+const num = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : 0);
+const gatewayRow = (x) => ({ in: num(x.inputUncached) + num(x.cacheRead) + num(x.cacheWrite), out: num(x.output), req: Math.max(0, num(x.requests) - num(x.errors)) });
+async function gatewayCounts(r) {
+  const get = async (path) => { const rows = await (await fetch(`${r.url}${path}`, { signal: AbortSignal.timeout(5000) })).json(); return Array.isArray(rows) ? rows : rows?.data || []; };
+  r.studio ??= (await get('/v1/models')).find((x) => x?.id === r.served)?.local_studio?.machineId || '';
+  const rows = await get('/api/usage/daily'), m = { prompt_tokens_total: 0, generation_tokens_total: 0, request_success_total: 0, ttft_prompt_tokens_sum: 0, ttft_seconds_sum: 0, gateway: true };
+  const mine = (x) => x && typeof x.model === 'string' && x.model && (!r.studio || x.machineId === r.studio);
+  for (const x of rows) {
+    if (!mine(x) || x.model !== r.served) continue;
+    const g = gatewayRow(x);
+    m.prompt_tokens_total += g.in; m.generation_tokens_total += g.out; m.request_success_total += g.req;
+    m.ttft_prompt_tokens_sum += num(x.inputUncached);
+    m.ttft_seconds_sum += num(x.ttftSumMs) / 1000;
+  }
+  // The first time a gateway is seen, what it served before is taken in once, every model it has a record of on this
+  // machine: by day, and the last two days by hour. A day (or hour) and model this app already counted itself is left
+  // as it is, so nothing is counted twice.
+  if (r.studio && !usage.imported[r.studio]) {
+    let hours = [];
+    try { hours = await get('/api/usage/hourly'); } catch { /* the days are enough */ }
+    const old = Date.now() - 48 * 3600e3, took = (all) => new Set(Object.entries(all).flatMap(([k, rows]) => Object.keys(rows).map((name) => `${k} ${name}`)));
+    for (const [all, list, keyOf] of [[usage.days, rows, (x) => (/^\d{4}-\d\d-\d\d$/.test(x.day) ? x.day : null)], [usage.hours, hours, (x) => (num(x.hour) > old ? new Date(x.hour).toISOString().slice(0, 13) : null)]]) {
+      const counted = took(all);
+      for (const x of list) {
+        const k = mine(x) && keyOf(x);
+        if (!k || counted.has(`${k} ${x.model}`)) continue;
+        const row = rowOf(all[k] ||= {}, x.model), g = gatewayRow(x);
+        for (const f of Object.keys(g)) row[f] += g[f];
+      }
+    }
+    usage.imported[r.studio] = new Date().toISOString();
+    dirty = true;
+  }
+  return m;
+}
+
 // Reads one engine's counters, adds what changed to the totals, and leaves its live numbers on the run.
 // Returns whether the counters were read. Asked twice in one tick, it reads once.
 export async function scrape(r, now) {
-  if (r.scraped === now) return true;
+  if (r.scraped === now || (r.gateway && now - r.scraped < GATEWAY_EVERY)) return true;
   let m;
   if (r.meter) m = { ...r.meter.counts }; // a host run has no /metrics; the app counts what passes through its port instead
   else {
     try {
-      const res = await fetch(`${r.url}/metrics`, { signal: AbortSignal.timeout(2000) });
-      if (!res.ok) return false;
-      m = parseMetrics(await res.text());
+      if (!r.gateway) {
+        const res = await fetch(`${r.url}/metrics`, { signal: AbortSignal.timeout(2000) });
+        if (!res.ok) return false;
+        const text = await res.text();
+        m = parseMetrics(text);
+        // No engine counters, and it says it is Local Studio's gateway: its own records are read from now on.
+        r.gateway = m.prompt_tokens_total === undefined && m.generation_tokens_total === undefined && m.tokens_predicted_total === undefined && /^local_studio_/m.test(text);
+      }
+      if (r.gateway) m = await gatewayCounts(r);
     } catch { return false; }
   }
   if (m.process_start) r.born = m.process_start; // which engine this is, wherever it is reached from
   const cur = { in: m.prompt_tokens_total || 0, out: m.generation_tokens_total || m.tokens_predicted_total || 0, req: m.request_success_total || 0 };
   const last = usage.last[keyOf(r)] || cur;
-  const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : cur[k]]));
+  const delta = Object.fromEntries(Object.keys(cur).map((k) => [k, cur[k] >= last[k] ? cur[k] - last[k] : m.gateway ? 0 : cur[k]]));
   usage.last[keyOf(r)] = cur;
   r.used ||= { in: 0, out: 0, req: 0 };
   // Tokens a speed measurement wrote are not usage. The scrape just after one still holds some, so it is skipped too.
