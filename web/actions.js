@@ -166,6 +166,7 @@ export const ACTS = {
   span: (d) => { s.span = d.v; },
   period: (d) => { s.period = d.v; },
   appauto: () => send('settings', 'POST', { autoUpdate: !s.snap.app.auto }),
+  appdownload: () => send('app/download'),
   appupdate: () => send('app/update'),
   appcheck: () => send('app/check'),
   savetoken: async () => { await send(scoped('settings'), 'POST', { hfToken: s.form.token || '' }); s.form.token = ''; go('back'); },

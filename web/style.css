@@ -383,3 +383,7 @@ html.wide #view { visibility: hidden; }
 /* For people who asked for less motion. */
 @media (prefers-reduced-motion: reduce) { #art, #art .color, .frame .screen::after { transition: none; } }
 .pfield input.field, .pfield select.field { max-width: none; }
+/* A newer version is out: the pill at the top that leads to it. */
+.upill { padding: 0 12px; height: 30px; font: 500 13px var(--ui); color: var(--accent); white-space: nowrap; flex: none; }
+.top .upill { margin-left: auto; margin-right: 6px; padding: 0 10px; font-size: 12px; }
+.upill.bad { box-shadow: inset 0 0 0 1px var(--red); }

@@ -13,7 +13,7 @@ export const MachineChip = ({ go, nav }) => html`<button class="mark chip"${data
 export const LayoutButton = () => canFull() && IconButton({ icon: s.full ? 'shrink' : 'grow', act: 'fs', label: s.full ? 'Exit fullscreen' : 'Fullscreen' });
 // The top of a panel screen: Home's (the machine, the layout switch, Settings), a screen's (the name and Close), or bare.
 export const HomeBar = () => (s.snap
-  ? html`<div class="top">${MachineChip({ go: 'machines' })}<span class="topr chip">${LayoutButton()}${IconButton({ icon: 'menu', go: 'settings', label: 'Settings' })}</span></div>`
+  ? html`<div class="top">${MachineChip({ go: 'machines' })}${UpdatePill(true)}<span class="topr chip">${LayoutButton()}${IconButton({ icon: 'menu', go: 'settings', label: 'Settings' })}</span></div>`
   : html`<div class="top">${Wordmark}</div>`);
 export const CloseBar = (go = 'back') => html`<div class="top">${Wordmark}${IconButton({ icon: 'close', go, label: 'Close', cls: 'x' })}</div>`;
 export const BareBar = html`<div class="top">${Wordmark}</div>`;
@@ -43,9 +43,21 @@ export const SwitchRow = ({ name, sub, toggle, grip, hidden, key }) => html`<div
 // Names on the left, values on the right. Each row is [name, value].
 export const KeyValue = (rows, { small } = {}) => html`<div class="kv${small ? ' small' : ''}">${rows.map(([k, v]) => html`<span class="label">${k}</span><b>${v}</b>`)}</div>`;
 export const ProgressBar = (fraction) => html`<div class="bar"><i style="width:${(Math.max(0, Math.min(1, fraction)) * 100).toFixed(1)}%"></i></div>`;
+// Where an update of the app has got to, in a few words: null when there is none to show. `short` for the panel.
+export function updateWord(short) {
+  const v = s.snap?.app;
+  if (!v?.latest) return null;
+  if (v.phase === 'downloading') return `${short ? '' : 'Downloading '}${Math.round((v.progress || 0) * 100)}%`;
+  if (v.phase === 'ready') return short ? 'Restart' : 'Restart to update';
+  if (v.phase === 'installing') return 'Updating…';
+  if (v.phase === 'failed') return short ? 'Update' : 'Update failed';
+  return short || !/^\d/.test(v.latest) ? 'Update' : `Update to ${v.latest}`;
+}
+// Shown at the top while a newer version is out, as T3 Code shows its own: it opens the page where it is downloaded.
+export const UpdatePill = (short) => updateWord(short) && html`<button class="upill chip${s.snap.app.phase === 'failed' ? ' bad' : ''}" data-go="app-update" aria-label="A new version of Local AI is out">${updateWord(short)}</button>`;
 // The app's version at the foot of Settings, with the update when there is one.
 export function VersionFoot() {
   const v = s.snap.app;
-  const right = v.latest ? html`<button data-go="app-update">Update${/^\d/.test(v.latest) ? ` to ${v.latest}` : ''}</button>` : v.can ? html`<span>Up to date</span>` : '';
+  const right = v.latest ? html`<button data-go="app-update">${updateWord()}</button>` : v.can ? html`<span>Up to date</span>` : '';
   return html`<div class="vfoot"><button class="vname" data-go="app-update">Local AI ${v.version}</button>${right}</div>`;
 }

@@ -17,7 +17,7 @@
     "release:mac": "scripts/release-mac.sh",
     "release:win": "scripts/release-win.sh",
     "release:public": "scripts/publish.sh",
-    "check": "eslint . && node tests/screens.mjs && node tests/fuzz.mjs && node tests/integration.mjs && node tests/e2e.mjs"
+    "check": "eslint . && node tests/screens.mjs && node tests/fuzz.mjs && node tests/integration.mjs && node tests/update.mjs && node tests/e2e.mjs"
   },
   "build": {
     "appId": "ai.sybilsolutions.local",

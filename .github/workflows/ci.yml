@@ -47,6 +47,8 @@ jobs:
           FUZZ_N: 20000
       - name: The real server against stand-in engines, Docker and a second machine
         run: node tests/integration.mjs
+      - name: An installed copy updating itself from a signed release
+        run: node tests/update.mjs
   e2e:
     needs: lint
     runs-on: ubuntu-24.04
