@@ -120,6 +120,8 @@ const HOMES = [
   ['opened', () => reset({ snap: snapshot({ runs: [run('ready')] }), opened: 18701 })],
   ['external', withRun('ready', { external: true, recipe: null })],
   ['external-noreply', withRun('unresponsive', { external: true, recipe: null, view: { line: t('Last heard 3 min ago'), p: 0.6 } })],
+  ['studio', withRun('ready', { external: true, byStudio: true, recipe: null })],
+  ['studio-noreply', withRun('unresponsive', { external: true, byStudio: true, recipe: null, view: { line: t('Last heard 3 min ago'), p: 0.6 } })],
   ['noreply', withRun('unresponsive', { view: { line: t('Last heard 3 min ago'), p: 0.6 } })],
   ['sleeping', withRun('stopping')],
   ['failed-room', withRun('failed', { error: t('CUDA out of memory'), view: { word: 'Ran out of room', line: t('Too big for the free GPU memory'), p: -1 } })],

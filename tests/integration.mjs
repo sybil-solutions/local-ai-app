@@ -177,6 +177,25 @@ const studio = await serve((req) => {
 });
 // The engine behind that gateway answers too, on a port of its own, with no counters: the gateway is the model.
 const twin = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ id: 'studio-model', max_model_len: 32768, owned_by: 'local-ai-tests' }] }] : [404, { error: 'not found' }]));
+// Local Studio's controller, which started that model. A program of its own (Local AI finds a controller by the
+// folder it runs in, where its key is), answering only with that key. It says what it runs, stops it when asked
+// (/evict), and tells the test how often it was asked (/asked).
+const STUDIO_KEY = 'studio-test-key', studioHome = join(HOME, 'local-studio');
+mkdirSync(join(studioHome, 'data'), { recursive: true });
+writeFileSync(join(studioHome, 'data', 'api-settings.json'), JSON.stringify({ apiKey: STUDIO_KEY }));
+const controller = process.platform === 'linux' && spawn(process.execPath, ['-e', `
+  let running = true, evicts = 0;
+  const server = require('node:http').createServer((req, res) => {
+    const send = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+    if (req.url === '/health') return send(200, { status: 'ok' });
+    if (req.url === '/asked') return send(200, { evicts, running });
+    if (req.headers.authorization !== 'Bearer ${STUDIO_KEY}') return send(401, { error: 'key' });
+    if (req.url === '/status') return send(200, { running, process: running ? { served_model_name: 'studio-model', port: 8000 } : null });
+    if (req.url === '/evict' && req.method === 'POST') { evicts++; setTimeout(() => { running = false; }, 1500); return send(200, { ok: true }); }
+    send(404, { error: 'not found' });
+  });
+  server.listen(0, '127.0.0.1', () => console.log(server.address().port));`], { cwd: studioHome, stdio: ['ignore', 'pipe', 'inherit'] });
+const STUDIO_PORT = controller ? +(await new Promise((done) => controller.stdout.once('data', (d) => done(String(d).trim())))) : 0;
 
 // The app itself.
 const logFile = join(HOME, 'server.log');
@@ -185,7 +204,7 @@ let server = null, log = '';
 // `arc: true` gives that machine Intel Arc cards as well: the stand-in lspci names the ones in lspci.txt.
 const FAKE_DOCKER = join(HOME, 'docker'), THERE_DOCKER = join(HOME, 'docker-second');
 function startServer({ nvidia = false, arc = false } = {}) {
-  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'),
+  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_STUDIO_PORT: String(STUDIO_PORT || 1),
     HF_ENDPOINT: `http://127.0.0.1:${hf.address().port}`, LOCAL_AI_MODELS: `${join(HOME, 'models')}:${HAVE}`, // downloads go to the first folder; the second holds weights already here
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
     ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}), ...(arc ? { FAKE_LSPCI: join(HOME, 'lspci.txt') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -224,7 +243,7 @@ async function cleanup() {
   for (const dir of [FAKE_DOCKER, THERE_DOCKER]) { try { for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) pids.push(JSON.parse(readFileSync(join(dir, f), 'utf8')).pid); } catch { /* the Docker path never ran */ } }
   try { pids = pids.concat(Object.values(JSON.parse(readFileSync(join(HOME, 'hosts.json'), 'utf8'))).map((h) => h.pid)); } catch { /* none started */ }
   for (const pid of pids) if (pid && alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
-  outside.close(); registry.close(); proxy.close(); studio.close(); twin.close(); hf.close();
+  outside.close(); registry.close(); proxy.close(); studio.close(); twin.close(); hf.close(); if (controller) controller.kill();
   writeFileSync(logFile, log);
   if (failures.length) console.log(`\n--- server log (last 60 lines) ---\n${log.trim().split('\n').slice(-60).join('\n')}`);
   rmSync(HOME, { recursive: true, force: true });
@@ -379,6 +398,14 @@ try {
   check('counts tokens through Local Studio\'s gateway, from when it is first seen, for this machine and model only', viaStudio.stats.used === 1600, `used ${viaStudio.stats.used}`);
   const past = (await api('/api/usage')).json.days.find((d) => d.d === '2026-01-01');
   check('takes in what the gateway served before, once, for this machine only', past?.models['studio-model'] === 5000 && past?.models['other-model'] === 99000 && past.req === 11, JSON.stringify(past));
+  if (controller) {
+    // Local Studio started it, so it can be stopped: by asking Local Studio, with its key, and waiting until it has.
+    const asked = async () => (await fetch(`http://127.0.0.1:${STUDIO_PORT}/asked`)).json();
+    const known = await until('it to be known as Local Studio\'s', async () => (await state()).runs.find((r) => r.id === sport && r.byStudio), 45000);
+    check('a model Local Studio started is known as Local Studio\'s', !!known);
+    const stopped = await api(`/api/runs/${sport}`, { method: 'DELETE' }), told = await asked();
+    check('and is stopped by asking Local Studio, which is waited for', stopped.status === 200 && told.evicts === 1 && !told.running && !(await state()).runs.some((r) => r.id === sport), `status ${stopped.status} ${JSON.stringify(told)}`);
+  }
 
   // A second Local AI, with a model of its own that this machine can also reach on a port here (as it would through
   // a forwarder). Until the two are connected nothing says whose model it is, so it is shown as running here. Once
