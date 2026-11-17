@@ -3,7 +3,7 @@ import { AgentList, AgentsFoot } from './components/agents.js';
 import { Button, QuietButton } from './components/controls.js';
 import { DeskPick, offLine, OpenButtons, runLine, StartButton, Stats, StopButton, Widget } from './components/home.js';
 import { Dove, Icon } from './components/icons.js';
-import { KeyValue, LayoutButton, MachineChip, ProgressBar, VersionFoot } from './components/layout.js';
+import { KeyValue, LayoutButton, MachineChip, ProgressBar, UpdatePill, VersionFoot } from './components/layout.js';
 import { CapNames, Caps, EditForm, facts, meta, ModelCard, UseButton } from './components/models.js';
 import { ctxOf, fmt } from './format.js';
 import { attrs, data, html } from './html.js';
@@ -25,7 +25,7 @@ export function NavBar(page) {
   if (!s.snap) return html`<header class="nav"><span class="mark chip">${Dove}<span>Local AI</span></span></header>`;
   const now = page ? SECTION[page] : 'home', r = D() && (s.dev === -1 || s.snap.devices[s.dev]?.online) && run(); // an offline machine's last snapshot is not live
   const live = r?.phase === 'ready' && html`<button class="nlive" data-nav="home" aria-label="${r.name} is running. Go to Home"><i></i><span class="nm">${r.name}</span><em>${fmt(r.stats?.tps || 0)} tok/s</em></button>`;
-  return html`<header class="nav">${MachineChip({ nav: 'machines' })}<nav class="nlinks" aria-label="Sections">${NAV.map(([k, label, to], i) => html`<button${data({ nav: to })} title="${label} (${i + 1})"${attrs({ 'aria-current': now === k && 'page' })}>${label}</button>`)}</nav><div class="nr">${live}${LayoutButton()}</div></header>`;
+  return html`<header class="nav">${MachineChip({ nav: 'machines' })}<nav class="nlinks" aria-label="Sections">${NAV.map(([k, label, to], i) => html`<button${data({ nav: to })} title="${label} (${i + 1})"${attrs({ 'aria-current': now === k && 'page' })}>${label}</button>`)}</nav><div class="nr">${UpdatePill()}${live}${LayoutButton()}</div></header>`;
 }
 
 // Home: the widgets you switched on in a row, then a strip with a title, something in the middle, and the buttons.

@@ -144,11 +144,19 @@ export const SCREENS = {
     return html`${CloseBar()}${Head('Registry')}${KeyValue([['Source', 'local-ai-registry'], ['Version', c.id || '—'], ['Recipes', c.count], ['Checked', c.at ? ago(c.at) : '—']])}${c.error && Note('Couldn’t reach it. Using the saved list.')}${Spacer}${Button({ label: 'Check for updates', act: 'refresh', kind: 'go' })}`;
   },
   'hf-token': () => html`${CloseBar()}${Head('Hugging Face token')}${Note('Some models are locked until you accept their terms on Hugging Face. A read token lets Local AI download them.')}${typed('token', 'Token', D().hfToken ? `Saved, ends in ${D().hfToken}` : 'hf_…', 'password')}${TextLink({ label: 'Make a token on Hugging Face', href: 'https://huggingface.co/settings/tokens', style: 'margin:2px 0 0;text-align:left' })}${Spacer}${Button({ label: 'Save', act: 'savetoken', kind: 'go' })}${D().hfToken && Button({ label: 'Remove token', act: 'removetoken', kind: 'neg' })}`,
+  // A newer version: Download, then Restart to update (as T3 Code does). A copy cloned from its repo pulls and restarts in one.
   'app-update': () => {
-    const v = s.snap.app, named = /^\d/.test(v.latest || '');
-    const about = v.latest ? `You have ${v.version}` : v.can ? 'You have the newest version' : 'This copy wasn’t installed from its repo, so it can’t update itself';
-    const auto = SwitchRow({ name: 'Update automatically', sub: 'Models keep running while it restarts', toggle: Toggle({ on: v.auto, act: 'appauto', label: 'Update automatically' }) });
-    return html`${CloseBar()}${Head(`Local AI ${named ? v.latest : v.version}`)}${Note(about)}${v.notes.length > 0 && html`${Label('What’s new', { group: true })}<ul class="notes">${v.notes.map((n) => html`<li>${n}</li>`)}</ul>`}${v.phase === 'failed' && Note(`The last update failed: ${v.error}`)}${Spacer}${v.can && html`${auto}${v.latest ? Button({ label: 'Update and restart', act: 'appupdate', kind: 'go' }) : Button({ label: 'Check for updates', act: 'appcheck' })}`}`;
+    const v = s.snap.app, named = /^\d/.test(v.latest || ''), app = v.kind === 'app';
+    const about = v.latest ? `${named ? `Local AI ${v.latest} is out. ` : 'A newer build is out. '}You have ${v.version}` : v.can ? `You have the newest version${v.checked ? ` · checked ${ago(v.checked).toLowerCase()}` : ''}`
+      : 'This copy can’t update itself. Download the newest version';
+    const auto = SwitchRow({ name: 'Update automatically', sub: app ? 'Downloads by itself. You restart when it suits you' : 'Models keep running while it restarts', toggle: Toggle({ on: v.auto, act: 'appauto', label: 'Update automatically' }) });
+    const step = !v.latest ? Button({ label: 'Check for updates', act: 'appcheck' })
+      : v.kind === 'git' ? Button({ label: 'Update and restart', act: 'appupdate', kind: 'go' })
+      : v.phase === 'downloading' ? html`${ProgressBar(v.progress || 0)}${Line(`Downloading · ${Math.round((v.progress || 0) * 100)}%`)}`
+      : v.phase === 'ready' ? Button({ label: 'Restart to update', act: 'appupdate', kind: 'go' })
+      : Button({ label: v.phase === 'failed' ? 'Try again' : `Download${named ? ` ${v.latest}` : ''}`, act: 'appdownload', kind: 'go' });
+    const page = v.url || (!v.can ? 'https://local.sybilsolutions.ai/download/' : null);
+    return html`${CloseBar()}${Head(`Local AI ${named ? v.latest : v.version}`)}${Note(about)}${v.notes.length > 0 && html`${Label('What’s new', { group: true })}<ul class="notes">${v.notes.map((n) => html`<li>${n}</li>`)}</ul>`}${v.error && Note(v.phase === 'failed' ? `The update didn’t work: ${v.error}` : v.error)}${page && TextLink({ label: v.can ? 'Release page' : 'Download Local AI', href: page, style: 'margin:2px 0 0;text-align:left' })}${Spacer}${v.can && html`${auto}${step}`}`;
   },
 };
 for (const id of Object.keys(STATE)) SCREENS[id] = () => Plain(id);

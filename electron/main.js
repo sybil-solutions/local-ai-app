@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, session, shell } from 'electron';
+import { installerFor } from './updater.js';
 
 // The app is Local AI, whichever way it was started. The installed app says so by itself. Run from source, the
 // program doing the running is Electron's own, and the Dock and the menu bar's first word take its name; everything
@@ -102,6 +103,9 @@ async function boot() {
   if (!key) {
     try { server = await (await import('../server/index.js')).start(); } catch (e) { throw e.code === 'EADDRINUSE' ? new Error(`Port ${PORT} is in use by another program`, { cause: e }) : e; }
     key = server.key;
+    // The server this app runs downloads and checks its updates; the app puts them in place (electron/updater.js).
+    const install = installerFor(app);
+    if (install) (await import('../server/update.js')).setInstaller(install);
   }
   const win = new BrowserWindow({ width: 1080, height: 820, minWidth: ROOMY.w, minHeight: ROOMY.h, backgroundColor: '#161616', autoHideMenuBar: true, title: 'Local AI', icon: ICON,
     webPreferences: { preload: join(HERE, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, webviewTag: false, spellcheck: false } });

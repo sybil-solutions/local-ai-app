@@ -1,6 +1,6 @@
 // The server. One port serves the web app, the API in ROUTES below, and a long-polled snapshot of everything on this machine.
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import * as speed from './speed.js';
 import { sendStatic } from './static.js';
 import * as update from './update.js';
 import * as usage from './usage.js';
-import { at, config, event, fail, HOST, PORT, saveConfig } from './util.js';
+import { at, config, event, fail, HOST, PORT, saveConfig, sleep } from './util.js';
 import * as weights from './weights.js';
 
 // Sent with everything. The page may load only what this server serves (plus pictures in a model card), run only its
@@ -50,7 +50,7 @@ async function saveSettings({ b }) {
     const order = [...new Set(b.home.order.filter((k) => BLOCKS.includes(k)))];
     config.home = { order: [...order, ...BLOCKS.filter((k) => !order.includes(k))], on: BLOCKS.filter((k) => b.home.on.includes(k)) };
   }
-  if (typeof b.autoUpdate === 'boolean') config.autoUpdate = b.autoUpdate;
+  if (typeof b.autoUpdate === 'boolean') { const on = b.autoUpdate && !config.autoUpdate; config.autoUpdate = b.autoUpdate; if (on) setTimeout(update.check, 0); } // switched on: an update already out starts now
   if ('hfToken' in b) weights.saveToken(b.hfToken);
   if (typeof b.picture === 'string') {
     const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(b.picture) || fail(400, 'Choose a picture');
@@ -90,6 +90,8 @@ const ROUTES = compile({
   'ANY /api/devices/:i/:rest': async ({ req, res, p, q, b }) => { const out = await machines.forward(+p.i, req.method, `${p.rest}${q.size ? `?${q}` : ''}`, b); res.writeHead(out.status, { 'content-type': out.type }); res.end(out.body); },
   'POST /api/docker/start': engine.startDocker,
   'POST /api/app/check': update.check,
+  // A download takes minutes: it is started, and the page follows it in the snapshot. Refused at once when there is nothing to download.
+  'POST /api/app/download': async () => { const job = update.download(); job.catch(() => {}); await Promise.race([job, sleep(50)]); return update.view(); },
   'POST /api/app/update': update.update,
 });
 
@@ -186,7 +188,7 @@ export async function start() {
   for (const part of [engine, agents, update, machines]) part.onChange(soon);
   machines.follow();
   recipes.refresh();
-  update.check();
+  setTimeout(update.check, 15000); // as T3 Code does: once it has settled, then every four hours
   await share();
   await engine.tick();
   await publish();
@@ -194,10 +196,12 @@ export async function start() {
   every(3000, async () => agents.syncPi(await sized()));
   every(30000, async () => { usage.flush(); await share(); });
   every(3600e3, recipes.refresh);
-  every(6 * 3600e3, update.check);
+  every(4 * 3600e3, update.check);
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { usage.flush(); process.exit(0); });
   event('info', 'server.started', { host: HOST, port: PORT });
   return { server, url: `http://127.0.0.1:${PORT}`, key: config.key, stop: usage.flush };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) start().catch((e) => { event('error', 'server.fatal', { error: e.message }); process.exit(1); });
+// Started as a program (not imported by the desktop app). Compared as real paths: the one it was started by may go through a link.
+const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) start().catch((e) => { event('error', 'server.fatal', { error: e.message }); process.exit(1); });

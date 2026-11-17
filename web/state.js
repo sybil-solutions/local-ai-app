@@ -111,7 +111,7 @@ export function resolve() {
   if (!s.snap) return s.online ? 'boot' : 'cantconnect';
   if (!s.online) return 'cantconnect';
   if (s.dev !== -1 && (!s.snap.devices[s.dev].online || !D())) return 'unreachable';
-  if (s.snap.app.phase === 'updating') return 'app-updating';
+  if (s.snap.app.phase === 'installing') return 'app-updating';
   const d = D(), r = run();
   if (r) {
     const late = r.phase === 'starting' && r.expected && (Date.now() - r.since) / 1000 > r.expected * 1.5;
