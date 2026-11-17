@@ -555,11 +555,18 @@ try {
   const noted = await api(`/api/card?id=${encodeURIComponent(NOTED)}`);
   check('they come with its card, with what it needs of the host, even when the model has no card', noted.status === 200 && /^NEEDS: one card/.test(noted.json?.notes || '') && noted.json.needs.ram === 1 && noted.json.needs.disk === 3 && noted.json.needs.nvme === true, JSON.stringify(noted.json));
   check('a recipe with no notes and no card still answers that it has none', (await api(`/api/card?id=${encodeURIComponent(DOCKED)}`)).status === 404);
+  // A proxy in front of that model (as Local Studio's gateway lists the models it can reach), found before the model
+  // says its name, while it loads. Once the model is ready it is the one shown, once.
+  const front = await serve((req) => (req.url === '/v1/models' ? [200, { data: [{ id: 'fake-engine', owned_by: 'local-ai-tests' }] }] : req.url === '/metrics' ? [200, 'local_studio_uptime_seconds 1', 'text/plain'] : [404, { error: 'not found' }]));
+  const fronted = await until('the proxy to be found', async () => (await state()).runs.find((r) => r.id === front.address().port), 45000).catch(() => null);
   const begun = await api('/api/runs', { method: 'POST', body: { recipe: DOCKED } });
   check('starts the container recipe', Number.isInteger(begun.json?.id), JSON.stringify(begun));
   const cid = begun.json.id;
   const up = await until('the container to be ready', async () => { const r = (await state()).runs.find((x) => x.id === cid); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready' && r; }, 60000);
   check('the container run is ready and serves its model', up.served === 'fake-engine' && !up.host && !up.external);
+  const once = await until('the proxy to give way to the model', async () => !(await state()).runs.some((r) => r.id === front.address().port), 10000).catch(() => false);
+  check('a proxy in front of a model Local AI started, found while it loaded, gives way to it once it is ready', !!fronted && once, fronted ? 'still shown' : 'the proxy was never found');
+  front.close();
   const made = JSON.parse(readFileSync(join(FAKE_DOCKER, `local-ai-${cid}.json`), 'utf8')), opt = (name) => made.options.filter((o) => o[0] === name).map((o) => o[1]);
   check('Docker was given the pinned image and nothing else as the image', made.image === PINNED);
   check('the container can gain no privileges and gets only the GPUs it was given', opt('--security-opt').join() === 'no-new-privileges' && opt('--gpus').join() === '"device=0"' && !made.options.some((o) => ['--privileged', '--cap-add', '--device', '--pid', '--network', '--net'].includes(o[0])), JSON.stringify(made.options));
