@@ -37,7 +37,7 @@ export const STATE = {
     return { pose: 'broken', word: f.word, line: f.line, extra: TextLink({ label: 'Engine output', go: 'logs' }), btns: html`${first}${Button({ label: 'Back', act: 'stop' })}` };
   },
   // A model started outside Local AI can't be restarted or stopped from here, so it gets no buttons.
-  noreply: () => ({ pose: 'broken', word: 'No reply', line: run().view.line, btns: !run().external && html`${Button({ label: 'Restart', act: 'retry', kind: 'go' })}${Button({ label: 'Stop', act: 'stop', kind: 'neg' })}` }),
+  noreply: () => ({ pose: 'broken', word: 'No reply', line: run().view.line, btns: run().external ? StopButton() : html`${Button({ label: 'Restart', act: 'retry', kind: 'go' })}${Button({ label: 'Stop', act: 'stop', kind: 'neg' })}` }),
   // On Windows Docker is Docker Desktop, which hands the GPUs to engines through WSL 2.
   needsdocker: () => ({ pose: 'apart', word: 'Needs Docker', line: 'One free install', btns: LinkButton({ label: 'Install Docker', href: `https://docs.docker.com/${D().os === 'win32' ? 'desktop/setup/install/windows-install/' : 'engine/install/'}`, kind: 'go' }) }),
   // Docker is running, but not for this user: on Linux, one who is not in the docker group. The fix needs sudo, which

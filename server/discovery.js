@@ -2,6 +2,7 @@
 import { probeApis, pulse } from './health.js';
 import { innerPorts } from './hosts.js';
 import * as machines from './machines.js';
+import * as studio from './studio.js';
 import { changed, runs, update } from './runs.js';
 import * as usage from './usage.js';
 import { event, PORT, run } from './util.js';
@@ -93,6 +94,7 @@ export async function discover(now) {
     if (!up) continue;
     if (r.phase !== 'ready') update(r, { phase: 'ready', heard: null });
     if (!r.apis) await probeApis(r);
+    if (now - (r.studioAt || 0) > 30000) { r.studioAt = now; const by = await studio.owns(r.served); if (by !== !!r.byStudio) update(r, { byStudio: by }); } // Local Studio's: it can be stopped
     await usage.scrape(r, now);
   }
   // Right after the app starts, connected machines have not answered yet, so a forwarder to one of them could not be

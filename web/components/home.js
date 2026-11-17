@@ -17,7 +17,7 @@ export const Status = ({ pose, word, line = '', p = 0 }) => html`${Art(pose, p)}
 // The line under the chosen model when nothing runs: why it can't start, what starting it costs, or that it is ready.
 export const offLine = (c) => (!hasRoom(c) ? 'The GPUs are in use by another program' : !c.ready ? `${c.sizeGb ? `${Math.round(c.sizeGb)} GB` : 'Model'} to download`
   : group()?.untested ? `Made for ${group().untested} · untested here` : c.loadS ? `Starts in about ${mins(c.loadS)} min` : 'Ready to start');
-export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.external ? 'Running · started outside Local AI' : 'Running');
+export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.byStudio ? 'Running · started by Local Studio' : r.external ? 'Running · started outside Local AI' : 'Running');
 
 const Stat = (label, value, live) => html`<div class="stat${live ? ' live' : ''}"><b>${fmt(value)}</b><span class="label">${label}</span></div>`;
 // The running model's numbers. Lifetime tokens opens Usage.
@@ -27,7 +27,8 @@ const GpuBars = () => html`<div class="wbtn"><span class="wtitle">GPUs</span>${D
 
 export const StartButton = () => Button({ label: chosen().ready ? 'Run' : 'Download', act: 'start', kind: 'go', disabled: !hasRoom() });
 export const OpenButtons = () => Split(agentName() ? Button({ label: `Open ${agentName()}`, act: 'open', kind: 'go' }) : Button({ label: 'Choose an agent', go: 'chooser', kind: 'go' }), Button({ label: Icon('down'), go: 'chooser', aria: 'Choose an agent' }));
-export const StopButton = () => !run().external && Button({ label: 'Stop', act: 'stop', kind: 'neg' });
+// A model Local Studio started is stopped by asking Local Studio; any other that Local AI did not start is left alone.
+export const StopButton = () => (!run().external || run().byStudio) && Button({ label: 'Stop', act: 'stop', kind: 'neg' });
 
 // The panel's Home. `phase` is off (nothing runs), run or opened. The model's name and state are always there, at the
 // Picture block's place in your order; the picture itself only when that block is on. Without the picks, the name of
