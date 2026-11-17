@@ -88,6 +88,11 @@ export async function discover(now) {
   // is only slow (an engine under load answers late) stays, shown as not replying, so Home does not lose it and find it again.
   for (const r of runs.values()) {
     if (!r.external) continue;
+    // The same model as one Local AI started, seen through a proxy in front of it (Local Studio's gateway lists it
+    // too), found while that one was still loading and did not yet say its name: it is that model, shown once. What
+    // was counted through the proxy is taken back, as the model counts its own tokens.
+    const own = [...runs.values()].find((o) => !o.external && o.served && o.served === r.served);
+    if (own) { runs.delete(r.id); usage.uncount(r); usage.forget(r); event('info', 'run.same', { id: r.id, model: r.served, as: own.id }); changed(); continue; }
     const up = await pulse(r, now);
     if (!up && (r.closed >= 3 || r.misses >= 150)) { runs.delete(r.id); event('info', 'run.gone', { id: r.id }); changed(); continue; }
     if (!up && r.misses >= 15 && r.phase === 'ready') { update(r, { phase: 'unresponsive', heard: now - r.misses * 2000 }); event('warn', 'run.unresponsive', { id: r.id }); }
