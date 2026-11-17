@@ -5,7 +5,7 @@ import globals from 'globals';
 export default [
   { ignores: ['design/**', 'node_modules/**', 'dist/**', 'build/**'] },
   js.configs.recommended,
-  { files: ['server/**/*.js', 'electron/**/*.js', 'tests/**/*.mjs', '*.js'], languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.node } },
+  { files: ['server/**/*.js', 'electron/**/*.js', 'tests/**/*.mjs', 'scripts/**/*.mjs', '*.js'], languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.node } },
   { files: ['electron/**/*.cjs'], languageOptions: { ecmaVersion: 2024, sourceType: 'commonjs', globals: globals.node } },
   { files: ['web/**/*.js'], languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.browser } },
   // The page: markup is only ever written with the html tag (which escapes what is put into it) and only ever reaches
