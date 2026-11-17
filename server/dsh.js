@@ -111,9 +111,10 @@ function replace(file, text) {
 // Writes the running models into the Harness's settings and makes `chosen` ({ key, model }) the one it starts on.
 // Returns null when done, else why not, as the end of a sentence. The settings as they were before Local AI first
 // changed them are kept beside them (cordis.patch.yml.before-local-ai).
+export const NOT_SET_UP = 'it has not been set up on this computer yet'; // its first start writes the settings
 export function wire(models, chosen) {
   const home = process.env.DSH_HOME || join(homedir(), '.dsh'), settings = join(home, 'profiles', 'web', 'cordis.patch.yml'), keys = join(home, '.credentials.yaml');
-  if (!existsSync(settings)) return 'it has not been set up on this computer yet';
+  if (!existsSync(settings)) return NOT_SET_UP;
   const before = readFileSync(settings, 'utf8'), listed = withModels(before, models), after = listed === null ? null : withDefault(listed, chosen.key, chosen.model);
   if (after === null) return 'its settings file is not laid out the way Local AI expects';
   const had = existsSync(keys) ? readFileSync(keys, 'utf8') : null, keyed = withKey(had);

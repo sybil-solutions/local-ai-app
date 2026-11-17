@@ -35,10 +35,13 @@ export async function openT3(bin, target, folder, targets) {
 
 // DeepSeek Harness: the running models are written into its settings as providers named as Pi's are, and the one
 // opened becomes the model its new conversations start on (see dsh.js). Then the app is opened.
-export async function openDsh(bundle, target, _folder, targets) {
+// Returns why that could not be done, or null. The `dsh` command (no app) reads the same files.
+export function wireDsh(target, targets) {
   const models = targets.filter((t) => !t.apis || t.apis.includes('chat')).map((t) => ({ key: t.key, model: t.model, title: titleOf(t), url: t.url, ctx: t.ctx || WINDOW, vision: !!t.vision }));
-  let why;
-  try { why = dsh.wire(models, { key: target.key, model: target.model }); } catch (e) { why = e.message; }
+  try { return dsh.wire(models, { key: target.key, model: target.model }) || null; } catch (e) { return e.message; }
+}
+export async function openDsh(bundle, target, _folder, targets) {
+  const why = wireDsh(target, targets);
   const opened = await launched('open', [bundle]);
   event(opened && !why ? 'info' : 'warn', 'harness.open', { agent: 'dsh', model: `${target.key}/${target.model}`, opened, ...(why ? { error: why } : {}) });
   if (!opened) fail(502, 'DeepSeek Harness did not open');

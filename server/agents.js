@@ -2,7 +2,8 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { openDsh, openT3 } from './apps.js';
+import { openDsh, openT3, wireDsh } from './apps.js';
+import { NOT_SET_UP } from './dsh.js';
 import { countAsLocal } from './omarchy.js';
 import { piArgs, WINDOW } from './pi.js';
 import { inShell, launched, q, shell, terminalPath, WIN } from './shell.js';
@@ -14,10 +15,15 @@ export { setTerminal, terminalChoice } from './terminals.js';
 
 const openai = (url, model) => ({ env: { OPENAI_BASE_URL: `${url}/v1`, OPENAI_API_BASE: `${url}/v1`, OPENAI_API_KEY: 'local', OPENAI_MODEL: model }, args: [] });
 
+// Hermes's own installer, told to ask nothing.
+const HERMES = WIN ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive"'
+  : 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive';
+// Where its installer puts the `hermes` command, which a terminal opened before the install has not got on its PATH.
+const HERMES_AT = WIN ? ['hermes.exe', 'hermes.cmd'].map((f) => join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'hermes', 'bin', f)) : [join(homedir(), '.local', 'bin', 'hermes')];
 const HARNESSES = {
   pi: { name: 'Pi', needs: 'chat', npm: '@earendil-works/pi-coding-agent', build: piArgs },
   omp: { name: 'Oh My Pi', needs: 'chat', npm: '@oh-my-pi/pi-coding-agent', build: piArgs },
-  claude: { name: 'Claude Code', needs: 'messages', npm: '@anthropic-ai/claude-code', self: 'claude update', build: (t) => ({
+  claude: { name: 'Claude Code', needs: 'messages', npm: '@anthropic-ai/claude-code', self: 'update', build: (t) => ({
     env: { ANTHROPIC_BASE_URL: t.url, ANTHROPIC_AUTH_TOKEN: 'local', ANTHROPIC_MODEL: t.model, ANTHROPIC_DEFAULT_SONNET_MODEL: t.model, ANTHROPIC_DEFAULT_OPUS_MODEL: t.model, ANTHROPIC_DEFAULT_HAIKU_MODEL: t.model },
     args: ['--model', t.model],
   }) },
@@ -26,18 +32,28 @@ const HARNESSES = {
     args: ['-c', 'model_providers.local.name=Local AI', '-c', `model_providers.local.base_url=${t.url}/v1`, '-c', 'model_providers.local.wire_api=responses',
       '-c', 'model_providers.local.env_key=LOCAL_AI_KEY', '-c', 'model_provider=local', '-c', `model=${t.model}`, '-c', `model_context_window=${t.ctx || WINDOW}`],
   }) },
-  opencode: { name: 'OpenCode', needs: 'chat', npm: 'opencode-ai', self: 'opencode upgrade', build: (t) => ({
+  opencode: { name: 'OpenCode', needs: 'chat', npm: 'opencode-ai', self: 'upgrade', build: (t) => ({
     env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: `local-ai/${t.model}`, small_model: `local-ai/${t.model}`,
       provider: { 'local-ai': { npm: '@ai-sdk/openai-compatible', name: 'Local AI', options: { baseURL: `${t.url}/v1`, apiKey: 'local' },
         models: { [t.model]: { name: t.model, limit: { context: t.ctx || WINDOW, output: t.ctx || WINDOW } } } } } }) },
     args: ['--model', `local-ai/${t.model}`],
   }) },
-  hermes: { name: 'Hermes', needs: 'chat', self: 'hermes update', build: (t) => openai(t.url, t.model) },
+  // Hermes is not on npm: its own installer sets it up (without the questions it asks in a terminal), and it updates itself.
+  hermes: { name: 'Hermes', needs: 'chat', self: 'update', script: HERMES, releases: 'NousResearch/hermes-agent', paths: HERMES_AT, build: (t) => openai(t.url, t.model) },
   copilot: { name: 'GitHub Copilot', needs: 'chat', npm: '@github/copilot', build: (t) => ({ env: { COPILOT_PROVIDER_BASE_URL: `${t.url}/v1`, COPILOT_PROVIDER_API_KEY: 'local' }, args: ['--model', t.model] }) },
   // Desktop apps, not terminal programs. Each is opened its own way (`open`, further down) and updates itself.
-  t3: { name: 'T3 Code', needs: 'chat', paths: [join(homedir(), '.t3', 'bin', 't3')], open: (...args) => openT3(binOf('t3'), ...args) },
-  dsh: { name: 'DeepSeek Harness', needs: 'chat', bare: true, paths: ['/Applications/DeepSeek Harness.app', join(homedir(), 'Applications', 'DeepSeek Harness.app')], open: (...args) => openDsh(binOf('dsh'), ...args) },
+  // T3 Code is installed from its download page, and puts its `t3` command where it is looked for.
+  t3: { name: 'T3 Code', needs: 'chat', site: 'https://github.com/pingdotgg/t3code/releases/latest', paths: [join(homedir(), '.t3', 'bin', 't3')], open: (...args) => openT3(binOf('t3'), ...args) },
+  // DeepSeek Harness is an app where one was installed (`bundles`), else the `dsh` command npm installs, which serves
+  // its web UI (`dsh web`) and opens it in the browser.
+  dsh: { name: 'DeepSeek Harness', needs: 'chat', npm: '@deepseek-ai/dsh', bundles: ['/Applications/DeepSeek Harness.app', join(homedir(), 'Applications', 'DeepSeek Harness.app')],
+    open: (...args) => (bundled('dsh') ? openDsh(bundled('dsh'), ...args) : null), build: (t, all) => {
+      const why = wireDsh(t, all);
+      return { env: {}, args: ['web'], note: why === NOT_SET_UP ? `DeepSeek Harness is starting for the first time. Open it from Local AI again to put it on ${t.name}`
+        : why ? `DeepSeek Harness is starting, but ${t.name} could not be added to it: ${why}. Add ${t.url}/v1 there by hand` : null };
+    } },
 };
+const bundled = (id) => HARNESSES[id].bundles?.find((p) => existsSync(p)) || null;
 
 let cached = { at: 0, found: new Set() };
 
@@ -45,14 +61,17 @@ const installed = once(async () => {
   if (Date.now() - cached.at < 120000) return cached.found; // agents come and go rarely, and looking starts a shell
   const names = Object.keys(HARNESSES);
   const r = WIN ? await run('where', names) : await inShell(names.map((n) => `command -v ${n}`).join(';'), 8000);
-  const found = new Set(names.filter((n) => new RegExp(`(^|[/\\\\])${n}(\\.\\w+)?\\s*$`, 'm').test(r.stdout) || HARNESSES[n].paths?.some((p) => existsSync(p))));
+  const found = new Set(names.filter((n) => new RegExp(`(^|[/\\\\])${n}(\\.\\w+)?\\s*$`, 'm').test(r.stdout) || HARNESSES[n].paths?.some((p) => existsSync(p)) || bundled(n)));
   cached = { at: Date.now(), found };
   return found;
 });
 // The command that starts an agent: its name when the shell finds it, else the fixed place it was found at.
 const binOf = (id) => HARNESSES[id].paths?.find((p) => existsSync(p)) || id;
+// What updates an installed agent: its own updater, else npm, which installed it. An app updates itself.
+const updater = (id) => { const h = HARNESSES[id]; return bundled(id) ? null : h.self ? `${q(binOf(id))} ${h.self}` : h.npm ? `npm install -g ${h.npm}@latest` : null; };
 
-// The version each agent reports, and the newest one npm has. Both are slow to ask for, so they are kept a while.
+// The version each agent reports, and the newest one npm (or its repository's releases) has. Both are slow to ask for,
+// so they are kept a while.
 const versions = { at: 0, of: {} }, latest = { at: 0, of: {} }, jobs = {};
 let notify = () => {};
 export const onChange = (fn) => { notify = fn; };
@@ -60,13 +79,15 @@ const refreshVersions = once(async (found) => {
   const before = JSON.stringify([versions.of, latest.of]);
   if (Date.now() - versions.at > 900e3 || [...found].some((n) => !(n in versions.of))) {
     versions.at = Date.now();
-    // `bare` marks one found as an app bundle, which has no --version to ask.
-    versions.of = Object.fromEntries(await Promise.all([...found].map(async (n) => [n, HARNESSES[n].bare ? null : /\d+\.\d+\.\d+(?:[\w.-]*\w)?/.exec((await inShell(`${q(binOf(n))} --version`, 15000)).stdout)?.[0] || null])));
+    // An app bundle has no --version to ask; on a Mac its Info.plist says.
+    versions.of = Object.fromEntries(await Promise.all([...found].map(async (n) => [n, bundled(n) ? await appVersion(bundled(n)) : /\d+\.\d+\.\d+(?:[\w.-]*\w)?/.exec((await inShell(`${q(binOf(n))} --version`, 15000)).stdout)?.[0] || null])));
   }
   if (Date.now() - latest.at > 6 * 3600e3) {
     latest.at = Date.now();
     await Promise.all(Object.entries(HARNESSES).filter(([, h]) => h.npm).map(async ([id, h]) => {
       try { latest.of[id] = (await (await fetch(`https://registry.npmjs.org/${h.npm}/latest`, { signal: AbortSignal.timeout(8000) })).json()).version || null; } catch { /* offline: keep what we knew */ }
+    }), ...Object.entries(HARNESSES).filter(([, h]) => h.releases).map(async ([id, h]) => {
+      try { latest.of[id] = /\d+\.\d+\.\d+\S*/.exec((await (await fetch(`https://api.github.com/repos/${h.releases}/releases/latest`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'local-ai' }, signal: AbortSignal.timeout(8000) })).json()).tag_name)?.[0] || latest.of[id] || null; } catch { /* offline: keep what we knew */ }
     }));
   }
   return before !== JSON.stringify([versions.of, latest.of]);
@@ -75,14 +96,16 @@ const refreshVersions = once(async (found) => {
 export const list = async () => {
   const found = await installed();
   refreshVersions(found).then((changed) => changed && notify(), () => {});
-  return Object.entries(HARNESSES).map(([id, h]) => ({ id, name: h.name, needs: h.needs, installed: found.has(id), version: versions.of[id] || null, latest: latest.of[id] || null, canInstall: !!h.npm, canUpdate: !!(h.npm || h.self), app: !!h.open, job: jobs[id] || null }));
+  // `site` is where one that cannot be installed from here is downloaded. One that updates itself has no latest to show.
+  return Object.entries(HARNESSES).map(([id, h]) => { const up = !found.has(id) || !!updater(id);
+    return { id, name: h.name, needs: h.needs, installed: found.has(id), version: versions.of[id] || null, latest: (up && latest.of[id]) || null, canInstall: !!(h.npm || h.script), canUpdate: up, site: h.site || null, app: !!h.open, job: jobs[id] || null }; });
 };
 
 // Installs a missing agent, or updates one with its own updater when it has one.
 export async function change(id) {
   const h = own(HARNESSES, id) || fail(400, 'Unknown agent');
   const has = (await installed()).has(id);
-  const command = has && h.self ? h.self : h.npm ? `npm install -g ${h.npm}@latest` : fail(409, `${h.name} comes with its own installer`);
+  const command = has ? updater(id) || fail(409, `${h.name} updates itself`) : h.script || (h.npm ? `npm install -g ${h.npm}@latest` : fail(409, `${h.name} is installed from ${h.site || 'its own installer'}`));
   if (jobs[id]?.phase === 'running') return { ok: true };
   jobs[id] = { kind: has ? 'update' : 'install', phase: 'running' };
   event('info', 'agent.change', { id, command });
@@ -104,8 +127,9 @@ export async function open(agent, target, folder, targets = [target]) {
   // Pi, Oh My Pi and T3 Code (which runs Pi) know each running model as a provider of its own; OpenCode knows one, local-ai.
   if (['pi', 'omp', 't3'].includes(agent)) countAsLocal(targets.map((t) => t.key));
   if (agent === 'opencode') countAsLocal(['local-ai']);
-  if (harness.open) return harness.open(target, folder, targets);
-  const { env, args } = harness.build(target), bin = binOf(agent);
+  const app = harness.open && await harness.open(target, folder, targets);
+  if (app) return app;
+  const { env, args, note } = harness.build(target, targets), bin = binOf(agent);
   mkdirSync(at('agents'), { recursive: true, mode: 0o700 });
   const script = at('agents', `open-${agent}${WIN ? '.cmd' : '.command'}`);
   const vars = Object.entries(env);
@@ -123,5 +147,11 @@ export async function open(agent, target, folder, targets = [target]) {
   const term = await terminalFor(script);
   const opened = term ? await launched(...term) : false;
   event(opened ? 'info' : 'warn', 'harness.open', { agent, model: target.model, opened, home: HOME });
-  return { opened, command };
+  return { opened, command, ...(note ? { note } : {}) };
+}
+
+// An app's version, as its Info.plist says (on a Mac; elsewhere a bundle is not looked for).
+async function appVersion(bundle) {
+  const out = await run('/usr/bin/defaults', ['read', join(bundle, 'Contents', 'Info'), 'CFBundleShortVersionString'], { timeout: 5000 });
+  return /\d+\.\d+\S*/.exec(out.stdout)?.[0] || null;
 }
