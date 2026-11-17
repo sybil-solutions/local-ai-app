@@ -7,12 +7,13 @@ import { Button, Field, Select } from './controls.js';
 function AgentRow(h, mode) {
   const failed = h.job?.phase === 'failed', change = data({ act: 'agent', agent: h.id }), why = attrs({ title: h.job?.error || '' });
   if (h.job?.phase === 'running') return html`<div class="item vrow busy"><span><b>${h.name}</b><small>${h.job.kind === 'update' ? 'Updating…' : 'Installing…'}</small></span><i class="instbar"></i></div>`;
-  if (!h.installed && !h.canInstall) return html`<div class="item vrow busy"><span><b>${h.name}</b><small>Not installed</small></span></div>`;
+  // One that cannot be installed from here is downloaded from its own page.
+  if (!h.installed && !h.canInstall) return html`<div class="item vrow"><span class="vpick"><span><b>${h.name}</b><small>Not installed</small></span></span>${h.site && html`<a class="inst vact" href="${h.site}" target="_blank" rel="noopener">Download</a>`}</div>`;
   if (!h.installed) return html`<button class="item vrow"${change}${why}><span><b>${h.name}</b><small>${failed ? 'Couldn’t install' : `Not installed${h.latest ? ` · ${h.latest}` : ''}`}</small></span><span class="inst">${failed ? 'Try again' : 'Install'}</span></button>`;
   const isDefault = h.id === s.snap.agent;
   if (mode === 'open') {
     const wrong = run()?.apis && !run().apis.includes(h.needs);
-    return html`<button class="item"${data({ act: 'open', agent: h.id })}${attrs({ disabled: !!wrong })}>${h.name}<small>${wrong ? 'Not for this model' : isDefault ? 'Default' : ''}</small></button>`;
+    return html`<button class="item"${data({ act: 'open', agent: h.id })}${attrs({ disabled: !!wrong })}>${h.name}<small>${wrong ? 'Not for this model' : [h.version, isDefault && 'Default'].filter(Boolean).join(' · ')}</small></button>`;
   }
   const label = !h.canUpdate ? '' : failed ? 'Try again' : h.version && h.latest && newer(h.latest, h.version) ? `Update to ${h.latest}` : h.latest ? '' : 'Update';
   // "Up to date" is only said when both its version and the newest one are known.
