@@ -61,7 +61,8 @@ export function go(id) {
 // Opens a section from the top bar: nothing to go back to.
 export const jump = (id) => { s.trail.length = 0; s.nav = null; go(id); s.trail.length = 0; };
 
-const stopRun = () => { const r = run(); s.opened = null; return r && !r.external ? send(scoped(`runs/${r.id}`), 'DELETE') : null; };
+// A model someone else started is stopped only when Local Studio started it (the server asks Local Studio).
+const stopRun = () => { const r = run(); s.opened = null; return r && (!r.external || r.byStudio) ? send(scoped(`runs/${r.id}`), 'DELETE') : null; };
 // A model that runs as a program on the machine, not in a container, is shown first: what it runs, and a button to
 // allow it. True when that screen was opened in place of starting it.
 const mustLook = (id) => { if (!all().find((r) => r.id === id)?.approve) return false; s.asking = id; s.look = null; go('approve'); return true; };

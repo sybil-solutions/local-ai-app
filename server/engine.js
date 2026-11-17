@@ -12,6 +12,7 @@ import { blocked, cardFor, find, label, shortNow } from './recipes.js';
 import { freeGpus, runs, setFailed, status, update } from './runs.js';
 import { loadSeconds } from './speed.js';
 import * as usage from './usage.js';
+import * as studio from './studio.js';
 import { config, ENGINE_HOST, event, fail, HOST, PORT, run, saveConfig } from './util.js';
 import * as weights from './weights.js';
 
@@ -70,7 +71,7 @@ async function begin(id, picked) {
 export async function remove(rawId) {
   const r = runs.get(+rawId) || fail(404, 'No such run');
   if (r.phase === 'stopping') return { id: r.id };
-  if (r.external) fail(409, 'Local AI didn’t start this model, so it can’t stop it');
+  if (r.external) return stopStudio(r);
   const alreadyFailed = r.phase === 'failed';
   r.abort?.abort();
   r.measureAbort?.abort();
@@ -80,6 +81,20 @@ export async function remove(rawId) {
   runs.delete(r.id);
   usage.forget(r);
   event('info', 'run.removed', { id: r.id, recipe: r.recipe });
+  return { id: r.id };
+}
+
+// A model someone else started is stopped only when Local Studio started it: by asking Local Studio (studio.js).
+async function stopStudio(r) {
+  if (!r.byStudio || !(await studio.owns(r.served))) fail(409, 'Local AI didn’t start this model, so it can’t stop it');
+  update(r, { phase: 'stopping', detail: 'Local Studio is stopping it', progress: null });
+  try { await studio.stop(r.served); } catch (e) {
+    if (runs.get(r.id) === r) update(r, { phase: 'ready', detail: null });
+    event('warn', 'run.stop', { id: r.id, by: 'local-studio', error: e.message });
+    fail(502, e.message);
+  }
+  runs.delete(r.id);
+  event('info', 'run.removed', { id: r.id, model: r.served, by: 'local-studio' });
   return { id: r.id };
 }
 
@@ -148,7 +163,7 @@ function describe(r) {
 
 export const all = () => [...runs.values()];
 // What the app is told about a run. Anything not named here stays inside the server.
-const SHOWN = ['id', 'host', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external', 'reachable', 'born'];
+const SHOWN = ['id', 'host', 'recipe', 'name', 'url', 'gpus', 'since', 'readyAt', 'phase', 'detail', 'progress', 'error', 'failure', 'served', 'apis', 'stats', 'external', 'byStudio', 'reachable', 'born'];
 export const listRuns = () => all().sort((a, b) => a.id - b.id).map((r) => ({
   ...Object.fromEntries(SHOWN.map((k) => [k, r[k]])), view: describe(r), expected: loadSeconds(r.recipe), ctx: find(r.recipe)?.launch?.ctx || r.window || 0, vision: !!find(r.recipe)?.launch?.vision,
 }));
