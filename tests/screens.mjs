@@ -62,9 +62,10 @@ const agents = () => [
   { id: 'claude', name: t('Claude Code'), needs: 'messages', installed: true, version: '2.1.3', latest: '2.1.9', canInstall: true, canUpdate: true, app: false, job: { kind: 'update', phase: 'running' } },
   { id: 'codex', name: t('Codex'), needs: 'responses', installed: true, version: null, latest: null, canInstall: true, canUpdate: true, app: false, job: { kind: 'update', phase: 'failed', error: t('npm stopped') } },
   { id: 'opencode', name: t('OpenCode'), needs: 'chat', installed: false, version: null, latest: '1.19.5', canInstall: true, canUpdate: true, app: false, job: { kind: 'install', phase: 'failed', error: t('no network') } },
-  { id: 'hermes', name: t('Hermes'), needs: 'chat', installed: false, version: null, latest: null, canInstall: false, canUpdate: true, app: false, job: null },
+  { id: 'hermes', name: t('Hermes'), needs: 'chat', installed: false, version: null, latest: '0.23.2', canInstall: true, canUpdate: true, app: false, job: null },
   { id: 'copilot', name: t('GitHub Copilot'), needs: 'chat', installed: false, version: null, latest: '1.0.108', canInstall: true, canUpdate: true, app: false, job: { kind: 'install', phase: 'running' } },
   { id: 't3', name: t('T3 Code'), needs: 'chat', installed: true, version: '0.1.8', latest: null, canInstall: false, canUpdate: false, app: true, job: null },
+  { id: 'dsh', name: t('DeepSeek Harness'), needs: 'chat', installed: false, version: null, latest: null, canInstall: false, canUpdate: true, site: t('https://example.com/download'), app: true, job: null },
 ];
 const snapshot = (extra = {}, app = {}) => ({ v: 7, ...machine(), devices: [
   { i: 0, name: t('big-box'), url: 'http://100.90.0.1:18700', online: true, error: null, state: { ...machine({ name: t('big-box'), gpus: [0, 1, 2, 3].map((i) => gpu(i, 92000)), free: [], runs: [run('ready', { external: true, recipe: null, id: 8000 })] }), devices: [], app: { version: '0.4.0', can: true } } },

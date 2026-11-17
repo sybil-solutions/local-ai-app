@@ -176,6 +176,7 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
 .vrow b { font-weight: 500; }
 .vrow .inst, .vact { flex: none; color: var(--accent); font: 500 12px var(--ui); white-space: nowrap; }
 .vact { min-height: 36px; padding: 0 2px; }
+a.vact { display: flex; align-items: center; text-decoration: none; }
 /* A row you can drag is a box of its own (it covers the rows it passes), so it has room inside. A plain row is part of the page. */
 .hrow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 52px; padding: 0 12px 0 4px; box-sizing: border-box; border-bottom: 1px solid var(--line); background: var(--bg); }
 .hrow.plain { grid-template-columns: minmax(0, 1fr) auto; padding: 0; border: 0; background: none; }
