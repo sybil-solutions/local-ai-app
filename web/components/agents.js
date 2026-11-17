@@ -10,6 +10,8 @@ function AgentRow(h, mode) {
   // One that cannot be installed from here is downloaded from its own page.
   if (!h.installed && !h.canInstall) return html`<div class="item vrow"><span class="vpick"><span><b>${h.name}</b><small>Not installed</small></span></span>${h.site && html`<a class="inst vact" href="${h.site}" target="_blank" rel="noopener">Download</a>`}</div>`;
   if (!h.installed) return html`<button class="item vrow"${change}${why}><span><b>${h.name}</b><small>${failed ? 'Couldn’t install' : `Not installed${h.latest ? ` · ${h.latest}` : ''}`}</small></span><span class="inst">${failed ? 'Try again' : 'Install'}</span></button>`;
+  // One whose command no longer starts (what it runs with was removed) is installed again over itself.
+  if (h.broken) return html`<div class="item vrow"><span class="vpick"><span><b>${h.name}</b><small>${failed ? 'Couldn’t reinstall' : 'Doesn’t start'}</small></span></span>${h.canInstall ? html`<button class="inst vact"${change}${why}>${failed ? 'Try again' : 'Reinstall'}</button>` : h.site && html`<a class="inst vact" href="${h.site}" target="_blank" rel="noopener">Download</a>`}</div>`;
   const isDefault = h.id === s.snap.agent;
   if (mode === 'open') {
     const wrong = run()?.apis && !run().apis.includes(h.needs);

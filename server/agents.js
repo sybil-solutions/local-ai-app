@@ -61,7 +61,9 @@ const installed = once(async () => {
   if (Date.now() - cached.at < 120000) return cached.found; // agents come and go rarely, and looking starts a shell
   const names = Object.keys(HARNESSES);
   const r = WIN ? await run('where', names) : await inShell(names.map((n) => `command -v ${n}`).join(';'), 8000);
-  const found = new Set(names.filter((n) => new RegExp(`(^|[/\\\\])${n}(\\.\\w+)?\\s*$`, 'm').test(r.stdout) || HARNESSES[n].paths?.some((p) => existsSync(p)) || bundled(n)));
+  // A command whose file is gone (a link left by an install that was removed) is not installed: it is installed again.
+  const listed = (n) => r.stdout.split(/\r?\n/).some((line) => new RegExp(`(^|[/\\\\])${n}(\\.\\w+)?\\s*$`).test(line) && (!/^[/\\]|^\w:/.test(line.trim()) || existsSync(line.trim())));
+  const found = new Set(names.filter((n) => listed(n) || HARNESSES[n].paths?.some((p) => existsSync(p)) || bundled(n)));
   cached = { at: Date.now(), found };
   return found;
 });
@@ -72,7 +74,7 @@ const updater = (id) => { const h = HARNESSES[id]; return bundled(id) ? null : h
 
 // The version each agent reports, and the newest one npm (or its repository's releases) has. Both are slow to ask for,
 // so they are kept a while.
-const versions = { at: 0, of: {} }, latest = { at: 0, of: {} }, jobs = {};
+const versions = { at: 0, of: {}, broken: new Set() }, latest = { at: 0, of: {} }, jobs = {};
 let notify = () => {};
 export const onChange = (fn) => { notify = fn; };
 const refreshVersions = once(async (found) => {
@@ -80,7 +82,15 @@ const refreshVersions = once(async (found) => {
   if (Date.now() - versions.at > 900e3 || [...found].some((n) => !(n in versions.of))) {
     versions.at = Date.now();
     // An app bundle has no --version to ask; on a Mac its Info.plist says.
-    versions.of = Object.fromEntries(await Promise.all([...found].map(async (n) => [n, bundled(n) ? await appVersion(bundled(n)) : /\d+\.\d+\.\d+(?:[\w.-]*\w)?/.exec((await inShell(`${q(binOf(n))} --version`, 15000)).stdout)?.[0] || null])));
+    // A command that cannot be run at all (126, 127: what it runs with is gone) is broken, and is installed again.
+    const broken = new Set();
+    versions.of = Object.fromEntries(await Promise.all([...found].map(async (n) => {
+      if (bundled(n)) return [n, await appVersion(bundled(n))];
+      const out = await inShell(`${q(binOf(n))} --version`, 15000);
+      if (!WIN && (out.code === 126 || out.code === 127)) broken.add(n);
+      return [n, /\d+\.\d+\.\d+(?:[\w.-]*\w)?/.exec(out.stdout)?.[0] || null];
+    })));
+    versions.broken = broken;
   }
   if (Date.now() - latest.at > 6 * 3600e3) {
     latest.at = Date.now();
@@ -98,13 +108,13 @@ export const list = async () => {
   refreshVersions(found).then((changed) => changed && notify(), () => {});
   // `site` is where one that cannot be installed from here is downloaded. One that updates itself has no latest to show.
   return Object.entries(HARNESSES).map(([id, h]) => { const up = !found.has(id) || !!updater(id);
-    return { id, name: h.name, needs: h.needs, installed: found.has(id), version: versions.of[id] || null, latest: (up && latest.of[id]) || null, canInstall: !!(h.npm || h.script), canUpdate: up, site: h.site || null, app: !!h.open, job: jobs[id] || null }; });
+    return { id, name: h.name, needs: h.needs, installed: found.has(id), version: versions.of[id] || null, latest: (up && latest.of[id]) || null, canInstall: !!(h.npm || h.script), canUpdate: up, broken: found.has(id) && versions.broken.has(id), site: h.site || null, app: !!h.open, job: jobs[id] || null }; });
 };
 
 // Installs a missing agent, or updates one with its own updater when it has one.
 export async function change(id) {
   const h = own(HARNESSES, id) || fail(400, 'Unknown agent');
-  const has = (await installed()).has(id);
+  const has = (await installed()).has(id) && !versions.broken.has(id); // a broken one is installed again
   const command = has ? updater(id) || fail(409, `${h.name} updates itself`) : h.script || (h.npm ? `npm install -g ${h.npm}@latest` : fail(409, `${h.name} is installed from ${h.site || 'its own installer'}`));
   if (jobs[id]?.phase === 'running') return { ok: true };
   jobs[id] = { kind: has ? 'update' : 'install', phase: 'running' };
