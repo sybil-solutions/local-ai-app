@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { containerLogs, isHeld, launchContainer, stopContainer, sweepContainers } from './containers.js';
+import { docker } from './dockercmd.js';
 import { discover } from './discovery.js';
 import { readGpus } from './gpus.js';
 import { adoptHosts, checkHost, hostLog, launchHost, stopHost } from './hosts.js';
@@ -118,9 +119,13 @@ function dockerIsDue() {
 // Docker is an app on a Mac and on Windows (Docker Desktop, in the place its installer puts it), a service on Linux.
 const DESKTOP = join(process.env.ProgramFiles || 'C:\\Program Files', 'Docker', 'Docker', 'Docker Desktop.exe');
 export async function startDocker() {
+  // A socket-activated Docker (the usual setup) starts on its first connection; no service manager call is needed.
+  if (!(await docker(['ps', '-q'], { timeout: 20000 })).code) { sweeps = 0; await tick(); return { ok: true }; }
   const tries = process.platform === 'darwin' ? [['open', ['-a', 'Docker']]] : process.platform === 'win32' ? (existsSync(DESKTOP) ? [['cmd', ['/c', 'start', '', DESKTOP]]] : [])
     : [['systemctl', ['start', 'docker']], ['systemctl', ['--user', 'start', 'docker']]];
   for (const [cmd, args] of tries) if (!(await run(cmd, args, { timeout: 20000 })).code) { sweeps = 0; await tick(); return { ok: true }; }
+  // A user service cannot start a system service directly; polkit can ask the person at the machine to allow it.
+  if (process.platform === 'linux' && !(await run('pkexec', ['systemctl', 'start', 'docker'], { timeout: 60000 })).code) { sweeps = 0; await tick(); return { ok: true }; }
   return fail(500, 'Could not start Docker. Start it yourself, then come back');
 }
 

@@ -25,12 +25,13 @@ const HARNESSES = {
   omp: { name: 'Oh My Pi', needs: 'chat', npm: '@oh-my-pi/pi-coding-agent', build: piArgs },
   claude: { name: 'Claude Code', needs: 'messages', npm: '@anthropic-ai/claude-code', self: 'update', build: (t) => ({
     env: { ANTHROPIC_BASE_URL: t.url, ANTHROPIC_AUTH_TOKEN: 'local', ANTHROPIC_MODEL: t.model, ANTHROPIC_DEFAULT_SONNET_MODEL: t.model, ANTHROPIC_DEFAULT_OPUS_MODEL: t.model, ANTHROPIC_DEFAULT_HAIKU_MODEL: t.model },
-    args: ['--model', t.model],
+    args: ['--model', t.model, '--dangerously-skip-permissions'],
   }) },
   codex: { name: 'Codex', needs: 'responses', npm: '@openai/codex', build: (t) => ({
     env: { LOCAL_AI_KEY: 'local' },
     args: ['-c', 'model_providers.local.name=Local AI', '-c', `model_providers.local.base_url=${t.url}/v1`, '-c', 'model_providers.local.wire_api=responses',
-      '-c', 'model_providers.local.env_key=LOCAL_AI_KEY', '-c', 'model_provider=local', '-c', `model=${t.model}`, '-c', `model_context_window=${t.ctx || WINDOW}`],
+      '-c', 'model_providers.local.env_key=LOCAL_AI_KEY', '-c', 'model_provider=local', '-c', `model=${t.model}`, '-c', `model_context_window=${t.ctx || WINDOW}`,
+      '--dangerously-bypass-approvals-and-sandbox'],
   }) },
   opencode: { name: 'OpenCode', needs: 'chat', npm: 'opencode-ai', self: 'upgrade', build: (t) => ({
     env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: `local-ai/${t.model}`, small_model: `local-ai/${t.model}`,
@@ -71,6 +72,14 @@ const installed = once(async () => {
 const binOf = (id) => HARNESSES[id].paths?.find((p) => existsSync(p)) || id;
 // What updates an installed agent: its own updater, else npm, which installed it. An app updates itself.
 const updater = (id) => { const h = HARNESSES[id]; return bundled(id) ? null : h.self ? `${q(binOf(id))} ${h.self}` : h.npm ? `npm install -g ${h.npm}@latest` : null; };
+// Agents Omarchy installs with mise. A mise-managed copy is not moved by its own updater or a global npm install:
+// `claude update` leaves it alone and npm installs a second copy the mise shim still shadows. Updating it means
+// mise, whose tool name is not always the command's (omp is oh-my-pi; dsh is an npm-backed tool).
+const MISE = { pi: 'pi', omp: 'oh-my-pi', claude: 'claude', codex: 'codex', opencode: 'opencode', copilot: 'copilot', dsh: 'npm:@deepseek-ai/dsh' };
+async function miseTool(id) {
+  const where = (await inShell(`command -v ${q(id)}`, 8000)).stdout.trim();
+  return MISE[id] && /(^|\/)mise\//.test(where) ? MISE[id] : null;
+}
 
 // The version each agent reports, and the newest one npm (or its repository's releases) has. Both are slow to ask for,
 // so they are kept a while.
@@ -115,13 +124,16 @@ export const list = async () => {
 export async function change(id) {
   const h = own(HARNESSES, id) || fail(400, 'Unknown agent');
   const has = (await installed()).has(id) && !versions.broken.has(id); // a broken one is installed again
-  const command = has ? updater(id) || fail(409, `${h.name} updates itself`) : h.script || (h.npm ? `npm install -g ${h.npm}@latest` : fail(409, `${h.name} is installed from ${h.site || 'its own installer'}`));
+  const tool = await miseTool(id);
+  const command = tool ? `mise ${has ? 'upgrade' : 'install'} ${q(tool)}${has ? '' : '@latest'}`
+    : has ? updater(id) || fail(409, `${h.name} updates itself`) : h.script || (h.npm ? `npm install -g ${h.npm}@latest` : fail(409, `${h.name} is installed from ${h.site || 'its own installer'}`));
   if (jobs[id]?.phase === 'running') return { ok: true };
   jobs[id] = { kind: has ? 'update' : 'install', phase: 'running' };
   event('info', 'agent.change', { id, command });
   inShell(command, 900e3).then((r) => {
     jobs[id] = r.code ? { kind: jobs[id].kind, phase: 'failed', error: (r.stderr.trim().split('\n').pop() || 'It did not finish').slice(0, 160) } : null;
     if (r.code) event('warn', 'agent.failed', { id, error: jobs[id].error });
+    else event('info', 'agent.updated', { id, command });
     cached.at = 0; versions.at = 0;
     notify();
   });
