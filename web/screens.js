@@ -42,7 +42,10 @@ export const STATE = {
   needsdocker: () => ({ pose: 'apart', word: 'Needs Docker', line: 'One free install', btns: LinkButton({ label: 'Install Docker', href: `https://docs.docker.com/${D().os === 'win32' ? 'desktop/setup/install/windows-install/' : 'engine/install/'}`, kind: 'go' }) }),
   // Docker is running, but not for this user: on Linux, one who is not in the docker group. The fix needs sudo, which
   // the app does not have, and takes effect once the user's programs have all been started again.
-  dockerdenied: () => ({ pose: 'apart', word: 'No access to Docker', line: 'Run sudo usermod -aG docker $USER, then restart' }),
+  // One command is all it takes; the server switches to the group itself on its next check (see server/dockercmd.js),
+  // so a service started before the group was added does not need a re-login or a restart.
+  dockerdenied: () => ({ pose: 'apart', word: 'No access to Docker', line: 'Run sudo usermod -aG docker $USER — Local AI picks it up on its next check (log out and back in if it cannot)',
+    btns: Button({ label: 'Copy the command', act: 'copy', kind: 'go', data: { copy: 'sudo usermod -aG docker $USER' } }) }),
   dockeroff: () => ({ pose: 'apart', word: 'Docker is off', line: 'Turn it on to start models', btns: Button({ label: 'Turn on', act: 'docker', kind: 'go' }) }),
   nogpu: () => ({ pose: 'apart', word: 'No GPU here', line: 'This computer can’t run models', btns: Elsewhere() }),
   nothing: () => ({ pose: 'apart', word: 'Nothing fits', line: `No tested models for ${D().groups[0]?.name || 'this GPU'}`, btns: Elsewhere() }),
@@ -155,8 +158,9 @@ export const SCREENS = {
       : v.phase === 'downloading' ? html`${ProgressBar(v.progress || 0)}${Line(`Downloading · ${Math.round((v.progress || 0) * 100)}%`)}`
       : v.phase === 'ready' ? Button({ label: 'Restart to update', act: 'appupdate', kind: 'go' })
       : Button({ label: v.phase === 'failed' ? 'Try again' : `Download${named ? ` ${v.latest}` : ''}`, act: 'appdownload', kind: 'go' });
-    const page = v.url || (!v.can ? 'https://local.sybilsolutions.ai/download/' : null);
-    return html`${CloseBar()}${Head(`Local AI ${named ? v.latest : v.version}`)}${Note(about)}${v.notes.length > 0 && html`${Label('What’s new', { group: true })}<ul class="notes">${v.notes.map((n) => html`<li>${n}</li>`)}</ul>`}${v.error && Note(v.phase === 'failed' ? `The update didn’t work: ${v.error}` : v.error)}${page && TextLink({ label: v.can ? 'Release page' : 'Download Local AI', href: page, style: 'margin:2px 0 0;text-align:left' })}${Spacer}${v.can && html`${auto}${step}`}`;
+    // A copy that cannot check for itself, and a check that fails, both still have a way forward.
+    const page = v.url || (!v.can || v.error ? 'https://local.sybilsolutions.ai/download/' : null);
+    return html`${CloseBar()}${Head(`Local AI ${named ? v.latest : v.version}`)}${Note(about)}${v.notes.length > 0 && html`${Label('What’s new', { group: true })}<ul class="notes">${v.notes.map((n) => html`<li>${n}</li>`)}</ul>`}${v.error && Note(v.phase === 'failed' ? `The update didn’t work: ${v.error}` : v.error)}${page && TextLink({ label: v.url ? 'Release page' : 'Download Local AI', href: page, style: 'margin:2px 0 0;text-align:left' })}${Spacer}${v.can && html`${auto}${step}`}`;
   },
 };
 for (const id of Object.keys(STATE)) SCREENS[id] = () => Plain(id);
