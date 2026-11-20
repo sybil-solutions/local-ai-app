@@ -72,6 +72,9 @@ Environment="PATH=$(quoted "$PATH")"
 $SETTINGS
 Restart=always
 RestartSec=2
+# Agents and terminals opened from the app are this service's children. A restart — including the one an
+# update makes — must stop the server, not every session the person has open on it.
+KillMode=process
 
 [Install]
 WantedBy=default.target
@@ -102,7 +105,7 @@ fi
 echo "Local AI is running at $URL"
 # Starting a model takes Docker, and Docker only answers to its group. Said here, where the fix can be pasted.
 if command -v docker >/dev/null && ! docker ps >/dev/null 2>&1 && docker ps 2>&1 | grep -qi 'permission denied'; then
-  echo "To start models, let this user use Docker: sudo usermod -aG docker $(id -un), then restart the computer."
+  echo "To start models, let this user use Docker: sudo usermod -aG docker $(id -un). Local AI uses it on its next check; log out and back in if that does not."
 fi
 # Shown only to a person at a terminal, never into a log: the address that opens the page with its key.
 if [ -t 1 ] && [ -n "$KEY" ]; then echo "Open it with: $URL/#key=$KEY"; fi

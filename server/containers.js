@@ -3,13 +3,12 @@
 import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { dockerArgs } from './docker.js';
+import { docker } from './dockercmd.js';
 import { health } from './health.js';
 import { isLocal, label } from './recipes.js';
 import { removed, runs, setFailed, share, status, update } from './runs.js';
-import { at, ENGINE_HOST, event, fail, HOST, run } from './util.js';
+import { at, ENGINE_HOST, event, fail, HOST } from './util.js';
 import * as weights from './weights.js';
-
-const docker = (args, opts) => run('docker', args, opts);
 
 // Pulls the recipe's image if it is not here, then starts its container.
 export async function launchContainer(r, recipe, signal) {

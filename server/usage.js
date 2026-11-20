@@ -1,4 +1,5 @@
 // Tokens served. Each running engine's own counters are read every tick and added up per day, per hour and per model.
+import { docker } from './dockercmd.js';
 import { at, readJson, run, writeJson } from './util.js';
 
 const file = at('usage.json');
@@ -200,7 +201,7 @@ export async function sources(runs) {
       seen.set(row.ip, had);
     }
     if (!r.container) continue;
-    const out = await run('docker', ['logs', '-t', '--since', since.toISOString(), r.container], { timeout: 20000 });
+    const out = await docker(['logs', '-t', '--since', since.toISOString(), r.container], { timeout: 20000 });
     for (const line of `${out.stdout}${out.stderr}`.split('\n')) {
       const m = /^(\S+) .*?(\d{1,3}(?:\.\d{1,3}){3}):\d+ - "POST \/v1\//.exec(line) || /^(\S+) .*request: POST \/v1\/\S+ (\d{1,3}(?:\.\d{1,3}){3}) /.exec(line);
       if (!m) continue;
