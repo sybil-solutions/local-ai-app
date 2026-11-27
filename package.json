@@ -101,10 +101,10 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "electron": "45.2.3",
+    "electron": "45.3.1",
     "electron-builder": "26.18.0",
     "eslint": "10.15.0",
-    "globals": "17.13.0"
+    "globals": "17.14.0"
   },
   "overrides": {
     "minimatch@>=7.0.0 <11.0.1": "11.0.9"
