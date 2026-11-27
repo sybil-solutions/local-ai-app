@@ -218,6 +218,23 @@ try {
   await press('[data-act=uselinked]', { ms: 20000 });
   await shows('the other machine\'s model', '.cin .nname', /Even Three/, 60000);
   check('a connected machine\'s model is shown as that machine\'s', await page('!!document.querySelector(".where")') && /Running/.test(await text('.cin .nsub')));
+  // On a remote model, Home adds no extra buttons; Open defaults to this computer (client) and Run on lives in the agent dropdown.
+  await press('.cright [data-act=open]');
+  const remoteOnLocal = await shows('the command on this computer for the remote model', '#page .box.mono', /pi/, 20000);
+  check('Open defaults to running the agent on this computer against the remote model', remoteOnLocal.includes(join(WORK, 'here')) && /--model la-0-\d+\/fake-engine/.test(remoteOnLocal), remoteOnLocal);
+  await press('[data-nav=home]');
+  await press('.cright [data-go=chooser]');
+  await until('the Run on dropdown in the agent popover', () => page(`${seen('.apop [data-save=runon]')}.length === 1`));
+  check('Run on defaults to This computer', (await page(`${seen('.apop [data-save=runon]')}[0].value`)) === '-1');
+  await page(`(() => { const el = ${seen('.apop [data-save=runon]')}[0]; el.value = '0'; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await sleep(250);
+  await press('.apop [data-act=open][data-agent=pi]');
+  const remoteOnRemote = await shows('the command on the connected machine', '#page .box.mono', /pi/, 20000);
+  check('switching Run on opens the agent on that connected machine', /Run this on /.test(await text('#page .head')) && remoteOnRemote.includes(join(WORK, 'there')) && /--model la-self-\d+\/fake-engine/.test(remoteOnRemote), remoteOnRemote);
+  await press('[data-nav=home]');
+  await press('.cright [data-go=chooser]');
+  await page(`(() => { const el = ${seen('.apop [data-save=runon]')}[0]; el.value = '-1'; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await sleep(250);
   await press('[data-nav=machines]');
   await press('[data-act=use][data-dev="-1"]');
   check('back on this computer, Home shows its own model', /Swift One/.test(await shows('this computer\'s model', '.cin .nname', /Swift One/)) && !(await page('!!document.querySelector(".where")')));

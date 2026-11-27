@@ -161,7 +161,7 @@ Every route is one line in `ROUTES` in `server/index.js`. All of them need `Auth
 | `GET /api/card?id=` | The model's Hugging Face card, as Markdown. | `recipes.card` |
 | `GET /api/usage` | Every day by model, the last two days by hour, live runs. | `usage.detail` |
 | `GET /api/endpoints` | Each running model's addresses and APIs, the key, today's callers. | `index.js` `endpoints` |
-| `POST /api/open` `{ agent, device, port, folder }` | Open an agent on a running model. | `agents.open` |
+| `POST /api/open` `{ agent, device, port, folder?, on?, target? }` | Open an agent on a running model. Runs on this computer by default; `on` forwards to a connected machine (with `target` when inference is on a different machine). | `agents.open` |
 | `POST /api/agents` `{ id }` | Install an agent, or update it. | `agents.change` |
 | `POST /api/settings` `{ folder?, agent?, terminal?, home?, background?, picture?, autoUpdate?, hfToken? }` | Save settings. | `index.js` `saveSettings` |
 | `GET /api/background` | Your own background picture. | `index.js` |

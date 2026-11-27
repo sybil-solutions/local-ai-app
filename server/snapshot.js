@@ -50,13 +50,29 @@ export async function answer({ q, req, res }) {
   res.end(plain ? snapshot : zipped ||= gzipSync(snapshot));
 }
 
+// Models on other machines handed to this one by a peer that asked this machine to run an agent on them. Kept so
+// syncPi does not drop them on its next tick.
+const external = new Map();
+let nextExternal = 1000;
+export function rememberTarget(t) {
+  const had = external.get(t.url);
+  const key = had?.key || `la-${nextExternal++}-${t.id}`;
+  const entry = { ...t, key, deviceIndex: 'ext' };
+  external.set(t.url, entry);
+  if (external.size > 20) external.delete(external.keys().next().value);
+  return entry;
+}
+
 // Everything an agent can be pointed at: the models ready here and on connected machines.
 export function targets() {
   const toTarget = (device, host, key) => (r) => ({ key: `la-${key}-${r.id}`, device, url: host ? `http://${host}:${r.id}` : r.url, model: r.served || r.name, name: r.name, ctx: r.ctx, vision: r.vision, apis: r.apis, id: r.id, deviceIndex: key });
   const ready = (runs) => runs.filter((r) => r.phase === 'ready');
   // One machine that can't be read is left out; it does not take the others with it.
-  const there = (d) => { try { return d.state ? ready(d.state.runs).filter((r) => r.reachable !== false).map(toTarget(d.name, new URL(d.url).hostname, d.i)) : []; } catch { return []; } };
-  return [...ready(engine.listRuns()).map(toTarget(hostname(), null, 'self')), ...machines.views().flatMap(there)];
+  const there = (d) => { try { const host = new URL(d.url).hostname, loop = /^(127\.|::1$|localhost$)/.test(host); return d.state ? ready(d.state.runs).filter((r) => loop || r.reachable !== false).map(toTarget(d.name, host, d.i)) : []; } catch { return []; } };
+  const list = [...ready(engine.listRuns()).map(toTarget(hostname(), null, 'self')), ...machines.views().flatMap(there)];
+  const urls = new Set(list.map((t) => t.url));
+  for (const t of external.values()) if (!urls.has(t.url)) list.push(t);
+  return list;
 }
 
 // A model whose machine does not say its context length (an older Local AI there, or a model it found and has no

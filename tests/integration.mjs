@@ -14,7 +14,7 @@
 // Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -140,11 +140,15 @@ const OLDFAST = 'smoke/gpu/oldfast.docker.2x';
 catalog.recipes[OLDFAST] = { ...docked({ cards: 2 }), model: 'oldfast-1', proof: [{ tps: 500, legacy: true, gates: 'load chat' }] };
 catalog.cards['smoke-gpu'].setups[1].picks = [PAIR, OLDFAST];
 // An Intel card the registry has tested, with two recipes for it. Their engine is given the card as a device.
-const ARC = 'smoke/arc/good.docker', ARC_TOO = 'smoke/arc/second.docker';
+// A smaller Intel card's generic llama.cpp SYCL recipe is also offered on it, while a card-specific vLLM recipe is not.
+const ARC = 'smoke/arc/good.docker', ARC_TOO = 'smoke/arc/second.docker', ARC_PEER = 'smoke/arc-small/peer.docker', ARC_PEER_VLLM = 'smoke/arc-small/vllm.docker';
 catalog.cards['smoke-arc'] = { name: 'Intel Arc Pro B70', vram_gb: 32, backend: 'intel-xpu', match: { names: ['arcprob70'] } };
-const arced = (model) => ({ card: 'smoke-arc', model, engine: 'llama.cpp', proof: [{ tps: 30 }], launch: { image: PINNED, port: 8000, cards: 1, seqs: 1, ctx: 8192, backend: 'intel-xpu', shm: '8g', args: ['--model', 'x'], env: { ONEAPI_DEVICE_SELECTOR: 'level_zero:0' } } });
+catalog.cards['smoke-arc-small'] = { name: 'Intel Arc Small', vram_gb: 16, backend: 'intel-xpu', match: { names: ['arcsmall'] } };
+const arced = (model, card = 'smoke-arc', engine = 'llama.cpp') => ({ card, model, engine, proof: [{ tps: 30 }], launch: { image: PINNED, port: 8000, cards: 1, seqs: 1, ctx: 8192, backend: 'intel-xpu', shm: '8g', args: ['--model', 'x'], env: { ONEAPI_DEVICE_SELECTOR: 'level_zero:0' } } });
 catalog.recipes[ARC] = arced('arc-1');
 catalog.recipes[ARC_TOO] = arced('arc-2');
+catalog.recipes[ARC_PEER] = arced('arc-peer', 'smoke-arc-small', 'llama.cpp-sycl');
+catalog.recipes[ARC_PEER_VLLM] = arced('arc-peer-vllm', 'smoke-arc-small', 'vllm');
 const HOSTED = 'smoke/chip/fake.host', TAMPERED = 'smoke/chip/tampered.host';
 if (APPLE) {
   const sysctl = (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', timeout: 5000 }).trim();
@@ -202,12 +206,19 @@ const logFile = join(HOME, 'server.log');
 let server = null, log = '';
 // `nvidia: true` starts it as on an NVIDIA machine: the stand-in nvidia-smi and docker come first on the PATH.
 // `arc: true` gives that machine Intel Arc cards as well: the stand-in lspci names the ones in lspci.txt.
+// A stand-in `pi` on PATH so POST /api/open can be tested without a real agent or terminal window.
+const AGENT_BIN = join(HOME, 'agent-bin');
+mkdirSync(AGENT_BIN, { recursive: true });
+writeFileSync(join(AGENT_BIN, 'pi'), '#!/bin/sh\necho "pi 9.9.9"\n');
+chmodSync(join(AGENT_BIN, 'pi'), 0o755);
+
 const FAKE_DOCKER = join(HOME, 'docker'), THERE_DOCKER = join(HOME, 'docker-second');
 function startServer({ nvidia = false, arc = false } = {}) {
-  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_STUDIO_PORT: String(STUDIO_PORT || 1),
+  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_TERMINAL: 'none', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_STUDIO_PORT: String(STUDIO_PORT || 1),
     HF_ENDPOINT: `http://127.0.0.1:${hf.address().port}`, LOCAL_AI_MODELS: `${join(HOME, 'models')}:${HAVE}`, // downloads go to the first folder; the second holds weights already here
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
-    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}), ...(arc ? { FAKE_LSPCI: join(HOME, 'lspci.txt') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    PATH: `${nvidia ? `${join(ROOT, 'tests', 'stand-ins', 'bin')}:` : ''}${AGENT_BIN}:${process.env.PATH}`,
+    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER } : {}), ...(arc ? { FAKE_LSPCI: join(HOME, 'lspci.txt') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (b) => { log += b; });
   server.stderr.on('data', (b) => { log += b; });
   return until('the server to answer', async () => (await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
@@ -412,8 +423,8 @@ try {
   // they are, it is that machine's: it is not shown as running here, and what it served is counted there, not here.
   // The machine is followed, not asked again and again: what changes there is here at once.
   const THERE = PORT + 400, thereHome = join(HOME, 'second');
-  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_DISCOVER: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
-    LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: THERE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } });
+  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_TERMINAL: 'none', LOCAL_AI_DISCOVER: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
+    LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: THERE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${AGENT_BIN}:${process.env.PATH}` } });
   try {
     await until('the second machine to answer', async () => (await fetch(`http://127.0.0.1:${THERE}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
     const thereKey = JSON.parse(readFileSync(join(thereHome, 'config.json'), 'utf8')).key;
@@ -443,6 +454,18 @@ try {
     while (!arrived && Date.now() - told < 5000) { if ((await state()).devices[0]?.state?.tone === 'gray') arrived = Date.now() - told; else await sleep(40); }
     check('a change on a connected machine is here in under a second', arrived > 0 && arrived < 1000, `${arrived} ms`);
     check('a call is run on the connected machine through this one', (await api('/api/devices/0/usage')).status === 200 && (await api('/api/devices/0/endpoints')).json?.key === thereKey);
+
+    // Opening an agent on a remote model defaults to this machine (client), and can be toggled to run on the connected machine
+    // (using either that machine's model or this machine's model).
+    const openLocal = await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 0, port: farPort } });
+    check('opening an agent on a remote model defaults to this computer', openLocal.status === 200 && openLocal.json?.command?.includes(HOME) && openLocal.json.command.includes(`--model la-0-${farPort}/fake-engine`), JSON.stringify(openLocal));
+    const openRemoteSame = await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 0, port: farPort, on: 0 } });
+    check('toggling Run on to the connected machine opens the agent there on its model', openRemoteSame.status === 200 && openRemoteSame.json?.command?.includes(thereHome) && openRemoteSame.json.command.includes(`--model la-self-${farPort}/fake-engine`), JSON.stringify(openRemoteSame));
+    const openRemoteCross = await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 'self', port, on: 0 } });
+    const thereModels = JSON.parse(readFileSync(join(thereHome, 'agents', 'models.json'), 'utf8')).providers;
+    check('a connected machine can run an agent against this computer’s inference too', openRemoteCross.status === 200 && openRemoteCross.json?.command?.includes(thereHome) && openRemoteCross.json.command.includes('/outside-model') && Object.values(thereModels).some((p) => p.baseUrl === `http://127.0.0.1:${port}/v1`), JSON.stringify(openRemoteCross));
+    check('invalid external target is refused', (await api('/api/open', { method: 'POST', body: { agent: 'pi', target: { url: 'javascript:alert(1)', model: 'x' } } })).status === 400);
+    check('unknown Run-on device is refused', (await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 'self', port, on: 9 } })).status === 404);
 
     const theirs = await until('the model to be seen as that machine\'s', async () => !(await state()).runs.some((r) => r.id === farPort), 45000).then(() => true, () => false);
     check('once its machine is connected, a model reached through a port here is not shown as running here', theirs);
@@ -635,7 +658,7 @@ try {
   const arc = await until('the Intel cards to be listed, and the one another container holds to be known', async () => { const s = await state(); return s.gpus.length === 4 && s.gpus[3].busy && s; }, 30000);
   check('Intel Arc cards are found beside the NVIDIA ones, each with its memory and its render node', arc.gpus.slice(2).map((g) => `${g.index} ${g.name} ${g.total} ${g.backend} ${g.node}`).join() === `2 Intel Arc Pro B70 32768 intel-xpu ${node('renderD128')},3 Intel Arc Pro B70 32768 intel-xpu ${node('renderD129')}`, JSON.stringify(arc.gpus.slice(2)));
   const arcGroup = arc.groups.find((g) => g.card === 'smoke-arc');
-  check('they are the registry\'s Intel card, with its recipes and none of an NVIDIA card\'s', arcGroup?.gpus.join() === '2,3' && arcGroup.recipes.map((r) => r.id).sort().join() === [ARC, ARC_TOO].sort().join() && arc.groups.length === 2, JSON.stringify(arc.groups.map((g) => [g.card, g.gpus, g.recipes.length])));
+  check('they are the registry\'s Intel card, with its recipes, smaller Intel cards\' llama.cpp recipes, and none of an NVIDIA card\'s', arcGroup?.gpus.join() === '2,3' && arcGroup.recipes.map((r) => r.id).sort().join() === [ARC, ARC_TOO, ARC_PEER].sort().join() && arc.groups.length === 2, JSON.stringify(arc.groups.map((g) => [g.card, g.gpus, g.recipes.map((r) => r.id)])));
   check('a card another program\'s container holds is not free', arc.free.includes(2) && !arc.free.includes(3) && !arc.gpus[2].busy, JSON.stringify(arc.free));
   const onArc = (await api('/api/runs', { method: 'POST', body: { recipe: ARC } })).json?.id;
   await until('the engine on the Intel card to be ready', async () => { const r = (await state()).runs.find((x) => x.id === onArc); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
@@ -645,6 +668,10 @@ try {
   const held = await api('/api/runs', { method: 'POST', body: { recipe: ARC_TOO } });
   check('a second engine is not started on the card that is held', held.status === 409 && /0 free/.test(held.json?.error || ''), JSON.stringify(held));
   await api(`/api/runs/${onArc}`, { method: 'DELETE' });
+  const peerRun = (await api('/api/runs', { method: 'POST', body: { recipe: ARC_PEER } })).json?.id;
+  await until('the smaller Intel card\'s llama.cpp recipe to be ready on the larger Intel card', async () => { const r = (await state()).runs.find((x) => x.id === peerRun); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
+  check('a smaller Intel card\'s llama.cpp recipe starts on the larger Intel card', Number.isInteger(peerRun));
+  await api(`/api/runs/${peerRun}`, { method: 'DELETE' });
 } catch (e) {
   check('the integration test ran to the end', false, e.message);
 }
