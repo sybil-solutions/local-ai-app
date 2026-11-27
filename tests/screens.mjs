@@ -102,6 +102,8 @@ const HOMES = [
   ['cantconnect-after', () => reset({ snap: snapshot(), online: false })],
   ['key', () => reset({ needKey: true })],
   ['off', () => reset({ snap: snapshot() })],
+  ['off-fourth-last', () => reset({ snap: snapshot({ last: t('r/mine') }) })],
+  ['off-fourth-selected', () => reset({ snap: snapshot(), sel: t('r/mine') })],
   ['off-expanded', () => reset({ snap: snapshot(), expanded: t('r/fast'), sel: t('r/smart') })],
   ['off-no-room', () => reset({ snap: snapshot({ free: [] }) })],
   ['off-untested', () => { const snap = snapshot(); snap.groups[0].untested = t('RTX 5090'); reset({ snap }); }],
@@ -225,6 +227,10 @@ const seen = drawAll('plain');
 const drawnStates = new Set(HOMES.map(([name, setup]) => { setup(); return resolve(); }));
 for (const id of Object.keys(SCREENS)) check(`the fixture covers the ${id} screen`, seen.has(id) || drawnStates.has(id) || !!STATE[id]);
 for (const id of Object.keys(STATE)) check(`the fixture covers the ${id} state`, seen.has(id) || drawnStates.has(id));
+for (const name of ['off', 'off-fourth-last', 'off-fourth-selected']) {
+  check(`Home desktop (${name}) shows only the three tier picks`, (out[`plain/home/${name}/desktop`]?.match(/class="cpick[\s"]/g) || []).length === 3);
+  check(`Home panel (${name}) shows only the three tier picks`, (out[`plain/home/${name}/panel`]?.match(/class="mrow[\s"]/g) || []).length === 3);
+}
 poison = true;
 drawAll('poisoned');
 
