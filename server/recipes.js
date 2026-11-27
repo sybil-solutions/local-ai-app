@@ -238,6 +238,15 @@ function appleCard(gpuName, vramGb) {
 // An Intel card runs only what was tested on it: an engine built for NVIDIA cards does not run there.
 export const cardFor = (gpu) => (gpu.unified ? appleCard(gpu.name, gpu.total / 1024) : cardOf(gpu.name, gpu.total / 1024, gpu.shared, gpu.backend) ?? (gpu.backend ? null : nearest(gpu.total / 1024)));
 
+// Whether a recipe can run on a card: directly for that card, or a generic llama.cpp SYCL recipe from a smaller-or-equal Intel Arc card.
+export function fitsCard(recipe, card) {
+  if (!recipe || !card) return false;
+  if (recipe.card === card) return true;
+  const me = own(catalog.cards, card), peer = own(catalog.cards, recipe.card);
+  return me?.backend === 'intel-xpu' && peer?.backend === 'intel-xpu' && /^llama\.cpp\b/.test(String(recipe.engine || ''))
+    && !!me.vram_gb && !!peer.vram_gb && peer.vram_gb <= me.vram_gb + 1;
+}
+
 // A recipe's id is written on its container as a label and read back from Docker's listing, one line a container,
 // so it is plain text on one line.
 const PLAIN_ID = /^[^\x00-\x1f\x7f]{1,200}$/; // eslint-disable-line no-control-regex
@@ -303,6 +312,29 @@ function recommendedOf(card, setups, list) {
   return null;
 }
 
+// For an Intel Arc card, generic llama.cpp SYCL recipes tested on smaller-or-equal Intel Arc cards also run here,
+// filling in models that don't yet have a runnable recipe on this exact card.
+function intelExtras(card, count, ownList, ids) {
+  const me = own(catalog.cards, card);
+  if (me?.backend !== 'intel-xpu' || !me.vram_gb) return [];
+  const have = new Set(ownList.filter((r) => !r.why).map((r) => find(r.id)?.model).filter(Boolean));
+  const peers = Object.entries(catalog.cards)
+    .filter(([id, c]) => id !== card && c.backend === 'intel-xpu' && c.vram_gb && c.vram_gb <= me.vram_gb + 1)
+    .sort(([, a], [, b]) => b.vram_gb - a.vram_gb);
+  const out = [];
+  for (const [peer] of peers) {
+    for (const id of ids) {
+      const r = find(id);
+      if (!r || r.card !== peer || !/^llama\.cpp\b/.test(String(r.engine || '')) || have.has(r.model)) continue;
+      const items = listed(id, peer, count).filter((x) => !x.why);
+      if (!items.length) continue;
+      have.add(r.model);
+      out.push(...items);
+    }
+  }
+  return out;
+}
+
 // One group per kind of card on the machine: its three picks, everything it can launch (`recipes`), what the
 // registry holds for these cards that this app will not start, each with the reason (`blocked`), and the setups
 // those belong to (`setups`). Nothing the registry has for the machine's cards is left out without a word.
@@ -315,7 +347,8 @@ export function groups(gpus) {
   }
   const ids = [...new Set([...Object.keys(catalog.recipes), ...Object.keys(local)])];
   return [...byCard.values()].map(({ card, tested, members }) => {
-    const all = ids.flatMap((id) => listed(id, card, members.length)).sort((a, b) => (b.tps || 0) - (a.tps || 0)), list = all.filter((r) => !r.why), setups = setupsOf(card, members.length, all);
+    const mine = ids.flatMap((id) => listed(id, card, members.length));
+    const all = [...mine, ...intelExtras(card, members.length, mine, ids)].sort((a, b) => (b.tps || 0) - (a.tps || 0)), list = all.filter((r) => !r.why), setups = setupsOf(card, members.length, all);
     return { card, name: own(catalog.cards, tested)?.name || members[0].name, untested: tested ? null : own(catalog.cards, card)?.name ?? null, gpus: members.map((g) => g.index), tiers: picksOf(list, setups), recommended: recommendedOf(card, setups, list), recipes: list, blocked: all.filter((r) => r.why), setups };
   });
 }

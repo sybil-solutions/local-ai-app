@@ -140,11 +140,15 @@ const OLDFAST = 'smoke/gpu/oldfast.docker.2x';
 catalog.recipes[OLDFAST] = { ...docked({ cards: 2 }), model: 'oldfast-1', proof: [{ tps: 500, legacy: true, gates: 'load chat' }] };
 catalog.cards['smoke-gpu'].setups[1].picks = [PAIR, OLDFAST];
 // An Intel card the registry has tested, with two recipes for it. Their engine is given the card as a device.
-const ARC = 'smoke/arc/good.docker', ARC_TOO = 'smoke/arc/second.docker';
+// A smaller Intel card's generic llama.cpp SYCL recipe is also offered on it, while a card-specific vLLM recipe is not.
+const ARC = 'smoke/arc/good.docker', ARC_TOO = 'smoke/arc/second.docker', ARC_PEER = 'smoke/arc-small/peer.docker', ARC_PEER_VLLM = 'smoke/arc-small/vllm.docker';
 catalog.cards['smoke-arc'] = { name: 'Intel Arc Pro B70', vram_gb: 32, backend: 'intel-xpu', match: { names: ['arcprob70'] } };
-const arced = (model) => ({ card: 'smoke-arc', model, engine: 'llama.cpp', proof: [{ tps: 30 }], launch: { image: PINNED, port: 8000, cards: 1, seqs: 1, ctx: 8192, backend: 'intel-xpu', shm: '8g', args: ['--model', 'x'], env: { ONEAPI_DEVICE_SELECTOR: 'level_zero:0' } } });
+catalog.cards['smoke-arc-small'] = { name: 'Intel Arc Small', vram_gb: 16, backend: 'intel-xpu', match: { names: ['arcsmall'] } };
+const arced = (model, card = 'smoke-arc', engine = 'llama.cpp') => ({ card, model, engine, proof: [{ tps: 30 }], launch: { image: PINNED, port: 8000, cards: 1, seqs: 1, ctx: 8192, backend: 'intel-xpu', shm: '8g', args: ['--model', 'x'], env: { ONEAPI_DEVICE_SELECTOR: 'level_zero:0' } } });
 catalog.recipes[ARC] = arced('arc-1');
 catalog.recipes[ARC_TOO] = arced('arc-2');
+catalog.recipes[ARC_PEER] = arced('arc-peer', 'smoke-arc-small', 'llama.cpp-sycl');
+catalog.recipes[ARC_PEER_VLLM] = arced('arc-peer-vllm', 'smoke-arc-small', 'vllm');
 const HOSTED = 'smoke/chip/fake.host', TAMPERED = 'smoke/chip/tampered.host';
 if (APPLE) {
   const sysctl = (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', timeout: 5000 }).trim();
@@ -654,7 +658,7 @@ try {
   const arc = await until('the Intel cards to be listed, and the one another container holds to be known', async () => { const s = await state(); return s.gpus.length === 4 && s.gpus[3].busy && s; }, 30000);
   check('Intel Arc cards are found beside the NVIDIA ones, each with its memory and its render node', arc.gpus.slice(2).map((g) => `${g.index} ${g.name} ${g.total} ${g.backend} ${g.node}`).join() === `2 Intel Arc Pro B70 32768 intel-xpu ${node('renderD128')},3 Intel Arc Pro B70 32768 intel-xpu ${node('renderD129')}`, JSON.stringify(arc.gpus.slice(2)));
   const arcGroup = arc.groups.find((g) => g.card === 'smoke-arc');
-  check('they are the registry\'s Intel card, with its recipes and none of an NVIDIA card\'s', arcGroup?.gpus.join() === '2,3' && arcGroup.recipes.map((r) => r.id).sort().join() === [ARC, ARC_TOO].sort().join() && arc.groups.length === 2, JSON.stringify(arc.groups.map((g) => [g.card, g.gpus, g.recipes.length])));
+  check('they are the registry\'s Intel card, with its recipes, smaller Intel cards\' llama.cpp recipes, and none of an NVIDIA card\'s', arcGroup?.gpus.join() === '2,3' && arcGroup.recipes.map((r) => r.id).sort().join() === [ARC, ARC_TOO, ARC_PEER].sort().join() && arc.groups.length === 2, JSON.stringify(arc.groups.map((g) => [g.card, g.gpus, g.recipes.map((r) => r.id)])));
   check('a card another program\'s container holds is not free', arc.free.includes(2) && !arc.free.includes(3) && !arc.gpus[2].busy, JSON.stringify(arc.free));
   const onArc = (await api('/api/runs', { method: 'POST', body: { recipe: ARC } })).json?.id;
   await until('the engine on the Intel card to be ready', async () => { const r = (await state()).runs.find((x) => x.id === onArc); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
@@ -664,6 +668,10 @@ try {
   const held = await api('/api/runs', { method: 'POST', body: { recipe: ARC_TOO } });
   check('a second engine is not started on the card that is held', held.status === 409 && /0 free/.test(held.json?.error || ''), JSON.stringify(held));
   await api(`/api/runs/${onArc}`, { method: 'DELETE' });
+  const peerRun = (await api('/api/runs', { method: 'POST', body: { recipe: ARC_PEER } })).json?.id;
+  await until('the smaller Intel card\'s llama.cpp recipe to be ready on the larger Intel card', async () => { const r = (await state()).runs.find((x) => x.id === peerRun); if (r?.phase === 'failed') throw new Error(r.error); return r?.phase === 'ready'; }, 60000);
+  check('a smaller Intel card\'s llama.cpp recipe starts on the larger Intel card', Number.isInteger(peerRun));
+  await api(`/api/runs/${peerRun}`, { method: 'DELETE' });
 } catch (e) {
   check('the integration test ran to the end', false, e.message);
 }

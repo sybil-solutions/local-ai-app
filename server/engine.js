@@ -9,7 +9,7 @@ import { docker } from './dockercmd.js';
 import { discover } from './discovery.js';
 import { readGpus } from './gpus.js';
 import { adoptHosts, checkHost, hostLog, launchHost, stopHost } from './hosts.js';
-import { blocked, cardFor, find, label, shortNow } from './recipes.js';
+import { blocked, cardFor, find, fitsCard, label, shortNow } from './recipes.js';
 import { freeGpus, runs, setFailed, status, update } from './runs.js';
 import { loadSeconds } from './speed.js';
 import * as usage from './usage.js';
@@ -57,7 +57,7 @@ async function begin(id, picked) {
   if (port >= PORT + 100) fail(409, 'No free port left');
   if (runs.has(port)) fail(409, 'Another launch just started, try again');
   const need = recipe.launch.cards || 1;
-  const free = freeGpus().filter((g) => cardFor(g) === recipe.card).map((g) => g.index);
+  const free = freeGpus().filter((g) => fitsCard(recipe, cardFor(g))).map((g) => g.index);
   const gpus = picked?.length ? picked : free.slice(0, need);
   if (gpus.length !== need || new Set(gpus).size !== need || gpus.some((g) => !free.includes(g))) fail(409, `Needs ${need} free GPU${need > 1 ? 's' : ''}; ${free.length} free`);
   const r = { id: port, recipe: id, host, name: label(id), url: `http://${ENGINE_HOST}:${port}`, gpus, phase: 'queued', detail: 'Queued', progress: null, error: null, since: Date.now(), busy: true, abort: new AbortController(), apis: null, stats: null, misses: 0 };
