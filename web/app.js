@@ -11,7 +11,7 @@ import { CTX } from './components/models.js';
 import { GrowthReadout } from './components/usage.js';
 import { NAV } from './desktop.js';
 import { ctxOf } from './format.js';
-import { api, chosen, hasRoom, homeCfg, isFull, resolve, s, send, shown } from './state.js';
+import { agentScoped, api, chosen, hasRoom, homeCfg, isFull, resolve, s, send, shown } from './state.js';
 import { desk, fitWindow, layout, panel, put, render } from './view.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -45,8 +45,9 @@ document.addEventListener('input', (e) => {
 // A field with data-save is saved when you leave it or choose from it.
 document.addEventListener('change', (e) => {
   const { save } = e.target.dataset;
-  if (save === 'terminal') send('settings', 'POST', { terminal: e.target.value }).catch(say);
-  if (save === 'folder') send('settings', 'POST', { folder: e.target.value.trim() }).then(() => { delete s.form.folder; }, say);
+  if (save === 'runon') { s.runOn = +e.target.value; s.opened = null; delete s.form.folder; render(true); }
+  if (save === 'terminal') send(agentScoped('settings'), 'POST', { terminal: e.target.value }).catch(say);
+  if (save === 'folder') send(agentScoped('settings'), 'POST', { folder: e.target.value.trim() }).then(() => { delete s.form.folder; }, say);
 });
 // Usage: a day under the pointer shows its numbers, and the growth chart's readout follows the pointer.
 document.addEventListener('pointerover', (e) => { const day = e.target.closest('[data-cell]'); if (day && e.pointerType === 'mouse') day.click(); });
@@ -103,6 +104,7 @@ async function follow() {
       if (s.snap && next.app.started !== s.snap.app.started) location.reload(); // the server restarted, so this page's code may be old
       Object.assign(s, { version: next.v, snap: next, online: true, needKey: false });
       if (s.dev !== -1 && !next.devices[s.dev]) s.dev = -1;
+      if (s.runOn !== -1 && !next.devices[s.runOn]) s.runOn = -1;
     } catch (e) {
       lost = true;
       if (e.status === 401) s.needKey = true; else s.online = false;

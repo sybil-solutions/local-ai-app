@@ -1,5 +1,5 @@
 // The desktop layout: a top bar, the picture as the room, Home along the bottom, and every other screen as a page.
-import { AgentList, AgentsFoot } from './components/agents.js';
+import { AgentList, AgentsFoot, RunOnSelect } from './components/agents.js';
 import { Button, QuietButton } from './components/controls.js';
 import { DeskPick, offLine, OpenButtons, runLine, StartButton, Stats, StopButton, Widget } from './components/home.js';
 import { Dove, Icon } from './components/icons.js';
@@ -8,7 +8,7 @@ import { CapNames, Caps, EditForm, facts, meta, ModelCard, UseButton } from './c
 import { ctxOf, fmt } from './format.js';
 import { attrs, data, html } from './html.js';
 import { Elsewhere, SCREENS, STATE } from './screens.js';
-import { all, chosen, D, here, HOME, model, others, run, s, sections, shown } from './state.js';
+import { all, chosen, D, here, HOME, model, others, run, runHosts, s, sections, shown } from './state.js';
 
 // [section, label, the screen it opens]. Keys 1 to 6 follow this order.
 export const NAV = [['home', 'Home', 'home'], ['models', 'Models', 'adv-models'], ['agents', 'Agents', 'agent'], ['machines', 'Machines', 'machines'], ['usage', 'Usage', 'usage'], ['settings', 'Settings', 'home-edit']];
@@ -37,7 +37,8 @@ export function DeskHome(id) {
     strip = Strip(c.name, offLine(c), html`<div class="cpicks">${HOME().includes('models') && shown().length > 1 && shown().map(DeskPick)}</div>`, html`${QuietButton({ label: 'More models', nav: 'adv-models' })}${StartButton()}`);
   } else if (id === 'awake' || id === 'opened') {
     const r = run(), sub = [runLine(r, id === 'opened'), all().find((x) => x.id === r.recipe)?.engine, r.ctx && ctxOf(r.ctx)].filter(Boolean).join(' · ');
-    strip = Strip(r.name, sub, html`<div>${HOME().includes('stats') && Stats(r)}</div>`, html`${s.agentsOpen && html`<div class="apop">${AgentList('open')}</div>`}${OpenButtons()}${StopButton()}`);
+    const pop = s.agentsOpen && html`<div class="apop">${runHosts().length > 1 && html`<div class="apop-on">${RunOnSelect()}</div>`}${AgentList('open')}</div>`;
+    strip = Strip(r.name, sub, html`<div>${HOME().includes('stats') && Stats(r)}</div>`, html`${pop}${OpenButtons()}${StopButton()}`);
   } else {
     const st = STATE[id]();
     strip = Strip(st.word, st.line, html`<div class="cprog">${st.bar && ProgressBar(st.p)}${st.extra}</div>`, st.btns);

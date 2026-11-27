@@ -14,7 +14,7 @@
 // Usage: node tests/integration.mjs   (exit code 0 when every check passed)
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -202,12 +202,19 @@ const logFile = join(HOME, 'server.log');
 let server = null, log = '';
 // `nvidia: true` starts it as on an NVIDIA machine: the stand-in nvidia-smi and docker come first on the PATH.
 // `arc: true` gives that machine Intel Arc cards as well: the stand-in lspci names the ones in lspci.txt.
+// A stand-in `pi` on PATH so POST /api/open can be tested without a real agent or terminal window.
+const AGENT_BIN = join(HOME, 'agent-bin');
+mkdirSync(AGENT_BIN, { recursive: true });
+writeFileSync(join(AGENT_BIN, 'pi'), '#!/bin/sh\necho "pi 9.9.9"\n');
+chmodSync(join(AGENT_BIN, 'pi'), 0o755);
+
 const FAKE_DOCKER = join(HOME, 'docker'), THERE_DOCKER = join(HOME, 'docker-second');
 function startServer({ nvidia = false, arc = false } = {}) {
-  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_STUDIO_PORT: String(STUDIO_PORT || 1),
+  server = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: HOME, LOCAL_AI_PORT: String(PORT), LOCAL_AI_SHARE: '0', LOCAL_AI_TERMINAL: 'none', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_STUDIO_PORT: String(STUDIO_PORT || 1),
     HF_ENDPOINT: `http://127.0.0.1:${hf.address().port}`, LOCAL_AI_MODELS: `${join(HOME, 'models')}:${HAVE}`, // downloads go to the first folder; the second holds weights already here
     LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
-    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } : {}), ...(arc ? { FAKE_LSPCI: join(HOME, 'lspci.txt') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    PATH: `${nvidia ? `${join(ROOT, 'tests', 'stand-ins', 'bin')}:` : ''}${AGENT_BIN}:${process.env.PATH}`,
+    ...(nvidia ? { LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: FAKE_DOCKER } : {}), ...(arc ? { FAKE_LSPCI: join(HOME, 'lspci.txt') } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', (b) => { log += b; });
   server.stderr.on('data', (b) => { log += b; });
   return until('the server to answer', async () => (await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
@@ -412,8 +419,8 @@ try {
   // they are, it is that machine's: it is not shown as running here, and what it served is counted there, not here.
   // The machine is followed, not asked again and again: what changes there is here at once.
   const THERE = PORT + 400, thereHome = join(HOME, 'second');
-  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_DISCOVER: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
-    LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: THERE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${process.env.PATH}` } });
+  const there = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PI_CODING_AGENT_DIR: join(HOME, 'pi'), LOCAL_AI_HOME: thereHome, LOCAL_AI_PORT: String(THERE), LOCAL_AI_SHARE: '0', LOCAL_AI_TERMINAL: 'none', LOCAL_AI_DISCOVER: '0', LOCAL_AI_STAND_INS: '1', HF_HOME: join(HOME, 'hf'), LOCAL_AI_REGISTRY: `http://127.0.0.1:${registry.address().port}/catalog.json`,
+    LOCAL_AI_GPU: 'nvidia', FAKE_DOCKER_DIR: THERE_DOCKER, PATH: `${join(ROOT, 'tests', 'stand-ins', 'bin')}:${AGENT_BIN}:${process.env.PATH}` } });
   try {
     await until('the second machine to answer', async () => (await fetch(`http://127.0.0.1:${THERE}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, 30000);
     const thereKey = JSON.parse(readFileSync(join(thereHome, 'config.json'), 'utf8')).key;
@@ -443,6 +450,18 @@ try {
     while (!arrived && Date.now() - told < 5000) { if ((await state()).devices[0]?.state?.tone === 'gray') arrived = Date.now() - told; else await sleep(40); }
     check('a change on a connected machine is here in under a second', arrived > 0 && arrived < 1000, `${arrived} ms`);
     check('a call is run on the connected machine through this one', (await api('/api/devices/0/usage')).status === 200 && (await api('/api/devices/0/endpoints')).json?.key === thereKey);
+
+    // Opening an agent on a remote model defaults to this machine (client), and can be toggled to run on the connected machine
+    // (using either that machine's model or this machine's model).
+    const openLocal = await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 0, port: farPort } });
+    check('opening an agent on a remote model defaults to this computer', openLocal.status === 200 && openLocal.json?.command?.includes(HOME) && openLocal.json.command.includes(`--model la-0-${farPort}/fake-engine`), JSON.stringify(openLocal));
+    const openRemoteSame = await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 0, port: farPort, on: 0 } });
+    check('toggling Run on to the connected machine opens the agent there on its model', openRemoteSame.status === 200 && openRemoteSame.json?.command?.includes(thereHome) && openRemoteSame.json.command.includes(`--model la-self-${farPort}/fake-engine`), JSON.stringify(openRemoteSame));
+    const openRemoteCross = await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 'self', port, on: 0 } });
+    const thereModels = JSON.parse(readFileSync(join(thereHome, 'agents', 'models.json'), 'utf8')).providers;
+    check('a connected machine can run an agent against this computer’s inference too', openRemoteCross.status === 200 && openRemoteCross.json?.command?.includes(thereHome) && openRemoteCross.json.command.includes('/outside-model') && Object.values(thereModels).some((p) => p.baseUrl === `http://127.0.0.1:${port}/v1`), JSON.stringify(openRemoteCross));
+    check('invalid external target is refused', (await api('/api/open', { method: 'POST', body: { agent: 'pi', target: { url: 'javascript:alert(1)', model: 'x' } } })).status === 400);
+    check('unknown Run-on device is refused', (await api('/api/open', { method: 'POST', body: { agent: 'pi', device: 'self', port, on: 9 } })).status === 404);
 
     const theirs = await until('the model to be seen as that machine\'s', async () => !(await state()).runs.some((r) => r.id === farPort), 45000).then(() => true, () => false);
     check('once its machine is connected, a model reached through a port here is not shown as running here', theirs);

@@ -11,10 +11,11 @@ export const s = {
   key: inlined && inlined !== '__KEY__' ? inlined : linked || store('key') || '',
   snap: null, online: true, needKey: false, version: 0,
   dev: -1,            // which machine is shown: -1 is this one, else an index into snap.devices
+  runOn: -1,          // which machine agents open on: -1 is this computer (default), else an index into snap.devices
   nav: null,          // the screen opened on top of Home, or null
   trail: [],          // where Close goes back to
   sel: null,          // the recipe picked on Home
-  expanded: null, modelOpen: null, opened: null, agentsOpen: false,
+  expanded: null, modelOpen: null, opened: null, agentsOpen: false, runOnName: null,
   full: store('la-full') !== '0',
   note: '', busy: false, command: '', logText: '',
   period: 'days', span: 'all', usage: null, ends: null, peers: null, install: null, draft: null, link: null,
@@ -29,8 +30,17 @@ export async function api(path, options = {}) {
   return data;
 }
 export const send = (path, method = 'POST', body) => api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
-// Calls about models go to the machine being shown; everything else stays on the one serving this page.
+// Calls about models go to the machine being shown; calls about where agents run go to the Run-on machine (this computer by default).
 export const scoped = (path) => (s.dev === -1 ? path : `devices/${s.dev}/${path}`);
+export const runHosts = () => (s.snap
+  ? [{ i: -1, name: s.snap.name, local: true, state: s.snap },
+    ...s.snap.devices.filter((d) => d.online && d.state).map((d) => ({ i: d.i, name: d.name, local: false, state: d.state }))]
+  : []);
+export const runHost = () => {
+  const d = s.runOn !== -1 && s.snap?.devices[s.runOn];
+  return d?.online && d.state ? { i: d.i, name: d.name, local: false, state: d.state } : { i: -1, name: s.snap?.name || '', local: true, state: s.snap };
+};
+export const agentScoped = (path) => (runHost().local ? path : `devices/${runHost().i}/${path}`);
 
 export const D = () => (s.dev === -1 ? s.snap : s.snap.devices[s.dev]?.state);
 export const here = () => (s.dev === -1 ? s.snap.name : s.snap.devices[s.dev]?.name || s.snap.name);
@@ -82,8 +92,8 @@ export function chosen() {
 export const shown = () => { const three = picks(), c = chosen(); return c && !three.some((r) => r.id === c.id) ? [...three, c] : three; };
 export const cardKey = (id) => `${s.dev} ${id}`; // a recipe id can mean a different model on another machine
 export const newer = (a, b) => a.localeCompare(b, 'en', { numeric: true }) > 0;
-export const agentName = () => s.snap.agents.find((a) => a.id === s.snap.agent && a.installed)?.name;
-export const outdated = () => s.snap.agents.filter((a) => a.installed && a.version && a.latest && newer(a.latest, a.version) && a.job?.phase !== 'running');
+export const agentName = () => { const h = runHost().state; return (h?.agents || []).find((a) => a.id === h.agent && a.installed)?.name; };
+export const outdated = () => (runHost().state?.agents || []).filter((a) => a.installed && a.version && a.latest && newer(a.latest, a.version) && a.job?.phase !== 'running');
 // Whether the machine has the free GPUs the chosen model needs. When it has not, Home says so and shows the GPUs.
 export function hasRoom(c = chosen()) {
   const d = D(), g = c && d.groups.find((x) => x.recipes.some((r) => r.id === c.id));

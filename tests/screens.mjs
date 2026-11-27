@@ -70,7 +70,7 @@ const agents = () => [
   { id: 'dsh', name: t('DeepSeek Harness'), needs: 'chat', installed: false, version: null, latest: null, canInstall: false, canUpdate: true, site: t('https://example.com/download'), app: true, job: null },
 ];
 const snapshot = (extra = {}, app = {}) => ({ v: 7, ...machine(), devices: [
-  { i: 0, name: t('big-box'), url: 'http://100.90.0.1:18700', online: true, error: null, state: { ...machine({ name: t('big-box'), gpus: [0, 1, 2, 3].map((i) => gpu(i, 92000)), free: [], runs: [run('ready', { external: true, recipe: null, id: 8000 })] }), devices: [], app: { version: '0.4.0', can: true } } },
+  { i: 0, name: t('big-box'), url: 'http://100.90.0.1:18700', online: true, error: null, state: { ...machine({ name: t('big-box'), os: 'linux', gpus: [0, 1, 2, 3].map((i) => gpu(i, 92000)), free: [], runs: [run('ready', { external: true, recipe: null, id: 8000 })] }), devices: [], agents: agents(), agent: 'pi', folder: t('/home/someone/code'), terminals: [], terminal: null, app: { version: '0.4.0', can: true } } },
   { i: 1, name: t('sleepy'), url: 'http://100.90.0.2:18700', online: false, error: t('Not responding'), state: null },
 ], agents: agents(), agent: 'pi', folder: t('/Users/someone/code'), terminals: [{ id: 'ghostty', name: t('Ghostty') }, { id: 'terminal', name: t('Terminal') }], terminal: 'ghostty',
 home: null, background: 'clouds', tone: null, picture: null, hfToken: null,
@@ -89,7 +89,7 @@ const CARD_MD = () => `# ${t('Model Card')}\n\nSome **bold** text, \`code\`, a [
 
 // Everything the page remembers itself, back to how it starts.
 function reset(extra = {}) {
-  Object.assign(s, { snap: null, online: true, needKey: false, version: 0, dev: -1, nav: null, trail: [], sel: null, expanded: null, modelOpen: null, opened: null, agentsOpen: false, full: true,
+  Object.assign(s, { snap: null, online: true, needKey: false, version: 0, dev: -1, runOn: -1, nav: null, trail: [], sel: null, expanded: null, modelOpen: null, opened: null, agentsOpen: false, runOnName: null, full: true,
     note: '', busy: false, command: '', logText: '', period: 'days', span: 'all', usage: null, ends: null, peers: null, install: null, draft: null, link: null, asking: null, look: null, form: {}, cards: {} }, extra);
 }
 
@@ -116,8 +116,10 @@ const HOMES = [
   ['awake-all-blocks', () => reset({ snap: snapshot({ runs: [run('ready')], home: { order: ['usage', 'gpus', 'hands', 'models', 'stats'], on: ['usage', 'gpus', 'hands', 'models', 'stats'] } }) })],
   ['awake-no-blocks', () => reset({ snap: snapshot({ runs: [run('ready')], home: { order: ['usage', 'gpus', 'hands', 'models', 'stats'], on: [] } }) })],
   ['awake-agents-open', () => reset({ snap: snapshot({ runs: [run('ready')] }), agentsOpen: true })],
+  ['awake-agents-remote', () => reset({ snap: snapshot({ runs: [run('ready')] }), agentsOpen: true, runOn: 0 })],
   ['awake-no-agent', () => { const snap = snapshot({ runs: [run('ready')] }); snap.agents.forEach((a) => { a.installed = false; }); reset({ snap }); }],
   ['opened', () => reset({ snap: snapshot({ runs: [run('ready')] }), opened: 18701 })],
+  ['opened-remote', () => reset({ snap: snapshot({ runs: [run('ready')] }), opened: 18701, runOn: 0 })],
   ['external', withRun('ready', { external: true, recipe: null })],
   ['external-noreply', withRun('unresponsive', { external: true, recipe: null, view: { line: t('Last heard 3 min ago'), p: 0.6 } })],
   ['studio', withRun('ready', { external: true, byStudio: true, recipe: null })],
@@ -147,14 +149,14 @@ const HOMES = [
 // Screens opened on top of Home: [screen, how to set up beyond a plain snapshot]. Several variants of one screen are fine.
 const base = (extra = {}, snapExtra = {}, app = {}) => () => reset({ snap: snapshot({ runs: [run('ready')], ...snapExtra }, app), ...extra });
 const PAGES = [
-  ['chooser', base()], ['chooser', base({}, { runs: [run('ready', { apis: null })] })],
-  ['runthis', base({ command: t('cd /x && env A=1 pi --model m') })],
+  ['chooser', base()], ['chooser', base({ dev: 0, runOn: 0 })], ['chooser', base({}, { runs: [run('ready', { apis: null })] })],
+  ['runthis', base({ command: t('cd /x && env A=1 pi --model m') })], ['runthis', base({ command: t('cd /x && env A=1 pi --model m'), runOnName: t('big-box') })],
   ['key', () => reset({ needKey: true, form: { key: t('typed') } })],
   ['settings', base()], ['settings', base({}, {}, { latest: t('0.6.0') })], ['settings', base({}, {}, { latest: t('a newer build'), can: true })], ['settings', base({}, {}, { can: false })],
   ['advanced', base()],
   ['home-edit', base()], ['home-edit', base({}, { home: { order: ['usage', 'hands', 'models', 'stats', 'gpus'], on: ['usage'] } })],
   ['background', base()], ['background', () => { dataset.bg = 'none'; base({}, { picture: 1 })(); }], ['background', () => { dataset.bg = 'own'; dataset.tone = 'gray'; base({}, { picture: 1, background: 'own' })(); }],
-  ['agent', base()], ['agent', base({ form: { folder: t('/typed/folder') } }, { terminals: [] })],
+  ['agent', base()], ['agent', base({ runOn: 0 })], ['agent', base({ form: { folder: t('/typed/folder') } }, { terminals: [] })],
   ['machines', base()], ['machines', base({ peers: PEERS(), install: t('curl -fsSL http://100.90.0.9:18700/install | bash') })], ['machines', base({ peers: [], dev: 0 })],
   ['addmachine', base({ form: { host: t('http://100.90.0.3:18700'), mkey: t('k') }, link: { name: t('x'), error: t('That key is wrong') } })],
   ['usage', base()], ...['run', 'today', 'month', 'all'].flatMap((span) => ['days', 'weeks', 'months'].map((period) => ['usage', base({ usage: USAGE(), span, period })])),
