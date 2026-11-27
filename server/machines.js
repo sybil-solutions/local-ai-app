@@ -129,6 +129,16 @@ export function conform(sent) {
     groups: things(sent.groups).map((g) => ({ ...g, name: words(g.name), gpus: wholes(g.gpus), recipes: things(g.recipes).filter(named).map(recipe), blocked: things(g.blocked).filter(named).map((r) => ({ ...recipe(r), why: words(r.why, 160) || 'Can’t be started by this app' })), recommended: words(g.recommended, 200) || null, setups: things(g.setups).filter((x) => Number.isInteger(x.cards) && x.cards > 0 && Number.isInteger(x.machines) && x.machines > 0 && typeof x.label === 'string').map((x) => ({ cards: x.cards, machines: x.machines, label: words(x.label, 80) })), tiers: Object.fromEntries(Object.entries(thing(g.tiers)).filter(([, r]) => r && typeof r === 'object' && named(r)).map(([k, r]) => [k, recipe(r)])) })),
     gpus: things(sent.gpus), free: wholes(sent.free), docker: { ok: !!thing(sent.docker).ok, error: words(thing(sent.docker).error, 300) || null },
     catalog: thing(sent.catalog), usage: thing(sent.usage), app: sent.app && typeof sent.app === 'object' && !Array.isArray(sent.app) ? sent.app : null,
+    agents: things(sent.agents).filter((a) => typeof a.id === 'string' && typeof a.name === 'string').map((a) => ({
+      id: words(a.id, 40), name: words(a.name, 80), needs: words(a.needs, 40) || null, installed: !!a.installed,
+      version: words(a.version, 60) || null, latest: words(a.latest, 60) || null,
+      canInstall: !!a.canInstall, canUpdate: !!a.canUpdate, broken: !!a.broken,
+      site: typeof a.site === 'string' && /^https?:\/\//.test(a.site) ? a.site.slice(0, 200) : null,
+      app: !!a.app, job: a.job && typeof a.job === 'object' && !Array.isArray(a.job) ? { kind: words(a.job.kind, 20), phase: words(a.job.phase, 20), error: words(a.job.error, 200) || null } : null,
+    })),
+    agent: words(sent.agent, 40) || null, folder: words(sent.folder, 400) || '',
+    terminals: things(sent.terminals).filter((t) => typeof t.id === 'string' && typeof t.name === 'string').map((t) => ({ id: words(t.id, 40), name: words(t.name, 80) })),
+    terminal: words(sent.terminal, 40) || null,
   };
 }
 

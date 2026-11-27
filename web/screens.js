@@ -1,6 +1,6 @@
 // Every screen, as a function that returns its markup. The panel shows one at a time; the desktop layout shows the
 // same ones as pages. A screen only arranges components (web/components/): it reads the state and decides what goes where.
-import { AgentList, AgentsFoot } from './components/agents.js';
+import { AgentList, AgentsFoot, RunOnSelect } from './components/agents.js';
 import { Button, CopyField, Field, LinkButton, ScreenTabs, TextLink, Toggle } from './components/controls.js';
 import { HomeBlocks, OpenButtons, StartButton, Status, StopButton } from './components/home.js';
 import { Grip } from './components/icons.js';
@@ -84,8 +84,8 @@ export const SCREENS = {
   off: () => html`${HomeBar()}${Scroll(HomeBlocks('off'), { home: true })}${StartButton()}`,
   awake: () => html`${HomeBar()}${Scroll(HomeBlocks('run'), { home: true })}${OpenButtons()}${StopButton()}`,
   opened: () => html`${HomeBar()}${Scroll(HomeBlocks('opened'), { home: true })}${OpenButtons()}${StopButton()}`,
-  chooser: () => html`${CloseBar()}${Head('Open with')}${Scroll(AgentList('open'))}`,
-  runthis: () => html`${CloseBar()}${Head('Run this')}${Box(s.command, { mono: true })}${Spacer}${Button({ label: 'Copy', act: 'copy', kind: 'go' })}`,
+  chooser: () => html`${CloseBar()}${Head('Open with')}${RunOnSelect()}${Scroll(AgentList('open'))}`,
+  runthis: () => html`${CloseBar()}${Head(s.runOnName ? `Run this on ${s.runOnName}` : 'Run this')}${Box(s.command, { mono: true })}${Spacer}${Button({ label: 'Copy', act: 'copy', kind: 'go' })}`,
   key: () => html`${BareBar}${Head('Enter the key', 'margin-top:24px')}${Note('It’s under Settings › API endpoints in the Local AI app on that machine, or in its file ~/.local-ai/config.json')}${typed('key', 'Key', 'Key')}${Spacer}${Button({ label: 'Connect', act: 'key', kind: 'go' })}`,
   settings: () => html`${CloseBar('home')}${SettingsTabs('settings')}${NavRow('Home screen', 'home-edit')}${NavRow('Background', 'background')}${NavRow('Agents and folder', 'agent')}${NavRow('Machines', 'machines')}${NavRow('Usage', 'usage')}${Spacer}${VersionFoot()}`,
   advanced: () => html`${CloseBar('home')}${SettingsTabs('advanced')}${NavRow('Models', 'adv-models')}${NavRow('API endpoints', 'endpoints')}${NavRow('Registry', 'registry')}${NavRow('Hugging Face token', 'hf-token')}${Spacer}${VersionFoot()}`,

@@ -8,7 +8,7 @@ import * as agents from './agents.js';
 import * as engine from './engine.js';
 import * as machines from './machines.js';
 import * as recipes from './recipes.js';
-import { answer, publish, sized } from './snapshot.js';
+import { answer, publish, rememberTarget, sized } from './snapshot.js';
 import * as speed from './speed.js';
 import { sendStatic } from './static.js';
 import * as update from './update.js';
@@ -26,11 +26,70 @@ const JSON_TYPE = { 'content-type': 'application/json' };
 let shared = null; // this machine's tailnet address, once the app is also listening there
 
 
+const cleanText = (v, max) => (typeof v === 'string' && ![...v].some((c) => c.charCodeAt(0) < 32) ? v.trim().slice(0, max) : '');
+const APIS = new Set(['chat', 'responses', 'messages']);
+function parseTarget(t) {
+  if (!t || typeof t !== 'object' || Array.isArray(t)) fail(400, 'Invalid model target');
+  const url = typeof t.url === 'string' && /^https?:\/\/[A-Za-z0-9._:[\]-]+$/.test(t.url) ? t.url : '';
+  let parsed = null;
+  try { parsed = url ? new URL(url) : null; } catch { /* rejected below */ }
+  if (!parsed || parsed.origin !== url) fail(400, 'Invalid model address');
+  const model = cleanText(t.model, 200);
+  if (!model) fail(400, 'Missing model name');
+  const id = Number.isInteger(t.id) && t.id > 0 && t.id <= 65535 ? t.id : (+parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+  const apis = Array.isArray(t.apis) ? t.apis.filter((a) => typeof a === 'string' && APIS.has(a)) : null;
+  return { url, model, name: cleanText(t.name, 200) || model, device: cleanText(t.device, 120) || parsed.hostname, id, ctx: Number.isInteger(t.ctx) && t.ctx >= 0 ? t.ctx : 0, vision: !!t.vision, apis: apis?.length ? apis : null };
+}
+
 async function openAgent({ b }) {
-  const all = await sized(), target = all.find((t) => String(t.deviceIndex) === String(b.device) && t.id === b.port) || fail(404, 'That model is not ready');
+  if (typeof b.agent !== 'string' || !b.agent) fail(400, 'Choose an agent');
+  const on = b.on === undefined || b.on === null || b.on === 'self' || b.on === -1 || b.on === '-1' ? 'self'
+    : (Number.isInteger(b.on) && b.on >= 0) || (typeof b.on === 'string' && /^\d+$/.test(b.on)) ? +b.on : fail(404, 'No such device');
+  if (on !== 'self') {
+    const peer = config.devices[on] || fail(404, 'No such device');
+    let body;
+    if (String(b.device) === String(on)) {
+      body = { agent: b.agent, device: 'self', port: b.port };
+    } else {
+      const all = await sized(), target = all.find((t) => String(t.deviceIndex) === String(b.device) && t.id === b.port) || fail(404, 'That model is not ready');
+      let url = target.url;
+      if (target.deviceIndex === 'self') {
+        engine.cancelMeasure(target.id);
+        const peerHost = new URL(peer.url).hostname;
+        if (!/^(127\.|::1$|localhost$)/.test(peerHost)) {
+          const r = engine.listRuns().find((x) => x.id === target.id);
+          if (r?.reachable === false) fail(409, `${hostname()} is not sharing this model on your network. Turn on Tailscale to run an agent on ${peer.name}`);
+          const host = shared || (!/^(127\.|0\.0\.0\.0$)/.test(HOST) ? HOST : (await machines.self())?.ip);
+          if (!host) fail(409, `${hostname()} is not reachable from ${peer.name}. Turn on Tailscale to run an agent there on this model`);
+          url = `http://${host}:${target.id}`;
+        }
+      }
+      body = { agent: b.agent, target: { url, model: target.model, name: target.name, device: target.device, id: target.id, ctx: target.ctx || 0, vision: !!target.vision, apis: target.apis || null } };
+    }
+    const out = await machines.forward(on, 'POST', 'open', body);
+    let data = {};
+    try { data = JSON.parse(out.body.toString('utf8')); } catch { /* handled below */ }
+    if (out.status >= 400) fail(out.status, data?.error || `${peer.name} answered ${out.status}`);
+    return data;
+  }
+  const folder = typeof b.folder === 'string' && b.folder ? b.folder : config.folder;
+  if (b.target !== undefined) {
+    const clean = parseTarget(b.target);
+    let all = await sized();
+    let target = all.find((t) => t.url === clean.url && t.model === clean.model);
+    if (!target) { target = rememberTarget(clean); all = await sized(); target = all.find((t) => t.key === target.key) || target; }
+    agents.syncPi(all);
+    return agents.open(b.agent, target, folder, all);
+  }
+  const all = await sized(), target = all.find((t) => String(t.deviceIndex) === String(b.device) && t.id === b.port);
+  if (!target) {
+    const d = machines.views().find((x) => String(x.i) === String(b.device));
+    if (d?.state?.runs.some((r) => r.phase === 'ready' && r.id === b.port && r.reachable === false)) fail(409, `That model is only listening locally on ${d.name}. Switch Run on to ${d.name}, or turn on Tailscale there`);
+    fail(404, 'That model is not ready');
+  }
   agents.syncPi(all);
   if (target.deviceIndex === 'self') engine.cancelMeasure(target.id);
-  return agents.open(b.agent, target, b.folder || config.folder, all);
+  return agents.open(b.agent, target, folder, all);
 }
 
 async function endpoints() {

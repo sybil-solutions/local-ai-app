@@ -3,7 +3,7 @@
 import { pickBg, setTone } from './art.js';
 import { markdown } from './markdown.js';
 import { STATE } from './screens.js';
-import { all, api, cardKey, chosen, homeCfg, isFull, model, outdated, picks, run, s, scoped, send, shellWindow, store } from './state.js';
+import { agentScoped, all, api, cardKey, chosen, homeCfg, isFull, model, outdated, picks, run, runHost, s, scoped, send, shellWindow, store } from './state.js';
 import { fitWindow, layout, render } from './view.js';
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -51,9 +51,10 @@ export const LOAD = {
 // go('home') closes everything, go('back') closes one screen, anything else opens that screen.
 export function go(id) {
   moves++;
+  const wasAgents = s.agentsOpen;
   s.agentsOpen = false;
   if (id === 'home') { s.nav = null; s.trail.length = 0; return; }
-  if (id === 'chooser' && isFull()) { s.agentsOpen = true; return; }
+  if (id === 'chooser' && isFull()) { s.agentsOpen = !wasAgents; return; }
   if (id === 'back') s.nav = s.trail.pop() ?? null;
   else { if (s.nav !== id && !STATE[s.nav]) s.trail.push(s.nav); s.nav = id; }
   Promise.resolve(LOAD[s.nav]?.()).catch((e) => { s.note = e.message; render(true); }); // a screen you return to loads again
@@ -105,16 +106,17 @@ export const ACTS = {
   tryfast: async () => { const fast = picks()[0]; if (mustLook(fast.id)) return 'stay'; await stopRun(); s.sel = fast.id; return startRun(fast.id); },
   switch: async (d) => { if (mustLook(d.id)) return 'stay'; await stopRun(); s.sel = d.id; await startRun(d.id); go('home'); return null; },
   open: async (d) => {
-    const r = run(), agent = d.agent || s.snap.agent;
-    if (agent !== s.snap.agent) await send('settings', 'POST', { agent });
-    const out = await send('open', 'POST', { agent, device: s.dev === -1 ? 'self' : s.dev, port: r.id, folder: s.snap.folder });
+    const r = run(), host = runHost(), agent = d.agent || host.state.agent;
+    if (agent && agent !== host.state.agent) await send(agentScoped('settings'), 'POST', { agent });
+    const out = await send('open', 'POST', { agent, device: s.dev === -1 ? 'self' : s.dev, port: r.id, ...(host.local ? { folder: s.snap.folder } : { on: host.i }) });
     s.opened = r.id;
+    s.runOnName = host.local ? null : host.name;
     go('home');
     if (!out.opened) { s.command = out.command; go('runthis'); } else if (out.note) s.note = out.note;
   },
-  default: (d) => send('settings', 'POST', { agent: d.agent }),
-  agent: (d) => send('agents', 'POST', { id: d.agent }),
-  updateall: () => Promise.all(outdated().map((h) => send('agents', 'POST', { id: h.id }))),
+  default: (d) => send(agentScoped('settings'), 'POST', { agent: d.agent }),
+  agent: (d) => send(agentScoped('agents'), 'POST', { id: d.agent }),
+  updateall: () => Promise.all(outdated().map((h) => send(agentScoped('agents'), 'POST', { id: h.id }))),
   copy: async (d, el) => {
     await navigator.clipboard.writeText(d.copy ?? el.closest('.screen').querySelector('.mono').innerText);
     el.classList.add('copied');

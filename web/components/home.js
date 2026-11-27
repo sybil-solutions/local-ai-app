@@ -1,7 +1,7 @@
 // Home: the model's name and state over the picture, and the blocks you switch on under Settings › Home screen.
 import { fmt, gb, mins } from '../format.js';
 import { data, html } from '../html.js';
-import { agentName, chosen, D, group, hasRoom, HOME, homeCfg, run, shown } from '../state.js';
+import { agentName, chosen, D, group, hasRoom, HOME, homeCfg, run, runHost, shown } from '../state.js';
 import { Button, QuietButton, Split } from './controls.js';
 import { Icon } from './icons.js';
 import { Line } from './layout.js';
@@ -17,7 +17,7 @@ export const Status = ({ pose, word, line = '', p = 0 }) => html`${Art(pose, p)}
 // The line under the chosen model when nothing runs: why it can't start, what starting it costs, or that it is ready.
 export const offLine = (c) => (!hasRoom(c) ? 'The GPUs are in use by another program' : !c.ready ? `${c.sizeGb ? `${Math.round(c.sizeGb)} GB` : 'Model'} to download`
   : group()?.untested ? `Made for ${group().untested} · untested here` : c.loadS ? `Starts in about ${mins(c.loadS)} min` : 'Ready to start');
-export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open` : r.byStudio ? 'Running · started by Local Studio' : r.external ? 'Running · started outside Local AI' : 'Running');
+export const runLine = (r, isOpen) => (isOpen ? `${agentName() || 'Agent'} is open${runHost().local ? '' : ` on ${runHost().name}`}` : r.byStudio ? 'Running · started by Local Studio' : r.external ? 'Running · started outside Local AI' : 'Running');
 
 const Stat = (label, value, live) => html`<div class="stat${live ? ' live' : ''}"><b>${fmt(value)}</b><span class="label">${label}</span></div>`;
 // The running model's numbers. Lifetime tokens opens Usage.
