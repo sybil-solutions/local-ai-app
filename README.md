@@ -260,8 +260,9 @@ What the app defends, and against whom:
 - **Connected machines.** What another machine sends is held to the shape the app reads and cut to size before it is kept; none of it can become markup (`web/html.js` escapes everything), and a machine that sends something unreadable is left for this one.
 - **Model cards** are other people's Markdown: their tags are dropped, the text is escaped, and only the app's own few tags are written, in one pass that stays fast on any input.
 - **The desktop app** is sandboxed with context isolation, navigates nowhere but its own page, opens only web links (in your browser), grants no permission but fullscreen and copying, and can't be started as plain Node or with a debugger attached (Electron fuses).
+- **Coding agents.** An agent opened from the app runs as you, on the model you chose, with its own approval prompts off: Claude Code is started with `--dangerously-skip-permissions`, Codex with `--dangerously-bypass-approvals-and-sandbox`. A local model's output is still untrusted input, so open an agent in a folder you are willing to have it change.
 
-What it does not defend: an engine in a container has no key and no such door, so anything that can reach its port can use the model (keep the server on loopback or a private network such as Tailscale); any program of yours that answers like an OpenAI server on loopback is shown as a model; updates and the registry are fetched over HTTPS, not signed.
+What it does not defend: an engine in a container has no key and no such door, so anything that can reach its port can use the model (keep the server on loopback or a private network such as Tailscale); any program of yours that answers like an OpenAI server on loopback is shown as a model; the registry is fetched over HTTPS but is not signed (a recipe must still be pinned, and a host recipe allowed); a copy cloned from this repository updates with `git pull` over HTTPS, also unsigned, while an installed copy checks a signed list of release files first.
 
 ## Working on it
 
@@ -283,7 +284,7 @@ npm run release:public                     # both and the Linux files, as the ne
 - **End to end** (`tests/e2e.mjs`) starts the desktop app itself (Electron, with its own data folder) and drives its window over the Chrome DevTools Protocol, as a person would: pick a model, start it, open an agent on it, read usage, edit a recipe, rearrange Home, change the background, connect a second machine, stop. It fails on any error the page logs, and on a page that keeps working when nothing is happening.
 - The stand-in engines say what they are (`owned_by: local-ai-tests`), and only a copy under test (`LOCAL_AI_STAND_INS=1`) shows them. Running the tests on a machine never puts a test model on the Home, or its tokens in the usage, of the copy you use there.
 
-Beside them, `tests/screens.mjs` draws every screen in both layouts for every state the server can report (460 renders) and fails if one throws or if any text it was given comes out as markup. `tests/fuzz.mjs` goes after the parts that decide what is safe: every short string of troublemaking characters against the Docker option grammar (exhaustively), random hostile recipes whose `docker run` is read back the way Docker reads it, file names in a download listing, model cards (for markup and for time), what a connected machine may send, the door on a model's port, host recipes, DeepSeek Harness settings, and the running server's paths and API. It is seeded, so a finding can be repeated: `node tests/fuzz.mjs <seed>`.
+Beside them, `tests/screens.mjs` draws every screen in both layouts for every state the server can report (564 renders) and fails if one throws or if any text it was given comes out as markup. `tests/fuzz.mjs` goes after the parts that decide what is safe: every short string of troublemaking characters against the Docker option grammar (exhaustively), random hostile recipes whose `docker run` is read back the way Docker reads it, file names in a download listing, model cards (for markup and for time), what a connected machine may send, the door on a model's port, host recipes, DeepSeek Harness settings, and the running server's paths and API. It is seeded, so a finding can be repeated: `node tests/fuzz.mjs <seed>`.
 
 CI (`.github/workflows/`) runs all of it on Linux on every push and pull request (the end-to-end test under `xvfb`), the integration and end-to-end tests on macOS when `server/`, `electron/` or `tests/` change (macOS minutes cost ten times as much), and `npm audit` weekly and when the lockfile changes. Dependabot opens one grouped update a week for npm and one for the actions, which are pinned by commit.
 
@@ -296,3 +297,15 @@ CI (`.github/workflows/`) runs all of it on Linux on every push and pull request
 There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that arranges components from `web/components/`; a component is a function that returns markup written with the `html` tag, which escapes everything put into it, so text the page is told can never become markup. A button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/actions.js`). To add a route, add a line to `ROUTES`.
 
 The design is final and lives in `design/`. `design/handoff/local-ai-build-map.html` maps every screen and how they connect.
+
+## Security
+
+See [`SECURITY.md`](SECURITY.md) for how to report a vulnerability privately, which versions are supported, and the app's security model — including what it does and does not defend.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to build, test and propose a change, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) for the community standards. Third-party notices are in [`NOTICE`](NOTICE).
+
+## License
+
+MIT © 2026 Sybil Solutions. See [`LICENSE`](LICENSE).

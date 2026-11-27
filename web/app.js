@@ -84,7 +84,7 @@ addEventListener('keydown', (e) => {
   const home = !s.nav && resolve() === 'off';
   if (/^[1-6]$/.test(e.key)) jump(NAV[+e.key - 1][2]);
   else if (e.key === 'Escape') { if (s.agentsOpen) s.agentsOpen = false; else go(s.nav === 'edit' ? 'back' : 'home'); }
-  else if (home && /^Arrow(Left|Right)$/.test(e.key)) { const list = shown(), i = list.findIndex((r) => r.id === chosen().id); s.sel = list[(i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length].id; }
+  else if (home && /^Arrow(Left|Right)$/.test(e.key)) { const list = shown(), i = list.findIndex((r) => r.id === chosen().id); s.sel = list[((i < 0 ? 0 : i) + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length].id; }
   else if (home && hasRoom() && e.key === 'Enter' && e.target === document.body) Promise.resolve().then(ACTS.start).catch(say);
   else return;
   render(true);
