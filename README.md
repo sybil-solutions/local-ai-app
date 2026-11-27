@@ -138,7 +138,6 @@ tests/             e2e.mjs (the real desktop app, driven through its window), in
                    input), and stand-ins/ (an engine, a Docker and an nvidia-smi that answer like real ones)
 scripts/           release-mac.sh (the signed, notarized DMG), release-win.sh (the Windows installer), publish.sh (puts
                    a version where anyone can download it), get.sh (the one-line installer the website gives for Linux)
-design/            the approved design and the developer handoff (reference only)
 ```
 
 ## Interfaces
@@ -295,8 +294,6 @@ CI (`.github/workflows/`) runs all of it on Linux on every push and pull request
 `npm run release:public` (`scripts/publish.sh`) then publishes that version to `sybil-solutions/local-ai-releases`, a public repository that holds no source, only releases: the DMG as `Local-AI-mac-arm64.dmg`, the Windows installer as `Local-AI-windows-x64.exe`, the Linux files as `local-ai-linux.tar.gz` (made from the commit with `git archive`) with its checksum, the one-line installer (`scripts/get.sh`, published as `install.sh`) and `SHA256SUMS`. The names carry no version, so `releases/latest/download/<name>` is always the newest, and the website's Download buttons and `https://local.sybilsolutions.ai/install.sh` are redirects to those addresses: a new version needs no change to the website. It refuses to run with uncommitted changes, without both apps, or with a DMG that Gatekeeper would not open. A new version goes up as a pre-release, which those addresses do not lead to; that repository's `Check a release` workflow then downloads the files and runs them on Windows, macOS and Linux machines (installs each, starts it, asks its server what it sees), and only when all three work is the version made the newest release.
 
 There is no build step and no framework: the server is plain Node, the app is plain ES modules. A screen is a function in `web/screens.js` that arranges components from `web/components/`; a component is a function that returns markup written with the `html` tag, which escapes everything put into it, so text the page is told can never become markup. A button carries `data-go` (open a screen) or `data-act` (an entry in `ACTS` in `web/actions.js`). To add a route, add a line to `ROUTES`.
-
-The design is final and lives in `design/`. `design/handoff/local-ai-build-map.html` maps every screen and how they connect.
 
 ## Security
 
