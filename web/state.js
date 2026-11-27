@@ -84,12 +84,12 @@ export function run() {
 }
 export function chosen() {
   const list = all(), three = picks();
-  // What is running, else what you chose, else what was started last, else the registry's recommended model for this machine, else Balanced.
-  const id = run()?.recipe ?? [s.sel, D().last, group()?.recommended].find((x) => list.some((y) => y.id === x)) ?? (three.find((x) => x.tier === 'Balanced') || three[0] || list[0])?.id;
+  // What is running, else what you explicitly picked, else the last-started or registry-recommended pick if it is one of the three tiers, else Balanced.
+  const id = run()?.recipe ?? (list.some((y) => y.id === s.sel) ? s.sel : null) ?? [D().last, group()?.recommended].find((x) => three.some((y) => y.id === x)) ?? (three.find((x) => x.tier === 'Balanced') || three[0] || list[0])?.id;
   return list.find((x) => x.id === id) || null;
 }
-// The three picks, plus the chosen model when it is none of them.
-export const shown = () => { const three = picks(), c = chosen(); return c && !three.some((r) => r.id === c.id) ? [...three, c] : three; };
+// Home shows only the three tier picks: Fast, Balanced and Smart.
+export const shown = () => picks();
 export const cardKey = (id) => `${s.dev} ${id}`; // a recipe id can mean a different model on another machine
 export const newer = (a, b) => a.localeCompare(b, 'en', { numeric: true }) > 0;
 export const agentName = () => { const h = runHost().state; return (h?.agents || []).find((a) => a.id === h.agent && a.installed)?.name; };

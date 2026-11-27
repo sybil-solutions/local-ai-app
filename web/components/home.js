@@ -35,7 +35,7 @@ export const StopButton = () => (!run().external || run().byStudio) && Button({ 
 // the chosen model stands in for them.
 const Title = (phase) => {
   const picture = homeCfg().on.includes('hands');
-  if (phase === 'off') return html`${picture && Art('apart')}${!HOME().includes('models') && html`<div class="word">${chosen().name}</div>`}${Line(offLine(chosen()))}`;
+  if (phase === 'off') return html`${picture && Art('apart')}${(!HOME().includes('models') || !shown().some((r) => r.id === chosen().id)) && html`<div class="word">${chosen().name}</div>`}${Line(offLine(chosen()))}`;
   return html`${picture && Art('work', 1)}<div class="word">${run().name}</div>${Line(phase === 'opened' ? `Running · ${runLine(run(), true)}` : runLine(run()))}`;
 };
 const BLOCKS = {

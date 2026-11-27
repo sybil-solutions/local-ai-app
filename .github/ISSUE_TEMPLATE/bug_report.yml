@@ -1,0 +1,72 @@
+name: Bug report
+description: Something does not work as it should
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For a security problem, please do **not** open an issue — follow [SECURITY.md](https://github.com/sybil-solutions/local-ai-app/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version shown in Settings, or the commit if you run from source.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux (Omarchy)
+        - Linux (other)
+        - macOS (Apple silicon)
+        - Windows
+        - iOS
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - One-line installer
+        - macOS app / DMG
+        - Windows installer
+        - From source
+        - iOS app
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Server events, `journalctl --user -u local-ai`, or the browser console. Remove keys and private paths."
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed keys, tokens, and private information from this report.
+          required: true
